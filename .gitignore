@@ -1,0 +1,114 @@
+For your security, sign in again to keep using Claude.
+Claude finished the response
+you said free tier cosmos ? data will be tiny - 2 x kids
+
+
+Searched the web
+Searched the web
+Yes — genuinely a good fit for 2 kids' worth of data.
+
+The free tier gives you the first 1000 RU/s and 25 GB of storage in the account for free, for the lifetime of the account — not a 12-month trial, it's permanent as long as you stay within those limits. For two kids' chore records, you'd be using a tiny fraction of that 25 GB and nowhere near 1000 RU/s of throughput, so realistically this costs you £0/month indefinitely. 
+Microsoft Learn
+
+One thing worth flagging since it's a live policy: you can have up to one free tier Cosmos DB account per Azure subscription — so just make sure this is the one thing in your subscription claiming that free tier if you've got other Azure projects (like Simm Group work) on the same subscription. Worth using a separate personal subscription or being mindful of that if you're on a shared one. 
+Azure Docs
+
+So for your setup: Static Web Apps (hosting) + Cosmos DB free tier (data + easy reporting queries) + built-in Functions (API) — the whole backend costs nothing at your scale.
+
+can i chop up that db and mak eit backend for other apps ?
+
+Yes, and it's actually a nice way to stretch the free tier further.
+
+One Cosmos DB account can hold multiple databases, and each database can have up to 25 containers sharing that same free 1000 RU/s / 25 GB pool. So you could have:
+
+Database: chores-app → containers for kids, tasks, completions
+Database: another-project → its own containers
+All under the one free account, no extra cost, as long as total usage stays under the 1000 RU/s and 25 GB ceiling.
+
+Worth flagging one thing since your other apps might be genuinely separate concerns (chores app vs, say, something else you build later): logically separating by database rather than just container keeps things tidy and stops one app's queries or schema changes from accidentally touching another's data. And remember — only one free-tier account per subscription, so this is the one to consolidate onto rather than spinning up a second free account for the next project.
+
+how do i find teh agents i created previosly ?
+
+
+Searched the web
+Searched the web
+Since these are your GitHub Copilot custom agents (the developer and elaborator you built this weekend), here's where to find them:
+
+Fastest way: go to github.com/copilot/agents — that's the agents tab where they're listed and where you can also pick one from a dropdown to assign a task to.
+
+The actual files themselves live as .agent.md files in your repo, under .github/agents/ on whichever branch you created them in. So if you can't find them in the UI, checking that folder directly in the repo will show you exactly what's there.
+
+One thing worth double-checking: organization-level custom agents live in the organization's .github or .github-private repo rather than the individual repo — so if you created them somewhere other than the repo you're currently looking at, that's likely why they're not showing up. 
+GitHub
+
+what is a gitignore
+
+A .gitignore is a plain text file in your repo that tells Git which files or folders not to track — so they never get committed or pushed.
+
+Typical things you'd put in it:
+
+Secrets/credentials (.env files, API keys)
+Build output (node_modules/, dist/, bin/)
+Local config or IDE clutter (.vscode/, .DS_Store)
+Large temp files or logs
+Example content:
+
+node_modules/
+.env
+*.log
+.vscode/
+For your chores app, the big one is making sure any Cosmos DB connection strings or keys go in .gitignore and never get committed — that's a common way secrets end up leaked on GitHub.
+
+so give m ethe content for that
+
+Here's a solid one for your chores app stack (PWA + Azure Functions + Cosmos DB):
+
+# Dependencies
+node_modules/
+package-lock.json.bak
+
+# Build output
+dist/
+build/
+.next/
+out/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+local.settings.json
+
+# Azure Functions
+bin/
+obj/
+.azure/
+
+# Azure Static Web Apps
+.swa/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# PWA build artifacts
+sw.js.map
+workbox-*.js
+The critical one for you is local.settings.json — that's where Azure Functions stores your Cosmos DB connection string locally, and it's easy to accidentally commit if it's not in here from the start.
+
+
+
+
+
+
+
+Claude is AI and can make mistakes. Please double-check responses.
