@@ -1,0 +1,903 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "languageVersion": "2.0",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "14626833612456619636"
+    }
+  },
+  "parameters": {
+    "env": {
+      "type": "string",
+      "allowedValues": [
+        "dev",
+        "prod"
+      ],
+      "metadata": {
+        "description": "Deployment environment. Supported values are dev and prod."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region where all resources are deployed."
+      }
+    },
+    "functionWorkerRuntime": {
+      "type": "string",
+      "defaultValue": "node",
+      "metadata": {
+        "description": "Function worker runtime value (for example node, dotnet-isolated, python)."
+      }
+    },
+    "functionLinuxFxVersion": {
+      "type": "string",
+      "defaultValue": "Node|20",
+      "metadata": {
+        "description": "Function App Linux runtime stack value (for example Node|20)."
+      }
+    },
+    "staticWebAppSku": {
+      "type": "string",
+      "defaultValue": "Free",
+      "allowedValues": [
+        "Free"
+      ],
+      "metadata": {
+        "description": "Azure Static Web App SKU. Free (F1) is sufficient for this project."
+      }
+    },
+    "llmApiKey": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional secure value for seeding the llm-api-key secret in Key Vault (the voice-note intent-validation LLM)."
+      }
+    },
+    "storageBlobDataContributorRoleDefinitionId": {
+      "type": "string",
+      "defaultValue": "ba92f5b4-2d11-453d-a403-e96b0029c9fe",
+      "metadata": {
+        "description": "Built-in Storage Blob Data Contributor role definition ID."
+      }
+    },
+    "enableKeyVaultPublicAccess": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Enable public network access to Key Vault. Defaults to false (security-by-default). Only enable if explicitly required; prefer private endpoints for production."
+      }
+    },
+    "cosmosSharedThroughput": {
+      "type": "int",
+      "defaultValue": 400,
+      "metadata": {
+        "description": "Shared throughput (RU/s) for the Cosmos DB database."
+      }
+    }
+  },
+  "variables": {
+    "storageAccountName": "[toLower(replace(format('herotasksstorage{0}', parameters('env')), '-', ''))]",
+    "functionAppName": "[format('herotasks-func-{0}', parameters('env'))]",
+    "keyVaultName": "[format('herotasks-kv-{0}', parameters('env'))]",
+    "keyVaultDnsSuffix": "[environment().suffixes.keyvaultDns]",
+    "llmApiKeySecretUri": "[format('https://{0}.{1}/secrets/llm-api-key/', variables('keyVaultName'), variables('keyVaultDnsSuffix'))]",
+    "cosmosAccountName": "[toLower(replace(format('herotasks-cosmos-{0}', parameters('env')), '-', ''))]",
+    "cosmosEndpoint": "[format('https://{0}.documents.azure.com:443/', variables('cosmosAccountName'))]",
+    "cosmosDatabaseName": "herotasks"
+  },
+  "resources": {
+    "storageAccount": {
+      "existing": true,
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-05-01",
+      "name": "[variables('storageAccountName')]"
+    },
+    "functionStorageBlobDataContributorRoleAssignment": {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+      "name": "[guid(variables('storageAccountName'), variables('functionAppName'), parameters('storageBlobDataContributorRoleDefinitionId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', parameters('storageBlobDataContributorRoleDefinitionId'))]",
+        "principalId": "[reference('functionApp').outputs.functionPrincipalId.value]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "functionApp"
+      ]
+    },
+    "storage": {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('storage-{0}', parameters('env'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "env": {
+            "value": "[parameters('env')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "8286788855793327528"
+            }
+          },
+          "parameters": {
+            "env": {
+              "type": "string",
+              "metadata": {
+                "description": "Deployment environment suffix (for example: dev or prod)."
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the storage account."
+              }
+            },
+            "storageSkuName": {
+              "type": "string",
+              "defaultValue": "Standard_LRS",
+              "metadata": {
+                "description": "Storage account SKU name."
+              }
+            }
+          },
+          "variables": {
+            "storageAccountName": "[toLower(replace(format('herotasksstorage{0}', parameters('env')), '-', ''))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('storageAccountName')]",
+              "location": "[parameters('location')]",
+              "kind": "StorageV2",
+              "sku": {
+                "name": "[parameters('storageSkuName')]"
+              },
+              "properties": {
+                "accessTier": "Hot",
+                "allowBlobPublicAccess": false,
+                "allowSharedKeyAccess": false,
+                "minimumTlsVersion": "TLS1_2",
+                "supportsHttpsTrafficOnly": true
+              }
+            }
+          ],
+          "outputs": {
+            "storageAccountId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            },
+            "storageAccountName": {
+              "type": "string",
+              "value": "[variables('storageAccountName')]"
+            }
+          }
+        }
+      }
+    },
+    "functionApp": {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('function-{0}', parameters('env'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "env": {
+            "value": "[parameters('env')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "storageAccountName": {
+            "value": "[reference('storage').outputs.storageAccountName.value]"
+          },
+          "workerRuntime": {
+            "value": "[parameters('functionWorkerRuntime')]"
+          },
+          "linuxFxVersion": {
+            "value": "[parameters('functionLinuxFxVersion')]"
+          },
+          "cosmosEndpoint": {
+            "value": "[variables('cosmosEndpoint')]"
+          },
+          "cosmosDatabaseName": {
+            "value": "[variables('cosmosDatabaseName')]"
+          },
+          "llmApiKeySecretUri": {
+            "value": "[variables('llmApiKeySecretUri')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "11994255678477450852"
+            }
+          },
+          "parameters": {
+            "env": {
+              "type": "string",
+              "metadata": {
+                "description": "Deployment environment suffix (for example: dev or prod)."
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the Function App and its hosting plan."
+              }
+            },
+            "storageAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Storage account name backing the Function host runtime state."
+              }
+            },
+            "workerRuntime": {
+              "type": "string",
+              "defaultValue": "node",
+              "metadata": {
+                "description": "Function worker runtime value (for example node, dotnet-isolated, python)."
+              }
+            },
+            "linuxFxVersion": {
+              "type": "string",
+              "defaultValue": "Node|20",
+              "metadata": {
+                "description": "Linux runtime stack for the Function App."
+              }
+            },
+            "cosmosEndpoint": {
+              "type": "string",
+              "metadata": {
+                "description": "Cosmos DB account endpoint the API reads/writes household data through."
+              }
+            },
+            "cosmosDatabaseName": {
+              "type": "string",
+              "defaultValue": "herotasks",
+              "metadata": {
+                "description": "Cosmos DB database name."
+              }
+            },
+            "llmApiKeySecretUri": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault secret URI for the voice-intent LLM API key."
+              }
+            }
+          },
+          "variables": {
+            "functionAppName": "[format('herotasks-func-{0}', parameters('env'))]",
+            "hostingPlanName": "[format('herotasks-plan-{0}', parameters('env'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Web/serverfarms",
+              "apiVersion": "2023-12-01",
+              "name": "[variables('hostingPlanName')]",
+              "location": "[parameters('location')]",
+              "kind": "linux",
+              "sku": {
+                "name": "Y1",
+                "tier": "Dynamic"
+              },
+              "properties": {
+                "reserved": true
+              }
+            },
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2023-12-01",
+              "name": "[variables('functionAppName')]",
+              "location": "[parameters('location')]",
+              "kind": "functionapp,linux",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+                "httpsOnly": true,
+                "siteConfig": {
+                  "linuxFxVersion": "[parameters('linuxFxVersion')]",
+                  "minTlsVersion": "1.2",
+                  "ftpsState": "Disabled",
+                  "cors": {
+                    "allowedOrigins": [
+                      "*"
+                    ]
+                  },
+                  "appSettings": [
+                    {
+                      "name": "FUNCTIONS_EXTENSION_VERSION",
+                      "value": "~4"
+                    },
+                    {
+                      "name": "FUNCTIONS_WORKER_RUNTIME",
+                      "value": "[parameters('workerRuntime')]"
+                    },
+                    {
+                      "name": "COSMOS_ENDPOINT",
+                      "value": "[parameters('cosmosEndpoint')]"
+                    },
+                    {
+                      "name": "COSMOS_DATABASE_NAME",
+                      "value": "[parameters('cosmosDatabaseName')]"
+                    },
+                    {
+                      "name": "LLM_API_KEY",
+                      "value": "[format('@Microsoft.KeyVault(SecretUri={0})', parameters('llmApiKeySecretUri'))]"
+                    },
+                    {
+                      "name": "AzureWebJobsStorage__accountName",
+                      "value": "[parameters('storageAccountName')]"
+                    },
+                    {
+                      "name": "AzureWebJobsStorage__credential",
+                      "value": "managedidentity"
+                    }
+                  ]
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "functionAppId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]"
+            },
+            "functionAppName": {
+              "type": "string",
+              "value": "[variables('functionAppName')]"
+            },
+            "functionPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionAppName')), '2023-12-01', 'full').identity.principalId]"
+            },
+            "functionDefaultHostname": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionAppName')), '2023-12-01').defaultHostName]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "storage"
+      ]
+    },
+    "keyVault": {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('keyvault-{0}', parameters('env'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "env": {
+            "value": "[parameters('env')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "functionPrincipalId": {
+            "value": "[reference('functionApp').outputs.functionPrincipalId.value]"
+          },
+          "llmApiKey": {
+            "value": "[parameters('llmApiKey')]"
+          },
+          "enablePublicNetworkAccess": {
+            "value": "[parameters('enableKeyVaultPublicAccess')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "13752764176501468457"
+            }
+          },
+          "parameters": {
+            "env": {
+              "type": "string",
+              "metadata": {
+                "description": "Deployment environment suffix (for example: dev or prod)."
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the Key Vault."
+              }
+            },
+            "functionPrincipalId": {
+              "type": "string",
+              "metadata": {
+                "description": "Function App managed identity principal ID that needs secret read access."
+              }
+            },
+            "llmApiKey": {
+              "type": "securestring",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Secure value for the voice-intent LLM API key. Leave empty to skip seeding this secret."
+              }
+            },
+            "keyVaultRoleDefinitionId": {
+              "type": "string",
+              "defaultValue": "4633458b-17de-408a-b874-0445c86b69e6",
+              "metadata": {
+                "description": "Built-in Key Vault role definition ID for the Secrets User role."
+              }
+            },
+            "enablePublicNetworkAccess": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Enable public network access to Key Vault. Defaults to false (security-by-default); use private endpoints instead for production."
+              }
+            }
+          },
+          "variables": {
+            "keyVaultName": "[format('herotasks-kv-{0}', parameters('env'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.KeyVault/vaults",
+              "apiVersion": "2023-07-01",
+              "name": "[variables('keyVaultName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "tenantId": "[subscription().tenantId]",
+                "sku": {
+                  "family": "A",
+                  "name": "standard"
+                },
+                "enableRbacAuthorization": true,
+                "enabledForDeployment": false,
+                "enabledForTemplateDeployment": false,
+                "enabledForDiskEncryption": false,
+                "softDeleteRetentionInDays": 90,
+                "publicNetworkAccess": "[if(parameters('enablePublicNetworkAccess'), 'Enabled', 'Disabled')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), parameters('functionPrincipalId'), parameters('keyVaultRoleDefinitionId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', parameters('keyVaultRoleDefinitionId'))]",
+                "principalId": "[parameters('functionPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('llmApiKey')))]",
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', variables('keyVaultName'), 'llm-api-key')]",
+              "properties": {
+                "value": "[parameters('llmApiKey')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "keyVaultId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+            },
+            "keyVaultName": {
+              "type": "string",
+              "value": "[variables('keyVaultName')]"
+            },
+            "keyVaultUri": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), '2023-07-01').vaultUri]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "functionApp"
+      ]
+    },
+    "cosmos": {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('cosmos-{0}', parameters('env'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "env": {
+            "value": "[parameters('env')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "functionPrincipalId": {
+            "value": "[reference('functionApp').outputs.functionPrincipalId.value]"
+          },
+          "databaseName": {
+            "value": "[variables('cosmosDatabaseName')]"
+          },
+          "sharedThroughput": {
+            "value": "[parameters('cosmosSharedThroughput')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "13823117976463526779"
+            }
+          },
+          "parameters": {
+            "env": {
+              "type": "string",
+              "metadata": {
+                "description": "Deployment environment suffix (for example: dev or prod)."
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the Cosmos DB account."
+              }
+            },
+            "functionPrincipalId": {
+              "type": "string",
+              "metadata": {
+                "description": "Function App managed identity principal ID that needs data-plane read/write access."
+              }
+            },
+            "databaseName": {
+              "type": "string",
+              "defaultValue": "herotasks",
+              "metadata": {
+                "description": "Cosmos DB SQL database name."
+              }
+            },
+            "sharedThroughput": {
+              "type": "int",
+              "defaultValue": 400,
+              "metadata": {
+                "description": "Shared throughput (RU/s) across all containers in the database. The Cosmos DB free tier covers up to 1000 RU/s and 25GB storage account-wide, comfortably above what a 2-kid household needs."
+              }
+            }
+          },
+          "variables": {
+            "cosmosDataContributorRoleId": "00000000-0000-0000-0000-000000000002",
+            "cosmosAccountName": "[toLower(replace(format('herotasks-cosmos-{0}', parameters('env')), '-', ''))]",
+            "householdScopedContainers": [
+              "people",
+              "chores",
+              "completions",
+              "rewards",
+              "planningItems",
+              "auditEvents"
+            ]
+          },
+          "resources": [
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts",
+              "apiVersion": "2024-05-15",
+              "name": "[variables('cosmosAccountName')]",
+              "location": "[parameters('location')]",
+              "kind": "GlobalDocumentDB",
+              "properties": {
+                "databaseAccountOfferType": "Standard",
+                "enableFreeTier": true,
+                "consistencyPolicy": {
+                  "defaultConsistencyLevel": "Session"
+                },
+                "locations": [
+                  {
+                    "locationName": "[parameters('location')]",
+                    "failoverPriority": 0,
+                    "isZoneRedundant": false
+                  }
+                ],
+                "disableLocalAuth": true,
+                "minimalTlsVersion": "Tls12"
+              }
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}', variables('cosmosAccountName'), parameters('databaseName'))]",
+              "properties": {
+                "resource": {
+                  "id": "[parameters('databaseName')]"
+                },
+                "options": {
+                  "throughput": "[parameters('sharedThroughput')]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosAccountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', variables('cosmosAccountName'), parameters('databaseName'), 'households')]",
+              "properties": {
+                "resource": {
+                  "id": "households",
+                  "partitionKey": {
+                    "paths": [
+                      "/id"
+                    ],
+                    "kind": "Hash"
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', variables('cosmosAccountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "scopedContainers",
+                "count": "[length(variables('householdScopedContainers'))]"
+              },
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', variables('cosmosAccountName'), parameters('databaseName'), variables('householdScopedContainers')[copyIndex()])]",
+              "properties": {
+                "resource": {
+                  "id": "[variables('householdScopedContainers')[copyIndex()]]",
+                  "partitionKey": {
+                    "paths": [
+                      "/householdId"
+                    ],
+                    "kind": "Hash"
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', variables('cosmosAccountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}', variables('cosmosAccountName'), guid(resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosAccountName')), parameters('functionPrincipalId'), variables('cosmosDataContributorRoleId')))]",
+              "properties": {
+                "roleDefinitionId": "[format('{0}/sqlRoleDefinitions/{1}', resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosAccountName')), variables('cosmosDataContributorRoleId'))]",
+                "principalId": "[parameters('functionPrincipalId')]",
+                "scope": "[resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosAccountName'))]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosAccountName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "cosmosAccountName": {
+              "type": "string",
+              "value": "[variables('cosmosAccountName')]"
+            },
+            "cosmosEndpoint": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosAccountName')), '2024-05-15').documentEndpoint]"
+            },
+            "databaseName": {
+              "type": "string",
+              "value": "[parameters('databaseName')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "functionApp"
+      ]
+    },
+    "staticWebApp": {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('staticwebapp-{0}', parameters('env'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "env": {
+            "value": "[parameters('env')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "sku": {
+            "value": "[parameters('staticWebAppSku')]"
+          },
+          "linkedFunctionAppId": {
+            "value": "[reference('functionApp').outputs.functionAppId.value]"
+          },
+          "linkedFunctionAppLocation": {
+            "value": "[parameters('location')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "languageVersion": "2.0",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "2941807685387417589"
+            }
+          },
+          "parameters": {
+            "env": {
+              "type": "string",
+              "metadata": {
+                "description": "Deployment environment suffix (for example: dev or prod)."
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the Static Web App."
+              }
+            },
+            "sku": {
+              "type": "string",
+              "defaultValue": "Free",
+              "allowedValues": [
+                "Free"
+              ],
+              "metadata": {
+                "description": "Azure Static Web App SKU. Free is sufficient at this scale."
+              }
+            },
+            "linkedFunctionAppId": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource ID of the Function App to link as this Static Web App's backend (shares auth/CORS automatically, no manual CORS config needed on the frontend side)."
+              }
+            },
+            "linkedFunctionAppLocation": {
+              "type": "string",
+              "metadata": {
+                "description": "Region the linked Function App is deployed in."
+              }
+            }
+          },
+          "variables": {
+            "staticWebAppName": "[format('herotasks-swa-{0}', parameters('env'))]"
+          },
+          "resources": {
+            "staticWebApp": {
+              "type": "Microsoft.Web/staticSites",
+              "apiVersion": "2024-04-01",
+              "name": "[variables('staticWebAppName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "[parameters('sku')]",
+                "tier": "[parameters('sku')]"
+              },
+              "properties": {
+                "provider": "None"
+              }
+            },
+            "linkedBackend": {
+              "type": "Microsoft.Web/staticSites/linkedBackends",
+              "apiVersion": "2024-04-01",
+              "name": "[format('{0}/{1}', variables('staticWebAppName'), 'herotasks-api')]",
+              "properties": {
+                "backendResourceId": "[parameters('linkedFunctionAppId')]",
+                "region": "[parameters('linkedFunctionAppLocation')]"
+              },
+              "dependsOn": [
+                "staticWebApp"
+              ]
+            }
+          },
+          "outputs": {
+            "staticWebAppDeploymentToken": {
+              "type": "securestring",
+              "value": "[listSecrets('staticWebApp', '2024-04-01').properties.apiKey]"
+            },
+            "staticWebAppName": {
+              "type": "string",
+              "value": "[variables('staticWebAppName')]"
+            },
+            "staticWebAppDefaultHostname": {
+              "type": "string",
+              "value": "[reference('staticWebApp').defaultHostname]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "functionApp"
+      ]
+    }
+  },
+  "outputs": {
+    "storageAccountName": {
+      "type": "string",
+      "value": "[reference('storage').outputs.storageAccountName.value]"
+    },
+    "keyVaultName": {
+      "type": "string",
+      "value": "[reference('keyVault').outputs.keyVaultName.value]"
+    },
+    "functionAppName": {
+      "type": "string",
+      "value": "[reference('functionApp').outputs.functionAppName.value]"
+    },
+    "cosmosAccountName": {
+      "type": "string",
+      "value": "[reference('cosmos').outputs.cosmosAccountName.value]"
+    },
+    "cosmosEndpoint": {
+      "type": "string",
+      "value": "[variables('cosmosEndpoint')]"
+    },
+    "cosmosDatabaseName": {
+      "type": "string",
+      "value": "[variables('cosmosDatabaseName')]"
+    },
+    "staticWebAppDeploymentToken": {
+      "type": "securestring",
+      "value": "[listOutputsWithSecureValues('staticWebApp', '2025-04-01').staticWebAppDeploymentToken]"
+    },
+    "staticWebAppName": {
+      "type": "string",
+      "value": "[reference('staticWebApp').outputs.staticWebAppName.value]"
+    },
+    "staticWebAppDefaultHostname": {
+      "type": "string",
+      "value": "[reference('staticWebApp').outputs.staticWebAppDefaultHostname.value]"
+    }
+  }
+}
