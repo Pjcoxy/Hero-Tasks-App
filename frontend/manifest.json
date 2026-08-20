@@ -1,0 +1,12 @@
+{
+  "name": "Hero Tasks",
+  "short_name": "Hero Tasks",
+  "description": "Family chore and task app with points, levels and streaks",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f0f4ff",
+  "theme_color": "#7c3aed",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -1,0 +1,8 @@
+*.js.map
+.git*
+.vscode
+local.settings.json
+local.settings.json.sample
+test-logic.js
+test
+.venv
