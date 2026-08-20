@@ -15,6 +15,10 @@ param functionLinuxFxVersion string = 'Node|20'
 @allowed(['Free'])
 param staticWebAppSku string = 'Free'
 
+@description('Azure region for the Static Web App. Static Web Apps only runs in a small subset of regions (independent of where everything else is deployed) — allowed values are exactly the regions Azure currently supports for this resource type.')
+@allowed(['centralus', 'eastus2', 'westus2', 'westeurope', 'eastasia'])
+param staticWebAppLocation string = 'eastasia'
+
 @description('Optional secure value for seeding the llm-api-key secret in Key Vault (the voice-note intent-validation LLM).')
 @secure()
 param llmApiKey string = ''
@@ -85,7 +89,7 @@ module staticWebApp './modules/staticwebapp.bicep' = {
   name: 'staticwebapp-${env}'
   params: {
     env: env
-    location: location
+    location: staticWebAppLocation
     sku: staticWebAppSku
     linkedFunctionAppId: functionApp.outputs.functionAppId
     linkedFunctionAppLocation: location
