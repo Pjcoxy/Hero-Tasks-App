@@ -1,0 +1,9 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "COSMOS_ENDPOINT": "https://herotaskscosmosdev.documents.azure.com:443/",
+    "COSMOS_DATABASE_NAME": "herotasks"
+  }
+}
