@@ -125,6 +125,26 @@ async function main() {
   assert.strictEqual(calcStreak([]), 0, 'no completions ever should be a 0 streak, not crash on empty today');
   console.log('✓ calcStreak handles populated and empty history');
 
+  // dueBy round-trips through getState for one-off tasks
+  const dueIso = '2026-08-25T18:00:00.000Z';
+  await chores.items.create({
+    id: 'chore2',
+    householdId: HOUSEHOLD_ID,
+    kidId: 'ollie',
+    title: 'Clean room',
+    points: 10,
+    cycle: 'oneoff',
+    dueBy: dueIso,
+    createdAt: '2026-08-01',
+    active: true,
+  });
+  state = await getState();
+  const cleanRoom = state.tasks.find((t) => t.id === 'chore2');
+  assert.strictEqual(cleanRoom.dueBy, dueIso, 'dueBy should round-trip unchanged through getState');
+  const dailyChore = state.tasks.find((t) => t.id === 'chore1');
+  assert.strictEqual(dailyChore.dueBy, null, 'daily task with no dueBy set should come back null, not undefined');
+  console.log('✓ dueBy round-trips correctly for one-off tasks');
+
   console.log('\nALL LOGIC TESTS PASSED');
 }
 
