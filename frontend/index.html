@@ -127,7 +127,7 @@
   <div id="screen-parent" class="hidden">
     <div class="topbar">
       <button class="back-btn" onclick="logout()">← Switch user</button>
-      <strong id="p-title">👑 Parent HQ</strong>
+      <strong id="p-hq-title">👑 Parent HQ</strong>
     </div>
 
     <h2>⏳ Awaiting your approval</h2>
@@ -378,7 +378,7 @@ function renderTaskList(elId, tasks, emptyMsg) {
 }
 
 function renderParent(person) {
-  document.getElementById('p-title').textContent = `👑 ${person.name}'s HQ`;
+  document.getElementById('p-hq-title').textContent = `👑 ${person.name}'s HQ`;
   const pending = state.completions.filter(c => c.status === 'pending');
   const el = document.getElementById('p-pending');
   if (pending.length === 0) {
