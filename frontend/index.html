@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#7c3aed">
+<link rel="manifest" href="manifest.json">
+<title>Hero Tasks 🚀</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --bg: #f0f4ff; --card: #ffffff; --ink: #2b2d42; --muted: #8d99ae;
+    --purple: #7c3aed; --purple-soft: #ede9fe; --green: #10b981; --green-soft: #d1fae5;
+    --amber: #f59e0b; --amber-soft: #fef3c7; --red: #ef4444;
+    --radius: 16px; --shadow: 0 4px 14px rgba(43,45,66,0.08);
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); min-height: 100vh; }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 16px 16px 80px; }
+  .hidden { display: none !important; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.05rem; margin: 20px 0 10px; }
+  button { font-family: inherit; cursor: pointer; border: none; }
+  .hero { text-align: center; padding: 28px 0 18px; }
+  .hero .big { font-size: 3rem; } .hero p { color: var(--muted); margin-top: 6px; }
+  .who-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
+  .who-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px 10px; text-align: center; font-size: 1rem; font-weight: 600; transition: transform 0.1s; }
+  .who-card:active { transform: scale(0.95); }
+  .who-card .avatar { font-size: 2.6rem; display: block; margin-bottom: 8px; }
+  .who-card.parent { background: var(--ink); color: #fff; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(43,45,66,0.5); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+  .modal { background: var(--card); border-radius: var(--radius); padding: 24px; width: 100%; max-width: 320px; text-align: center; }
+  .modal h3 { margin-bottom: 12px; }
+  .pin-input { font-size: 1.8rem; text-align: center; letter-spacing: 0.4em; width: 100%; padding: 10px; border: 2px solid var(--purple-soft); border-radius: 12px; margin-bottom: 14px; }
+  .pin-err { color: var(--red); font-size: 0.85rem; margin-bottom: 10px; min-height: 1.2em; }
+  .btn { background: var(--purple); color: #fff; border-radius: 12px; padding: 12px 20px; font-size: 1rem; font-weight: 600; width: 100%; }
+  .btn.ghost { background: var(--purple-soft); color: var(--purple); }
+  .btn.small { width: auto; padding: 8px 14px; font-size: 0.85rem; }
+  .btn.green { background: var(--green); } .btn.red-ghost { background: #fee2e2; color: var(--red); }
+  .kid-head { background: linear-gradient(135deg, #7c3aed, #a855f7); color: #fff; border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 14px; }
+  .kid-head .avatar { font-size: 2.8rem; } .kid-head .name { font-size: 1.2rem; font-weight: 700; }
+  .kid-head .level { font-size: 0.85rem; opacity: 0.95; margin-top: 2px; }
+  .kid-head .score { margin-left: auto; text-align: right; }
+  .kid-head .score .pts { font-size: 1.7rem; font-weight: 800; } .kid-head .score .lbl { font-size: 0.7rem; opacity: 0.85; }
+  .streak { display: inline-block; margin-top: 4px; background: rgba(255,255,255,0.2); border-radius: 20px; padding: 2px 10px; font-size: 0.8rem; font-weight: 600; }
+  .progress-wrap { margin: 12px 0 0; }
+  .progress-lbl { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; text-align: center; }
+  .progress-bar { background: #e2e8f0; border-radius: 20px; height: 14px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 20px; background: linear-gradient(90deg, #f59e0b, #f97316); transition: width 0.6s ease; }
+  .task { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .task .tick { width: 44px; height: 44px; min-width: 44px; border-radius: 50%; border: 3px solid var(--purple-soft); background: #fff; font-size: 1.4rem; display: flex; align-items: center; justify-content: center; }
+  .task.done-pending .tick { border-color: var(--amber); background: var(--amber-soft); }
+  .task.done-approved .tick { border-color: var(--green); background: var(--green-soft); }
+  .task .info { flex: 1; } .task .title { font-weight: 600; }
+  .task.done-approved .title { text-decoration: line-through; color: var(--muted); }
+  .task .sub { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+  .task .pts-badge { background: var(--amber-soft); color: #b45309; font-weight: 700; border-radius: 20px; padding: 4px 10px; font-size: 0.85rem; white-space: nowrap; }
+  .empty { color: var(--muted); text-align: center; padding: 16px; font-size: 0.9rem; }
+  .board { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; }
+  .board-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; }
+  .board-row .place { font-size: 1.2rem; width: 30px; text-align: center; }
+  .board-row .b-name { font-weight: 600; flex: 1; } .board-row .b-pts { font-weight: 700; color: var(--purple); }
+  .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; margin-bottom: 14px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+  .field input, .field select { width: 100%; padding: 10px 12px; font-size: 1rem; border: 2px solid #e2e8f0; border-radius: 10px; font-family: inherit; background: #fff; }
+  .input-row { display: flex; gap: 8px; } .input-row input { flex: 1; }
+  .mic-btn { background: var(--purple-soft); color: var(--purple); border-radius: 10px; width: 48px; min-width: 48px; font-size: 1.3rem; }
+  .mic-btn.listening { background: var(--red); color: #fff; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: 0.6; } }
+  .approve-row { display: flex; gap: 8px; margin-top: 10px; } .approve-row .btn { flex: 1; }
+  .tag { font-size: 0.7rem; font-weight: 700; border-radius: 20px; padding: 2px 8px; }
+  .tag.extra { background: var(--purple-soft); color: var(--purple); }
+  .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .back-btn { background: none; font-size: 0.9rem; color: var(--muted); font-weight: 600; padding: 8px; }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; border-radius: 30px; padding: 12px 24px; font-weight: 700; z-index: 100; box-shadow: var(--shadow); white-space: nowrap; }
+  #confetti-canvas { position: fixed; inset: 0; pointer-events: none; z-index: 99; }
+  #loading { text-align: center; padding: 40px; color: var(--muted); }
+  .setup-warn { background: var(--amber-soft); border-radius: var(--radius); padding: 16px; margin-top: 20px; font-size: 0.9rem; line-height: 1.5; }
+</style>
+</head>
+<body>
+<canvas id="confetti-canvas"></canvas>
+<div class="wrap">
+
+  <div id="screen-who">
+    <div class="hero"><div class="big">🦸</div><h1>Hero Tasks</h1><p>Who are you?</p></div>
+    <div id="loading">Loading…</div>
+    <div class="who-grid" id="who-grid"></div>
+    <div id="setup-warn" class="setup-warn hidden">
+      <strong>⚙️ Can't reach the server:</strong> check that <code>API_URL</code> at the top of this
+      page's script points at your deployed Function App, and that it's actually running.
+    </div>
+  </div>
+
+  <div id="screen-kid" class="hidden">
+    <div class="topbar"><button class="back-btn" onclick="logout()">← Switch user</button></div>
+    <div class="kid-head">
+      <span class="avatar" id="k-avatar"></span>
+      <div>
+        <div class="name" id="k-name"></div>
+        <div class="level" id="k-level"></div>
+        <span class="streak" id="k-streak"></span>
+      </div>
+      <div class="score"><div class="pts" id="k-points"></div><div class="lbl">POINTS</div></div>
+    </div>
+    <div class="progress-wrap">
+      <div class="progress-lbl" id="k-progress-lbl"></div>
+      <div class="progress-bar"><div class="progress-fill" id="k-progress-fill"></div></div>
+    </div>
+
+    <h2>📅 Today's Missions</h2>
+    <div id="k-daily"></div>
+    <h2>🗓️ This Week</h2>
+    <div id="k-weekly"></div>
+    <div id="k-oneoff-section">
+      <h2>⭐ One-off Missions</h2>
+      <div id="k-oneoff"></div>
+    </div>
+
+    <button class="btn ghost" style="margin-top:8px" onclick="addExtraPrompt()">➕ I did something extra!</button>
+
+    <h2>🏆 Leaderboard</h2>
+    <div class="board" id="k-board"></div>
+  </div>
+
+  <div id="screen-parent" class="hidden">
+    <div class="topbar">
+      <button class="back-btn" onclick="logout()">← Switch user</button>
+      <strong id="p-title">👑 Parent HQ</strong>
+    </div>
+
+    <h2>⏳ Awaiting your approval</h2>
+    <div id="p-pending"></div>
+
+    <h2>➕ Allocate a task</h2>
+    <div class="card">
+      <div class="field">
+        <label>Task</label>
+        <div class="input-row">
+          <input id="p-title" type="text" placeholder="e.g. Feed the dog" autocomplete="off">
+          <button class="mic-btn hidden" id="p-mic" onclick="toggleMic()">🎤</button>
+        </div>
+      </div>
+      <div class="field"><label>Who</label><select id="p-kid"></select></div>
+      <div class="field"><label>How often</label>
+        <select id="p-cycle">
+          <option value="daily">Every day</option>
+          <option value="weekly">Once a week</option>
+          <option value="oneoff">One-off</option>
+        </select>
+      </div>
+      <div class="field"><label>Points</label><input id="p-points" type="number" value="5" min="1"></div>
+      <button class="btn" onclick="parentAddTask()">Allocate task</button>
+    </div>
+
+    <h2>📋 Current tasks</h2>
+    <div id="p-tasks"></div>
+
+    <h2>👧 Add a kid</h2>
+    <div class="card">
+      <div class="field"><label>Name</label><input id="p-kid-name" type="text" autocomplete="off"></div>
+      <div class="field"><label>Avatar</label>
+        <select id="p-kid-emoji">
+          <option>🦄</option><option>🐯</option><option>🦖</option><option>🐼</option>
+          <option>🦊</option><option>🐸</option><option>🦁</option><option>🐨</option>
+          <option>🐧</option><option>🦋</option><option>⚽</option><option>🎮</option>
+        </select>
+      </div>
+      <div class="field"><label>PIN (optional, 4 digits)</label><input id="p-kid-pin" type="text" inputmode="numeric" maxlength="4" autocomplete="off"></div>
+      <button class="btn ghost" onclick="parentAddKid()">Add kid</button>
+    </div>
+  </div>
+
+</div>
+
+<div id="pin-modal" class="modal-bg hidden">
+  <div class="modal">
+    <h3 id="pin-title">Enter PIN</h3>
+    <input class="pin-input" id="pin-input" type="password" inputmode="numeric" maxlength="6" autocomplete="off">
+    <div class="pin-err" id="pin-err"></div>
+    <button class="btn" onclick="submitPin()">Let's go!</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="closePin()">Cancel</button>
+  </div>
+</div>
+
+<div id="toast" class="hidden"></div>
+
+<script>
+// ============================================================
+// CONFIG — set this to your Function App's hostname once deployed.
+// e.g. 'https://herotasks-func-dev.azurewebsites.net/api/hero'
+// ============================================================
+const API_URL = 'https://herotasks-func-dev.azurewebsites.net/api/hero';
+
+const LEVELS = [
+  { pts: 0,   title: 'Egg',               emoji: '🥚' },
+  { pts: 25,  title: 'Hatchling',         emoji: '🐣' },
+  { pts: 60,  title: 'Busy Bee',          emoji: '🐝' },
+  { pts: 110, title: 'Ninja in Training', emoji: '🥷' },
+  { pts: 170, title: 'Chore Ninja',       emoji: '⚡' },
+  { pts: 250, title: 'Superstar',         emoji: '🌟' },
+  { pts: 350, title: 'Rocketeer',         emoji: '🚀' },
+  { pts: 480, title: 'Legend',            emoji: '🏆' },
+  { pts: 650, title: 'MEGA LEGEND',       emoji: '👑' },
+];
+
+const CHEERS = [
+  'BOOM! 💥', 'You legend! 🙌', 'Chore-tastic! ✨', 'Nailed it! 🔨',
+  'Super effort! 🦸', 'High five! ✋', 'Crushing it! 💪', 'Woohoo! 🎉'
+];
+
+let state = null;
+let session = JSON.parse(localStorage.getItem('hero-session') || 'null');
+let pinTarget = null;
+
+async function api(payload) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (data.people) { state = data; render(); }
+  return data;
+}
+
+function kidsOnly() { return state.people.filter(p => p.role === 'kid'); }
+
+async function refresh() {
+  try {
+    await api({ action: 'state' });
+  } catch (e) {
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('setup-warn').classList.remove('hidden');
+  }
+}
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function isoWeek(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const week1 = new Date(d.getFullYear(), 0, 4);
+  return d.getFullYear() + '-W' + Math.round(((d - week1) / 86400000 + ((week1.getDay() + 6) % 7)) / 7 + 1);
+}
+
+function cycleCompletion(task) {
+  const live = state.completions.filter(c =>
+    c.taskId === task.id && (c.status === 'pending' || c.status === 'approved'));
+  if (task.cycle === 'daily')  return live.find(c => c.date === todayStr()) || null;
+  if (task.cycle === 'weekly') return live.find(c => isoWeek(c.date) === isoWeek(todayStr())) || null;
+  return live[0] || null;
+}
+
+function levelFor(points) {
+  let lvl = LEVELS[0], next = null;
+  for (let i = 0; i < LEVELS.length; i++) {
+    if (points >= LEVELS[i].pts) lvl = LEVELS[i];
+    else { next = LEVELS[i]; break; }
+  }
+  return { lvl, next };
+}
+
+function render() {
+  if (!state) return;
+  renderWho();
+  const person = session && state.people.find(p => p.id === session.personId);
+  if (!person) {
+    if (session) { logout(); return; }
+    show('screen-who');
+  } else if (session.role === 'kid') {
+    renderKid(person);
+    show('screen-kid');
+  } else {
+    renderParent(person);
+    show('screen-parent');
+  }
+}
+
+function show(id) {
+  ['screen-who', 'screen-kid', 'screen-parent'].forEach(s =>
+    document.getElementById(s).classList.toggle('hidden', s !== id));
+}
+
+function renderWho() {
+  document.getElementById('loading').classList.add('hidden');
+  const grid = document.getElementById('who-grid');
+  grid.innerHTML = state.people.map(p =>
+    `<button class="who-card ${p.role === 'parent' ? 'parent' : ''}" onclick="pickPerson('${p.id}')">
+       <span class="avatar">${p.emoji}</span>${esc(p.name)}${p.role === 'parent' ? ' 👑' : ''}
+     </button>`).join('');
+}
+
+function renderKid(kid) {
+  const st = state.stats[kid.id] || { points: 0, streak: 0 };
+  const { lvl, next } = levelFor(st.points);
+  document.getElementById('k-avatar').textContent = kid.emoji;
+  document.getElementById('k-name').textContent = kid.name;
+  document.getElementById('k-level').textContent = lvl.emoji + ' ' + lvl.title;
+  document.getElementById('k-points').textContent = st.points;
+  document.getElementById('k-streak').textContent = st.streak > 0 ? `🔥 ${st.streak} day streak` : '🔥 Start a streak today!';
+
+  if (next) {
+    const span = next.pts - lvl.pts;
+    const pct = Math.min(100, Math.round(((st.points - lvl.pts) / span) * 100));
+    document.getElementById('k-progress-lbl').textContent = `${next.pts - st.points} points to become ${next.emoji} ${next.title}!`;
+    document.getElementById('k-progress-fill').style.width = pct + '%';
+  } else {
+    document.getElementById('k-progress-lbl').textContent = '👑 Maximum level reached. Absolute royalty.';
+    document.getElementById('k-progress-fill').style.width = '100%';
+  }
+
+  const mine = state.tasks.filter(t => t.kidId === kid.id);
+  renderTaskList('k-daily', mine.filter(t => t.cycle === 'daily'), 'No daily missions — enjoy the freedom! 😎');
+  renderTaskList('k-weekly', mine.filter(t => t.cycle === 'weekly'), 'Nothing weekly right now.');
+  const oneoffs = mine.filter(t => t.cycle === 'oneoff').filter(t => {
+    const c = cycleCompletion(t);
+    return !(c && c.status === 'approved');
+  });
+  document.getElementById('k-oneoff-section').classList.toggle('hidden', oneoffs.length === 0);
+  renderTaskList('k-oneoff', oneoffs, '');
+
+  const ranked = kidsOnly()
+    .map(k => ({ ...k, pts: (state.stats[k.id] || {}).points || 0 }))
+    .sort((a, b) => b.pts - a.pts);
+  const medals = ['🥇', '🥈', '🥉'];
+  document.getElementById('k-board').innerHTML = ranked.map((k, i) =>
+    `<div class="board-row">
+       <span class="place">${medals[i] || (i + 1)}</span>
+       <span>${k.emoji}</span>
+       <span class="b-name">${esc(k.name)}${k.id === kid.id ? ' (you!)' : ''}</span>
+       <span class="b-pts">${k.pts} pts</span>
+     </div>`).join('');
+}
+
+function renderTaskList(elId, tasks, emptyMsg) {
+  const el = document.getElementById(elId);
+  if (tasks.length === 0) {
+    el.innerHTML = emptyMsg ? `<div class="empty">${emptyMsg}</div>` : '';
+    return;
+  }
+  el.innerHTML = tasks.map(t => {
+    const c = cycleCompletion(t);
+    const cls = c ? (c.status === 'approved' ? 'done-approved' : 'done-pending') : '';
+    const tickIcon = c ? (c.status === 'approved' ? '✅' : '⏳') : '';
+    const sub = c
+      ? (c.status === 'approved' ? 'Done — points banked! 💰' : 'Waiting for a grown-up to check ⏳')
+      : (t.cycle === 'weekly' ? 'Any time this week' : '');
+    const action = c
+      ? (c.status === 'pending' ? `undoTask('${c.id}')` : '')
+      : `doTask('${t.id}')`;
+    return `<div class="task ${cls}">
+      <button class="tick" ${action ? `onclick="${action}"` : 'disabled'}>${tickIcon}</button>
+      <div class="info">
+        <div class="title">${esc(t.title)}</div>
+        ${sub ? `<div class="sub">${sub}</div>` : ''}
+      </div>
+      <span class="pts-badge">+${t.points}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderParent(person) {
+  document.getElementById('p-title').textContent = `👑 ${person.name}'s HQ`;
+  const pending = state.completions.filter(c => c.status === 'pending');
+  const el = document.getElementById('p-pending');
+  if (pending.length === 0) {
+    el.innerHTML = '<div class="empty">Nothing waiting — all caught up! ✨</div>';
+  } else {
+    el.innerHTML = pending.map(c => {
+      const kid = state.people.find(k => k.id === c.kidId) || { name: '?', emoji: '❓' };
+      const isExtra = !c.taskId;
+      return `<div class="card">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:1.4rem">${kid.emoji}</span>
+          <div style="flex:1">
+            <strong>${esc(kid.name)}</strong>: ${esc(c.title)}
+            ${isExtra ? '<span class="tag extra">kid-added</span>' : ''}
+            <div class="sub" style="font-size:0.75rem;color:var(--muted)">${c.date}${isExtra ? '' : ` · worth ${c.points} pts`}</div>
+          </div>
+        </div>
+        <div class="approve-row">
+          <button class="btn green small" onclick="parentApprove('${c.id}', ${isExtra})">✓ Approve${isExtra ? ' & set points' : ''}</button>
+          <button class="btn red-ghost small" onclick="parentReject('${c.id}')">✗ Nope</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  const sel = document.getElementById('p-kid');
+  const current = sel.value;
+  sel.innerHTML = kidsOnly().map(k => `<option value="${k.id}">${k.emoji} ${esc(k.name)}</option>`).join('');
+  if (current) sel.value = current;
+
+  const cycleLabel = { daily: 'daily', weekly: 'weekly', oneoff: 'one-off' };
+  document.getElementById('p-tasks').innerHTML = kidsOnly().map(k => {
+    const mine = state.tasks.filter(t => t.kidId === k.id);
+    if (mine.length === 0) return '';
+    return `<div class="card">
+      <strong>${k.emoji} ${esc(k.name)}</strong>
+      ${mine.map(t => `
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f1f5f9">
+          <div style="flex:1">${esc(t.title)}
+            <div style="font-size:0.75rem;color:var(--muted)">${cycleLabel[t.cycle] || t.cycle} · ${t.points} pts</div>
+          </div>
+          <button class="btn red-ghost small" onclick="parentDeleteTask('${t.id}')">Remove</button>
+        </div>`).join('')}
+    </div>`;
+  }).join('') || '<div class="empty">No tasks allocated yet.</div>';
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, m =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
+function pickPerson(personId) {
+  const p = state.people.find(x => x.id === personId);
+  if (!p.hasPin) {
+    session = { personId: p.id, role: p.role, pin: '' };
+    saveSession(); render();
+    return;
+  }
+  pinTarget = p;
+  openPin(`Hi ${p.name}! Enter your PIN`);
+}
+
+function openPin(title) {
+  document.getElementById('pin-title').textContent = title;
+  document.getElementById('pin-input').value = '';
+  document.getElementById('pin-err').textContent = '';
+  document.getElementById('pin-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('pin-input').focus(), 50);
+}
+function closePin() { document.getElementById('pin-modal').classList.add('hidden'); pinTarget = null; }
+
+async function submitPin() {
+  const pin = document.getElementById('pin-input').value.trim();
+  const err = document.getElementById('pin-err');
+  err.textContent = 'Checking…';
+  try {
+    const res = await api({ action: 'login', personId: pinTarget.id, pin });
+    if (res.ok) {
+      session = { personId: pinTarget.id, role: res.role, pin: res.role === 'parent' ? pin : '' };
+      saveSession(); closePin(); render();
+    } else {
+      err.textContent = 'Hmm, that PIN isn\'t right. Try again!';
+    }
+  } catch (e) {
+    err.textContent = 'Connection problem — try again.';
+  }
+}
+
+function saveSession() { localStorage.setItem('hero-session', JSON.stringify(session)); }
+function logout() {
+  session = null;
+  localStorage.removeItem('hero-session');
+  render();
+}
+
+async function doTask(taskId) {
+  celebrate();
+  toast(CHEERS[Math.floor(Math.random() * CHEERS.length)]);
+  await api({ action: 'completeTask', taskId });
+}
+
+async function undoTask(completionId) {
+  await api({ action: 'uncomplete', completionId });
+}
+
+async function addExtraPrompt() {
+  const title = prompt('What did you do? 🌟');
+  if (!title || !title.trim()) return;
+  toast('Sent to your grown-up! ⏳');
+  await api({ action: 'addExtra', kidId: session.personId, title: title.trim() });
+}
+
+async function parentAddTask() {
+  const title = document.getElementById('p-title').value.trim();
+  if (!title) { toast('Type or speak a task first!'); return; }
+  const payload = {
+    action: 'addTask', parentId: session.personId, parentPin: session.pin,
+    kidId: document.getElementById('p-kid').value,
+    title,
+    cycle: document.getElementById('p-cycle').value,
+    points: Number(document.getElementById('p-points').value) || 5,
+  };
+  document.getElementById('p-title').value = '';
+  toast('Task allocated! 📬');
+  await api(payload);
+}
+
+async function parentApprove(completionId, isExtra) {
+  let points;
+  if (isExtra) {
+    points = prompt('How many points is this worth?', '5');
+    if (points === null) return;
+  }
+  celebrate();
+  await api({ action: 'approve', parentId: session.personId, parentPin: session.pin, completionId, points });
+}
+
+async function parentReject(completionId) {
+  await api({ action: 'reject', parentId: session.personId, parentPin: session.pin, completionId });
+}
+
+async function parentDeleteTask(taskId) {
+  if (!confirm('Remove this task?')) return;
+  await api({ action: 'deleteTask', parentId: session.personId, parentPin: session.pin, taskId });
+}
+
+async function parentAddKid() {
+  const name = document.getElementById('p-kid-name').value.trim();
+  if (!name) { toast('Enter a name first!'); return; }
+  const payload = {
+    action: 'addKid', parentId: session.personId, parentPin: session.pin, name,
+    emoji: document.getElementById('p-kid-emoji').value,
+    pin: document.getElementById('p-kid-pin').value.trim(),
+  };
+  document.getElementById('p-kid-name').value = '';
+  document.getElementById('p-kid-pin').value = '';
+  toast(`${name} joined the squad! 🎉`);
+  await api(payload);
+}
+
+let recognition = null, listening = false;
+(function initMic() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+  recognition = new SR();
+  recognition.lang = 'en-AU';
+  recognition.interimResults = false;
+  recognition.onresult = e => {
+    document.getElementById('p-title').value = e.results[0][0].transcript;
+  };
+  recognition.onend = () => {
+    listening = false;
+    document.getElementById('p-mic').classList.remove('listening');
+  };
+  document.getElementById('p-mic').classList.remove('hidden');
+})();
+
+function toggleMic() {
+  if (!recognition) return;
+  if (listening) { recognition.stop(); return; }
+  listening = true;
+  document.getElementById('p-mic').classList.add('listening');
+  recognition.start();
+}
+
+const canvas = document.getElementById('confetti-canvas');
+const ctx = canvas.getContext('2d');
+let particles = [];
+function celebrate() {
+  canvas.width = innerWidth; canvas.height = innerHeight;
+  const colors = ['#7c3aed', '#f59e0b', '#10b981', '#ef4444', '#3b82f6', '#ec4899'];
+  for (let i = 0; i < 90; i++) {
+    particles.push({
+      x: innerWidth / 2, y: innerHeight / 2,
+      vx: (Math.random() - 0.5) * 14, vy: (Math.random() - 1.1) * 12,
+      size: Math.random() * 8 + 4,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rot: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 0.3,
+      life: 90,
+    });
+  }
+  if (particles.length <= 90) requestAnimationFrame(tickConfetti);
+}
+function tickConfetti() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  particles.forEach(p => {
+    p.x += p.vx; p.y += p.vy; p.vy += 0.35; p.rot += p.vr; p.life--;
+    ctx.save();
+    ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = Math.max(0, p.life / 90);
+    ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+    ctx.restore();
+  });
+  particles = particles.filter(p => p.life > 0 && p.y < canvas.height + 20);
+  if (particles.length > 0) requestAnimationFrame(tickConfetti);
+  else ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add('hidden'), 2500);
+}
+
+refresh();
+setInterval(refresh, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+document.getElementById('pin-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitPin(); });
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
