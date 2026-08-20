@@ -4,8 +4,9 @@ param env string
 @description('Azure region for the Function App and its hosting plan.')
 param location string
 
-@description('Storage account name backing the Function host runtime state.')
-param storageAccountName string
+@description('Connection string for the storage account backing the Function host runtime state.')
+@secure()
+param storageConnectionString string
 
 @description('Function worker runtime value (for example node, dotnet-isolated, python).')
 param workerRuntime string = 'node'
@@ -80,12 +81,8 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           value: '@Microsoft.KeyVault(SecretUri=${llmApiKeySecretUri})'
         }
         {
-          name: 'AzureWebJobsStorage__accountName'
-          value: storageAccountName
-        }
-        {
-          name: 'AzureWebJobsStorage__credential'
-          value: 'managedidentity'
+          name: 'AzureWebJobsStorage'
+          value: storageConnectionString
         }
       ]
     }

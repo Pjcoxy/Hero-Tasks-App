@@ -22,7 +22,14 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   properties: {
     accessTier: 'Hot'
     allowBlobPublicAccess: false
-    allowSharedKeyAccess: false
+    // Shared key access is required here: func core tools' zip-deploy package upload
+    // needs a real AzureWebJobsStorage connection string to stage the deployment
+    // artifact, independent of how the Functions runtime itself authenticates
+    // afterward. Confirmed by a real `func azure functionapp publish` failure
+    // ("Error creating a Blob container reference... AzureWebJobsStorage is valid")
+    // when this was false. This account only ever holds the Function host's own
+    // runtime state, never application data (that's Cosmos DB, key-free).
+    allowSharedKeyAccess: true
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
   }
@@ -30,3 +37,5 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
 
 output storageAccountId string = storageAccount.id
 output storageAccountName string = storageAccount.name
+@secure()
+output connectionString string = 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};AccountKey=${storageAccount.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'

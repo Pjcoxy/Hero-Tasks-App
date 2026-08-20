@@ -54,7 +54,7 @@ module functionApp './modules/functionapp.bicep' = {
   params: {
     env: env
     location: location
-    storageAccountName: storage.outputs.storageAccountName
+    storageConnectionString: storage.outputs.connectionString
     workerRuntime: functionWorkerRuntime
     linuxFxVersion: functionLinuxFxVersion
     cosmosEndpoint: cosmosEndpoint
@@ -98,10 +98,11 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing 
   name: storageAccountName
 }
 
-// RBAC: grant the Function App's system-assigned managed identity the "Storage Blob Data
-// Contributor" role on its own runtime storage account. Required because allowSharedKeyAccess
-// is false on that account (no connection strings), so AzureWebJobsStorage must authenticate
-// via managed identity instead.
+// RBAC: also grant the Function App's managed identity "Storage Blob Data Contributor"
+// on its own runtime storage account, alongside the connection string in
+// AzureWebJobsStorage (see storage.bicep for why a real connection string is needed —
+// func core tools' zip-deploy package upload requires one). Harmless belt-and-suspenders:
+// any future binding that supports identity-based auth can use this instead of the key.
 resource functionStorageBlobDataContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(storageAccountName, functionAppName, storageBlobDataContributorRoleDefinitionId)
   scope: storageAccount
