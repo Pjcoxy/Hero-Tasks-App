@@ -4,15 +4,9 @@ param env string
 @description('Azure region for the Static Web App.')
 param location string
 
-@description('Azure Static Web App SKU. Free is sufficient at this scale.')
+@description('Azure Static Web App SKU. Free is sufficient at this scale. Note: linkedBackends (linking a separate Function App as this SWA\'s backend) requires the Standard tier — not used here on purpose, to stay on Free. The frontend calls the Function App directly by its own hostname instead; CORS on the Function App (see functionapp.bicep) covers this.')
 @allowed(['Free'])
 param sku string = 'Free'
-
-@description('Resource ID of the Function App to link as this Static Web App\'s backend (shares auth/CORS automatically, no manual CORS config needed on the frontend side).')
-param linkedFunctionAppId string
-
-@description('Region the linked Function App is deployed in.')
-param linkedFunctionAppLocation string
 
 var staticWebAppName = 'herotasks-swa-${env}'
 
@@ -25,15 +19,6 @@ resource staticWebApp 'Microsoft.Web/staticSites@2024-04-01' = {
   }
   properties: {
     provider: 'None'
-  }
-}
-
-resource linkedBackend 'Microsoft.Web/staticSites/linkedBackends@2024-04-01' = {
-  parent: staticWebApp
-  name: 'herotasks-api'
-  properties: {
-    backendResourceId: linkedFunctionAppId
-    region: linkedFunctionAppLocation
   }
 }
 

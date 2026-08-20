@@ -53,8 +53,9 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       cors: {
-        // Tightened to the real Static Web App hostname once known; '*' is fine while
-        // the SWA-linked-backend wiring (below, in main.bicep) also covers auth passthrough.
+        // The frontend calls this Function App directly by its own hostname (no SWA
+        // linkedBackends — that requires the Standard SWA tier, and Free is the goal).
+        // Tighten this to the real Static Web App hostname once known.
         allowedOrigins: ['*']
       }
       appSettings: [

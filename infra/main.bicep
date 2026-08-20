@@ -91,8 +91,6 @@ module staticWebApp './modules/staticwebapp.bicep' = {
     env: env
     location: staticWebAppLocation
     sku: staticWebAppSku
-    linkedFunctionAppId: functionApp.outputs.functionAppId
-    linkedFunctionAppLocation: location
   }
 }
 
