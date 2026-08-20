@@ -58,6 +58,7 @@ async function getState() {
       title: t.title,
       points: t.points,
       cycle: t.cycle,
+      dueBy: t.dueBy || null,
       createdAt: t.createdAt,
     })),
     completions: completions.map((c) => ({
@@ -109,6 +110,10 @@ async function addTask(req) {
     title: req.title,
     points: Number(req.points) || 5,
     cycle: req.cycle || 'daily',
+    // Due date/time only applies to one-off tasks — daily/weekly recurrence already
+    // defines "when", and a recurring due-time is a separate feature (ties into
+    // reminders, issue #11) rather than a natural extension of this field.
+    dueBy: req.cycle === 'oneoff' && req.dueBy ? req.dueBy : null,
     createdAt: todayStr(),
     active: true,
   });

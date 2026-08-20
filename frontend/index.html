@@ -53,6 +53,8 @@
   .task.done-approved .title { text-decoration: line-through; color: var(--muted); }
   .task .sub { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
   .task .pts-badge { background: var(--amber-soft); color: #b45309; font-weight: 700; border-radius: 20px; padding: 4px 10px; font-size: 0.85rem; white-space: nowrap; }
+  .task.overdue .tick { border-color: var(--red); }
+  .task.overdue .sub { color: var(--red); font-weight: 700; }
   .empty { color: var(--muted); text-align: center; padding: 16px; font-size: 0.9rem; }
   .board { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; }
   .board-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; }
@@ -142,11 +144,15 @@
       </div>
       <div class="field"><label>Who</label><select id="p-kid"></select></div>
       <div class="field"><label>How often</label>
-        <select id="p-cycle">
+        <select id="p-cycle" onchange="updateDueVisibility()">
           <option value="daily">Every day</option>
           <option value="weekly">Once a week</option>
           <option value="oneoff">One-off</option>
         </select>
+      </div>
+      <div class="field hidden" id="p-due-wrap">
+        <label>Due by (optional)</label>
+        <input id="p-due" type="datetime-local">
       </div>
       <div class="field"><label>Points</label><input id="p-points" type="number" value="5" min="1"></div>
       <button class="btn" onclick="parentAddTask()">Allocate task</button>
@@ -334,6 +340,14 @@ function renderKid(kid) {
      </div>`).join('');
 }
 
+function formatDue(iso) {
+  const d = new Date(iso);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return `today ${time}`;
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + time;
+}
+
 function renderTaskList(elId, tasks, emptyMsg) {
   const el = document.getElementById(elId);
   if (tasks.length === 0) {
@@ -344,13 +358,15 @@ function renderTaskList(elId, tasks, emptyMsg) {
     const c = cycleCompletion(t);
     const cls = c ? (c.status === 'approved' ? 'done-approved' : 'done-pending') : '';
     const tickIcon = c ? (c.status === 'approved' ? '✅' : '⏳') : '';
-    const sub = c
+    const isOverdue = !c && t.dueBy && new Date(t.dueBy) < new Date();
+    let sub = c
       ? (c.status === 'approved' ? 'Done — points banked! 💰' : 'Waiting for a grown-up to check ⏳')
       : (t.cycle === 'weekly' ? 'Any time this week' : '');
+    if (!c && t.dueBy) sub = isOverdue ? `⚠️ Overdue — was due ${formatDue(t.dueBy)}` : `Due ${formatDue(t.dueBy)}`;
     const action = c
       ? (c.status === 'pending' ? `undoTask('${c.id}')` : '')
       : `doTask('${t.id}')`;
-    return `<div class="task ${cls}">
+    return `<div class="task ${cls} ${isOverdue ? 'overdue' : ''}">
       <button class="tick" ${action ? `onclick="${action}"` : 'disabled'}>${tickIcon}</button>
       <div class="info">
         <div class="title">${esc(t.title)}</div>
@@ -402,7 +418,7 @@ function renderParent(person) {
       ${mine.map(t => `
         <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f1f5f9">
           <div style="flex:1">${esc(t.title)}
-            <div style="font-size:0.75rem;color:var(--muted)">${cycleLabel[t.cycle] || t.cycle} · ${t.points} pts</div>
+            <div style="font-size:0.75rem;color:var(--muted)">${cycleLabel[t.cycle] || t.cycle} · ${t.points} pts${t.dueBy ? ' · due ' + formatDue(t.dueBy) : ''}</div>
           </div>
           <button class="btn red-ghost small" onclick="parentDeleteTask('${t.id}')">Remove</button>
         </div>`).join('')}
@@ -476,17 +492,26 @@ async function addExtraPrompt() {
   await api({ action: 'addExtra', kidId: session.personId, title: title.trim() });
 }
 
+function updateDueVisibility() {
+  const isOneoff = document.getElementById('p-cycle').value === 'oneoff';
+  document.getElementById('p-due-wrap').classList.toggle('hidden', !isOneoff);
+}
+
 async function parentAddTask() {
   const title = document.getElementById('p-title').value.trim();
   if (!title) { toast('Type or speak a task first!'); return; }
+  const cycle = document.getElementById('p-cycle').value;
+  const dueInput = document.getElementById('p-due').value;
   const payload = {
     action: 'addTask', parentId: session.personId, parentPin: session.pin,
     kidId: document.getElementById('p-kid').value,
     title,
-    cycle: document.getElementById('p-cycle').value,
+    cycle,
     points: Number(document.getElementById('p-points').value) || 5,
+    dueBy: cycle === 'oneoff' && dueInput ? new Date(dueInput).toISOString() : null,
   };
   document.getElementById('p-title').value = '';
+  document.getElementById('p-due').value = '';
   toast('Task allocated! 📬');
   await api(payload);
 }
