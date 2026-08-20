@@ -1,0 +1,259 @@
+const { app } = require('@azure/functions');
+const { randomUUID } = require('crypto');
+const { container } = require('../lib/cosmos');
+const { ensureSeeded, HOUSEHOLD_ID } = require('../lib/seed');
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function queryHousehold(containerName) {
+  const { resources } = await container(containerName)
+    .items.query({
+      query: 'SELECT * FROM c WHERE c.householdId = @h',
+      parameters: [{ name: '@h', value: HOUSEHOLD_ID }],
+    })
+    .fetchAll();
+  return resources;
+}
+
+// Streak = consecutive days with >=1 pending/approved completion, not counting
+// today against you if nothing's been done yet today.
+function calcStreak(completions) {
+  const days = new Set();
+  completions.forEach((c) => {
+    if (c.status === 'approved' || c.status === 'pending') days.add(c.date);
+  });
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  let streak = 0;
+  const cursor = new Date();
+  if (!days.has(fmt(cursor))) cursor.setUTCDate(cursor.getUTCDate() - 1);
+  while (days.has(fmt(cursor))) {
+    streak++;
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+  return streak;
+}
+
+async function getState() {
+  const people = await queryHousehold('people');
+  const chores = (await queryHousehold('chores')).filter((t) => t.active !== false);
+  const completions = await queryHousehold('completions');
+
+  const stats = {};
+  people
+    .filter((p) => p.role === 'kid')
+    .forEach((p) => {
+      const mine = completions.filter((c) => c.kidId === p.id);
+      const points = mine.filter((c) => c.status === 'approved').reduce((s, c) => s + (c.points || 0), 0);
+      stats[p.id] = { points, streak: calcStreak(mine) };
+    });
+
+  return {
+    ok: true,
+    people: people.map((p) => ({ id: p.id, name: p.name, emoji: p.emoji, role: p.role, hasPin: !!p.pin })),
+    tasks: chores.map((t) => ({
+      id: t.id,
+      kidId: t.kidId,
+      title: t.title,
+      points: t.points,
+      cycle: t.cycle,
+      createdAt: t.createdAt,
+    })),
+    completions: completions.map((c) => ({
+      id: c.id,
+      taskId: c.taskId || '',
+      kidId: c.kidId,
+      title: c.title,
+      points: c.points || 0,
+      date: c.date,
+      status: c.status,
+      createdAt: c.createdAt,
+    })),
+    stats,
+    today: todayStr(),
+  };
+}
+
+async function requireParent(parentId, parentPin) {
+  if (!parentId || !parentPin) {
+    throw Object.assign(new Error('Missing parent credentials'), { status: 401 });
+  }
+  const { resource: person } = await container('people')
+    .item(parentId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!person || person.role !== 'parent' || String(person.pin) !== String(parentPin)) {
+    throw Object.assign(new Error('Wrong parent PIN'), { status: 401 });
+  }
+}
+
+async function login(req) {
+  const { resource: person } = await container('people')
+    .item(req.personId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!person) return { ok: false, error: 'Person not found' };
+  if (String(person.pin) !== '' && String(person.pin) !== String(req.pin || '')) {
+    return { ok: false, error: 'Wrong PIN' };
+  }
+  return { ok: true, role: person.role };
+}
+
+async function addTask(req) {
+  await requireParent(req.parentId, req.parentPin);
+  await container('chores').items.create({
+    id: randomUUID(),
+    householdId: HOUSEHOLD_ID,
+    kidId: req.kidId,
+    title: req.title,
+    points: Number(req.points) || 5,
+    cycle: req.cycle || 'daily',
+    createdAt: todayStr(),
+    active: true,
+  });
+  return getState();
+}
+
+async function deleteTask(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const chores = container('chores');
+  const { resource: chore } = await chores
+    .item(req.taskId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (chore) {
+    chore.active = false;
+    await chores.item(req.taskId, HOUSEHOLD_ID).replace(chore);
+  }
+  return getState();
+}
+
+async function completeTask(req) {
+  const chores = await queryHousehold('chores');
+  const chore = chores.find((t) => t.id === req.taskId);
+  if (!chore) return { ok: false, error: 'Task not found' };
+  await container('completions').items.create({
+    id: randomUUID(),
+    householdId: HOUSEHOLD_ID,
+    taskId: chore.id,
+    kidId: chore.kidId,
+    title: chore.title,
+    points: Number(chore.points) || 0,
+    date: todayStr(),
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  });
+  return getState();
+}
+
+async function uncomplete(req) {
+  const completions = container('completions');
+  const { resource: completion } = await completions
+    .item(req.completionId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (completion && completion.status === 'pending') {
+    await completions.item(req.completionId, HOUSEHOLD_ID).delete();
+  }
+  return getState();
+}
+
+async function addExtra(req) {
+  await container('completions').items.create({
+    id: randomUUID(),
+    householdId: HOUSEHOLD_ID,
+    taskId: '',
+    kidId: req.kidId,
+    title: req.title,
+    points: 0,
+    date: todayStr(),
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  });
+  return getState();
+}
+
+async function approve(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const completions = container('completions');
+  const { resource: completion } = await completions
+    .item(req.completionId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (completion) {
+    if (req.points !== undefined && req.points !== null && req.points !== '') {
+      completion.points = Number(req.points);
+    }
+    completion.status = 'approved';
+    await completions.item(req.completionId, HOUSEHOLD_ID).replace(completion);
+  }
+  return getState();
+}
+
+async function reject(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const completions = container('completions');
+  const { resource: completion } = await completions
+    .item(req.completionId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (completion) {
+    completion.status = 'rejected';
+    await completions.item(req.completionId, HOUSEHOLD_ID).replace(completion);
+  }
+  return getState();
+}
+
+async function addKid(req) {
+  await requireParent(req.parentId, req.parentPin);
+  await container('people').items.create({
+    id: randomUUID(),
+    householdId: HOUSEHOLD_ID,
+    name: req.name,
+    emoji: req.emoji || '🙂',
+    pin: req.pin || '',
+    role: 'kid',
+  });
+  return getState();
+}
+
+const ROUTES = {
+  state: () => getState(),
+  login,
+  addTask,
+  deleteTask,
+  completeTask,
+  uncomplete,
+  addExtra,
+  approve,
+  reject,
+  addKid,
+};
+
+app.http('hero', {
+  methods: ['POST', 'GET'],
+  authLevel: 'anonymous',
+  route: 'hero',
+  handler: async (request, context) => {
+    try {
+      await ensureSeeded();
+      let req = {};
+      if (request.method === 'POST') {
+        req = await request.json().catch(() => ({}));
+      }
+      const action = req.action || 'state';
+      const handlerFn = ROUTES[action];
+      if (!handlerFn) {
+        return { status: 400, jsonBody: { ok: false, error: 'Unknown action' } };
+      }
+      const result = await handlerFn(req);
+      return { jsonBody: result };
+    } catch (err) {
+      context.error(err);
+      return { status: err.status || 500, jsonBody: { ok: false, error: err.message } };
+    }
+  },
+});
+
+module.exports = { getState, calcStreak };
