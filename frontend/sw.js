@@ -1,6 +1,10 @@
-// Minimal app-shell cache so the page still opens (with stale data) if offline.
-// Data itself is never cached — every screen re-fetches from the API on load.
-const CACHE_NAME = 'hero-tasks-shell-v1';
+// App-shell cache so the page still opens (with stale data) if offline.
+// Network-first: every request tries the real network first, so updates are
+// always visible when online (the normal case) — only falls back to the
+// cached copy if the network request actually fails. A cache-first strategy
+// here would silently keep serving old code forever after every deploy,
+// which is exactly the bug this replaced.
+const CACHE_NAME = 'hero-tasks-shell-v2';
 const SHELL_FILES = ['/', '/index.html', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
@@ -25,6 +29,12 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.includes('/api/')) return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    fetch(event.request)
+      .then((res) => {
+        const resClone = res.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, resClone));
+        return res;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
