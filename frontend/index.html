@@ -347,6 +347,12 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .task.overdue .sub  { color: var(--danger); font-weight: var(--weight-medium); }
 .task.dimmed { opacity: 0.72; }
 .task-side { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); }
+.task-exiting {
+  transform: translateX(12px);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform var(--dur-base) var(--ease-out), opacity var(--dur-base) var(--ease-out);
+}
 
 /* ─── Empty states ────────────────────────────────────────────────────── */
 .empty {
@@ -1144,7 +1150,7 @@ function renderKid(kid) {
   document.getElementById('k-avatar').textContent = kid.emoji;
   document.getElementById('k-name').textContent = kid.name;
   document.getElementById('k-level').textContent = lvl.emoji + ' ' + lvl.title;
-  document.getElementById('k-points').textContent = balance;
+  animatePoints(balance);
   document.getElementById('k-streak').textContent = st.streak > 0 ? '🔥 ' + st.streak + ' day streak' : '🔥 Start a streak today!';
 
   if (next) {
@@ -1452,14 +1458,97 @@ function logout() {
   render();
 }
 
+function isInQuietHours() {
+  var qh = state && state.quietHours;
+  if (!qh || !qh.start || !qh.end) return false;
+  var now = new Date();
+  var hhmm = now.getHours() * 60 + now.getMinutes();
+  var toMins = function(t) { var p = t.split(':'); return parseInt(p[0], 10) * 60 + parseInt(p[1], 10); };
+  var s = toMins(qh.start), e = toMins(qh.end);
+  return s <= e ? (hhmm >= s && hhmm < e) : (hhmm >= s || hhmm < e);
+}
+
+function vibrateIfAllowed() {
+  if (navigator.vibrate && !isInQuietHours()) navigator.vibrate(12);
+}
+
+var _kPointsAnim = null;
+function animatePoints(targetVal) {
+  var el = document.getElementById('k-points');
+  var startVal = parseInt(el.textContent, 10);
+  if (isNaN(startVal) || startVal === targetVal) { el.textContent = targetVal; return; }
+  var durSlow = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-slow')) || 380;
+  var start = performance.now();
+  if (_kPointsAnim) cancelAnimationFrame(_kPointsAnim);
+  function step(now) {
+    var progress = Math.min(1, (now - start) / durSlow);
+    el.textContent = Math.round(startVal + (targetVal - startVal) * progress);
+    if (progress < 1) { _kPointsAnim = requestAnimationFrame(step); }
+    else { el.textContent = targetVal; }
+  }
+  _kPointsAnim = requestAnimationFrame(step);
+}
+
+function findTaskCard(taskId) {
+  var lists = ['k-daily', 'k-weekly', 'k-oneoff'];
+  for (var li = 0; li < lists.length; li++) {
+    var el = document.getElementById(lists[li]);
+    if (!el) continue;
+    var cards = el.querySelectorAll('.task');
+    for (var ci = 0; ci < cards.length; ci++) {
+      var btn = cards[ci].querySelector('.tick');
+      if (btn && (btn.getAttribute('onclick') || '').indexOf(taskId) !== -1) return cards[ci];
+    }
+  }
+  return null;
+}
+
 async function doTask(taskId) {
+  var task = (state.tasks || []).find(function(t) { return t.id === taskId; });
+  if (!task) return;
+
+  var taskEl = findTaskCard(taskId);
+  if (taskEl) {
+    taskEl.classList.add('task-exiting');
+    await new Promise(function(resolve) { setTimeout(resolve, 220); });
+  }
+
+  var syntheticId = '_opt_' + taskId + '_' + Date.now();
+  var prev = state.completions.slice();
+  state.completions = prev.concat([{
+    id: syntheticId, taskId: taskId, kidId: session.personId,
+    title: task.title, points: task.points,
+    status: 'pending', date: todayStr(),
+  }]);
+  render();
+
+  var res;
+  try {
+    res = await api({ action: 'completeTask', taskId });
+  } catch (e) {
+    state.completions = prev; render(); toast('Connection problem — try again.'); return;
+  }
+  if (res && res.ok === false) {
+    state.completions = prev; render(); toast(res.error || 'Could not complete that task.'); return;
+  }
   celebrate();
   toast(CHEERS[Math.floor(Math.random() * CHEERS.length)]);
-  await api({ action: 'completeTask', taskId });
+  vibrateIfAllowed();
 }
 
 async function undoTask(completionId) {
-  await api({ action: 'uncomplete', completionId });
+  var prev = state.completions.slice();
+  state.completions = prev.filter(function(c) { return c.id !== completionId; });
+  render();
+  var res;
+  try {
+    res = await api({ action: 'uncomplete', completionId });
+  } catch (e) {
+    state.completions = prev; render(); toast('Connection problem — try again.'); return;
+  }
+  if (res && res.ok === false) {
+    state.completions = prev; render(); toast(res.error || 'Could not undo that task.'); return;
+  }
 }
 
 async function addExtraPrompt() {
@@ -1473,21 +1562,35 @@ async function redeemKidReward(rewardId, cost) {
   var reward = (state.rewards || []).find(function(r) { return r.id === rewardId; });
   var rewardTitle = reward ? reward.title : 'this reward';
   if (!confirm('Redeem ' + rewardTitle + ' for ' + cost + ' points?')) return;
-  var previousIds = new Set(((state.redemptions || []).filter(function(r) { return r.kidId === session.personId; })).map(function(r) { return r.id; }));
+
+  var syntheticId = '_opt_' + rewardId + '_' + Date.now();
+  var prevRedemptions = (state.redemptions || []).slice();
+  var prevStats = JSON.parse(JSON.stringify(state.stats || {}));
+  var kidStats = prevStats[session.personId] || { points: 0, balance: 0, streak: 0 };
+  state.redemptions = prevRedemptions.concat([{
+    id: syntheticId, rewardId: rewardId, kidId: session.personId,
+    title: rewardTitle, cost: cost, status: reward && !reward.needsApproval ? 'approved' : 'pending',
+  }]);
+  if (state.stats[session.personId]) {
+    state.stats[session.personId] = Object.assign({}, state.stats[session.personId], {
+      balance: Math.max(0, (state.stats[session.personId].balance || 0) - cost),
+    });
+  }
+  render();
+
   var res;
   try {
     res = await api({ action: 'redeemReward', kidId: session.personId, rewardId });
   } catch (e) {
-    toast('Connection problem — try again.');
-    return;
+    state.redemptions = prevRedemptions; state.stats = prevStats; render();
+    toast('Connection problem — try again.'); return;
   }
   if (res && res.ok === false) {
-    toast(res.error || 'Could not redeem that reward.');
-    await refresh();
-    return;
+    state.redemptions = prevRedemptions; state.stats = prevStats; render();
+    toast(res.error || 'Could not redeem that reward.'); return;
   }
   var created = (state.redemptions || []).find(function(r) {
-    return r.kidId === session.personId && !previousIds.has(r.id) && r.rewardId === rewardId;
+    return r.kidId === session.personId && r.rewardId === rewardId && r.id !== syntheticId;
   });
   celebrate();
   toast(created && created.status === 'approved' ? 'Enjoy it! 🎉' : 'Sent to your grown-up! ⏳');
@@ -1497,17 +1600,27 @@ async function cancelKidRedemption(redemptionId) {
   var redemption = (state.redemptions || []).find(function(r) { return r.id === redemptionId; });
   var rewardTitle = redemption ? redemption.title : 'this reward';
   if (!confirm('Changed your mind about ' + rewardTitle + '?')) return;
+
+  var prevRedemptions = (state.redemptions || []).slice();
+  var prevStats = JSON.parse(JSON.stringify(state.stats || {}));
+  state.redemptions = prevRedemptions.filter(function(r) { return r.id !== redemptionId; });
+  if (redemption && state.stats[session.personId]) {
+    state.stats[session.personId] = Object.assign({}, state.stats[session.personId], {
+      balance: (state.stats[session.personId].balance || 0) + (redemption.cost || 0),
+    });
+  }
+  render();
+
   var res;
   try {
     res = await api({ action: 'cancelRedemption', kidId: session.personId, redemptionId });
   } catch (e) {
-    toast('Connection problem — try again.');
-    return;
+    state.redemptions = prevRedemptions; state.stats = prevStats; render();
+    toast('Connection problem — try again.'); return;
   }
   if (res && res.ok === false) {
-    toast(res.error || 'Could not cancel that reward.');
-    await refresh();
-    return;
+    state.redemptions = prevRedemptions; state.stats = prevStats; render();
+    toast(res.error || 'Could not cancel that reward.'); return;
   }
   toast('Points returned! 💜');
 }
@@ -1542,11 +1655,33 @@ async function parentApprove(completionId, isExtra) {
     points = prompt('How many points is this worth?', '5');
     if (points === null) return;
   }
-  await api({ action: 'approve', parentId: session.personId, parentPin: session.pin, completionId, points });
+  var prevCompletions = state.completions.slice();
+  state.completions = prevCompletions.filter(function(c) { return c.id !== completionId; });
+  render();
+  var res;
+  try {
+    res = await api({ action: 'approve', parentId: session.personId, parentPin: session.pin, completionId, points });
+  } catch (e) {
+    state.completions = prevCompletions; render(); toast('Connection problem — try again.'); return;
+  }
+  if (res && res.ok === false) {
+    state.completions = prevCompletions; render(); toast(res.error || 'Could not approve.'); return;
+  }
 }
 
 async function parentReject(completionId) {
-  await api({ action: 'reject', parentId: session.personId, parentPin: session.pin, completionId });
+  var prevCompletions = state.completions.slice();
+  state.completions = prevCompletions.filter(function(c) { return c.id !== completionId; });
+  render();
+  var res;
+  try {
+    res = await api({ action: 'reject', parentId: session.personId, parentPin: session.pin, completionId });
+  } catch (e) {
+    state.completions = prevCompletions; render(); toast('Connection problem — try again.'); return;
+  }
+  if (res && res.ok === false) {
+    state.completions = prevCompletions; render(); toast(res.error || 'Could not reject.'); return;
+  }
 }
 
 async function parentDeleteTask(taskId) {
@@ -1651,14 +1786,30 @@ async function parentClearQuietHours() {
 }
 
 async function parentApproveRedemption(redemptionId) {
-  var result = await api({ action: 'approveRedemption', parentId: session.personId, parentPin: session.pin, redemptionId });
-  if (toastApiError(result)) return;
+  var prevRedemptions = (state.redemptions || []).slice();
+  state.redemptions = prevRedemptions.filter(function(r) { return r.id !== redemptionId; });
+  render();
+  var result;
+  try {
+    result = await api({ action: 'approveRedemption', parentId: session.personId, parentPin: session.pin, redemptionId });
+  } catch (e) {
+    state.redemptions = prevRedemptions; render(); toast('Connection problem — try again.'); return;
+  }
+  if (toastApiError(result)) { state.redemptions = prevRedemptions; render(); return; }
   toast('Reward approved! 🎉');
 }
 
 async function parentRejectRedemption(redemptionId) {
-  var result = await api({ action: 'rejectRedemption', parentId: session.personId, parentPin: session.pin, redemptionId });
-  if (toastApiError(result)) return;
+  var prevRedemptions = (state.redemptions || []).slice();
+  state.redemptions = prevRedemptions.filter(function(r) { return r.id !== redemptionId; });
+  render();
+  var result;
+  try {
+    result = await api({ action: 'rejectRedemption', parentId: session.personId, parentPin: session.pin, redemptionId });
+  } catch (e) {
+    state.redemptions = prevRedemptions; render(); toast('Connection problem — try again.'); return;
+  }
+  if (toastApiError(result)) { state.redemptions = prevRedemptions; render(); return; }
   toast('Reward request declined.');
 }
 
@@ -1706,6 +1857,8 @@ var ctx    = canvas.getContext('2d');
 var particles = [];
 function celebrate() {
   canvas.width = innerWidth; canvas.height = innerHeight;
+  var durSlow = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-slow')) || 380;
+  var celebLife = Math.round(durSlow * 60 / 1000 * 4);
   var colors = ['#6d3bf5', '#f0873a', '#12a06a', '#d93a4a', '#3b82f6', '#d356a8'];
   for (var i = 0; i < 90; i++) {
     particles.push({
@@ -1714,7 +1867,7 @@ function celebrate() {
       size: Math.random() * 8 + 4,
       color: colors[Math.floor(Math.random() * colors.length)],
       rot: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 0.3,
-      life: 90,
+      life: celebLife, maxLife: celebLife,
     });
   }
   if (particles.length <= 90) requestAnimationFrame(tickConfetti);
@@ -1726,7 +1879,7 @@ function tickConfetti() {
     ctx.save();
     ctx.translate(p.x, p.y); ctx.rotate(p.rot);
     ctx.fillStyle = p.color;
-    ctx.globalAlpha = Math.max(0, p.life / 90);
+    ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
     ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
     ctx.restore();
   });
