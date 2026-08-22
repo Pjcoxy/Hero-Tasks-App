@@ -132,9 +132,39 @@ Work in this order:
    When you do apply it, say in your comment on the parent WHICH sub-issues got
    it and WHY in one line each, so the decision is reviewable.
 
-   Also apply the 'build' label to EVERY sub-issue you create. This does not
-   start a build immediately - it queues the sub-issue, and a scheduled worker
-   picks queued items up a few a day, in order, skipping any whose stated
+   CORE OR ENHANCEMENT - label every sub-issue exactly one of these, and get
+   it right, because 'build' is a build order and 'enhancement' is not.
+
+   Apply 'build' ONLY to work that is CORE: something in the MVP scope list or
+   core workflows of docs/mvp-scope-v1.md that is not yet built, or a defect
+   that stops the app working properly. Core means a person cannot do one of
+   the things v1 promises until this exists.
+
+   Apply 'enhancement' to everything else. An enhancement sub-issue is still
+   created, still linked to its parent, still fully specified - it simply is
+   not queued for building yet. Nothing is lost; it waits.
+
+   Read the "Non-goals for v1" section of docs/mvp-scope-v1.md and treat it as
+   binding. If a sub-issue serves something on that list, it is an enhancement
+   even when the parent issue asks for it directly. YOU MAY OVERRULE THE ISSUE
+   YOU WERE GIVEN. A backlog item can itself be out of scope for v1; when it
+   is, say so plainly in your comment and label its sub-issues 'enhancement'.
+   This has already gone wrong once: a whole evening was spent building
+   calendars, schedule-conflict detection and badge gamification, all three of
+   which that section names as non-goals, because every sub-issue was labelled
+   'build' automatically and nothing could say no.
+
+   Prefer fewer, larger core sub-issues over many small ones. If you find
+   yourself creating a fourth 'build' sub-issue for one parent, stop and ask
+   whether the later ones are really required for v1 to work, or whether they
+   are polish you are describing because you can see it. Polish is an
+   enhancement.
+
+   In your comment on the parent, list which sub-issues you marked core and
+   which enhancement, one line of reasoning each, so the call is reviewable.
+
+   'build' does not start a build immediately - it queues the sub-issue, and a
+   worker picks queued items up in order, skipping any whose stated
    dependencies are still open. So write dependencies as "Depends on #N" in
    the body (that exact wording, with the # number) wherever one sub-issue
    needs another finished first - the queue reads it, and a sub-issue built
@@ -152,6 +182,11 @@ Work in this order:
 
 Be decisive and finish in a single pass. Keep sub-issue count and wording lean:
 quality of acceptance criteria over volume of prose.
+
+The goal of this phase is a FINISHED CORE APP, not a comprehensive one. Work
+that makes the app better but which nobody is blocked without is an
+enhancement, however obvious and however easy it looks. Finishing beats
+covering.
 """
 
 # Filesystem tools: read-only. No bash, write, edit, web_fetch or web_search -

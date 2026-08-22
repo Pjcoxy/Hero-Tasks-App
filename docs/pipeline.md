@@ -301,6 +301,39 @@ deleted. Work now moves the instant something unblocks it.
 | `auto-merge.yml` (nominally 5 min) | Copilot never signals "finished" — it opens a draft and later just renames the title from `[WIP] …`. There is no event meaning done |
 | ~~`approve-agent-workflows.yml`~~ | **Deleted.** It never worked — see below |
 
+### Elaboration is not a build order
+
+The Elaborator used to end with "apply the 'build' label to EVERY sub-issue you
+create". That made planning and committing the same act: anything it thought of,
+the queue built.
+
+Over one evening that produced calendar views, a schedule-conflict engine with
+alternate-slot suggestions, badge gamification and an audit log — while the live
+app still had no way to switch users. All three of those areas are named in the
+**Non-goals for v1** section of `docs/mvp-scope-v1.md`. Nothing was
+malfunctioning: every agent did what it was told, and what it was told had no
+word for "not yet".
+
+Two labels now, and the Elaborator must pick one per sub-issue:
+
+- **`build`** — core. Something in the MVP scope or core workflows that is not
+  yet built, or a defect stopping the app working. A person cannot do one of the
+  things v1 promises until it exists.
+- **`enhancement`** — everything else. Still created, still linked to its
+  parent, still fully specified. Simply not queued.
+
+The gate is mechanical, not advisory: the build queue only reads `build`. That
+matters, because the same lesson has now been learned three times on this
+project — the design system held only once CI enforced it, the merge gate held
+only once auto-merge checked the check run itself, and scope will hold only
+because the queue cannot see `enhancement`.
+
+The Elaborator is also explicitly allowed to **overrule the issue it was given**.
+A backlog item can itself be out of scope for v1; when it is, it says so and
+labels its sub-issues `enhancement`. It could not do that before, which is the
+root of what went wrong — the issues were queued by a human who had not checked
+them against the non-goals, and no agent had standing to object.
+
 ### Never count workflow runs to measure work
 
 The elaborate/architect queues each had a "runaway guard" that counted workflow
