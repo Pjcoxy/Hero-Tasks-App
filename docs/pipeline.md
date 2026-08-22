@@ -175,8 +175,7 @@ before it, so the conflict mostly cannot arise. That is what actually keeps the
 pipeline unattended; six at once does not.
 
 **Afterwards, restore the guards:** the daily guard in
-`build.yml` back to ~8, and delete `approve-agent-workflows.yml` (which also
-removes one of the two remaining timers). Leave the
+`build.yml` back to ~8. Leave the
 `elaborate.yml` / `architect.yml` ceilings alone — they are runaway protection,
 not a budget, and lowering them below the sweep rate stalls the queue for good
 (see below).
@@ -283,12 +282,12 @@ write), so its merges raise events like anyone else's, and every sweep on
 `deploy.yml`, `build-queue.yml`, `elaborate.yml` and `architect.yml` was
 deleted. Work now moves the instant something unblocks it.
 
-**Two timers remain, both irreducible:**
+**One timer remains, and it is irreducible:**
 
 | Workflow | Why it cannot be an event |
 |---|---|
 | `auto-merge.yml` (5 min) | Copilot never signals "finished" — it opens a draft and later just renames the title from `[WIP] …`. There is no event meaning done |
-| `approve-agent-workflows.yml` (5 min) | Temporary build-out only; there is no event for "a run is waiting for approval". Delete it when the backlog is built |
+| ~~`approve-agent-workflows.yml`~~ | **Deleted.** It never worked — see below |
 
 `deploy.yml` still keeps its own record of what is live — a git tag called
 **`deployed`** — and deploys everything changed *since that tag* rather than
@@ -342,3 +341,28 @@ Re-run either setup workflow after editing a persona; agents version in place.
 - **Everything** — disable the workflows, or remove the
   `HEROTASK_ANTHROPIC_KEY` secret (Anthropic agents stop immediately; Copilot
   builds are unaffected)
+
+## Why there is no auto-approve workflow
+
+GitHub holds workflow runs on Copilot's branches at `action_required` until a
+maintainer approves. A workflow was added to clear that automatically, calling
+`POST /actions/runs/{id}/approve`. **It never once succeeded**, and the failure
+was hidden behind a hand-written message blaming token permissions. Once the
+real error was printed it was obvious:
+
+```
+This run is not from a fork pull request or queued by the Actions bot
+```
+
+That endpoint only approves **fork** pull requests. Copilot's branches live in
+this repository, so no permission and no token could ever make it work.
+
+It does not matter, because the gate no longer blocks anything that counts:
+`ci.yml` runs via `pull_request_target`, which is not subject to it. The runs
+still held at `action_required` on `copilot/` branches are `build-queue` and the
+approver itself, neither of which needs to run there.
+
+So the workflow was deleted. The lesson worth keeping: **a hand-written error
+message that guesses at the cause is worse than no message at all.** It sent
+several rounds of debugging at the token when the endpoint was wrong from the
+start.
