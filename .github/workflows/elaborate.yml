@@ -5,8 +5,9 @@ name: Elaborate backlog issue
 #   1. Add the "elaborate" label to an issue.
 #   2. Actions tab -> "Elaborate backlog issue" -> Run workflow -> enter issue number.
 #
-# Guard: refuses to start more than 10 elaborator runs in any rolling 24h window,
-# so with the $2/session budget cap the worst case is ~$20/day.
+# Guard: refuses to start more than 20 elaborator runs in any rolling 24h window,
+# so with the $2/session budget cap the worst case is ~$40/day. Raised for the
+# initial build-out of the backlog; drop back to ~10 for ongoing feature work.
 
 on:
   workflow_dispatch:
@@ -32,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Daily run guard (max 10 per rolling 24h)
+      - name: Daily run guard (max 20 per rolling 24h)
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
@@ -40,8 +41,8 @@ jobs:
           SINCE=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
           COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/elaborate.yml/runs?created=%3E%3D${SINCE}" --jq '.total_count')
           echo "Elaborator runs in last 24h (including this one): ${COUNT}"
-          if [ "${COUNT}" -gt 10 ]; then
-            echo "Daily limit of 10 elaborator runs reached - skipping. Try again later or raise the limit in elaborate.yml."
+          if [ "${COUNT}" -gt 20 ]; then
+            echo "Daily limit of 20 elaborator runs reached - skipping. Try again later or raise the limit in elaborate.yml."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"

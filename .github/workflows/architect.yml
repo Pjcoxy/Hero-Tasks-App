@@ -3,7 +3,8 @@ name: Architect an issue
 # Trigger: add the "architect" label to an issue, or dispatch manually with an
 # issue number. Posts a technical approach as a comment; writes no code.
 #
-# Guard: at most 10 architect runs per rolling 24h.
+# Guard: at most 20 architect runs per rolling 24h. Raised for the initial
+# build-out; drop back to ~10 for ongoing feature work.
 
 on:
   workflow_dispatch:
@@ -29,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Daily run guard (max 10 per rolling 24h)
+      - name: Daily run guard (max 20 per rolling 24h)
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
@@ -37,8 +38,8 @@ jobs:
           SINCE=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
           COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/architect.yml/runs?created=%3E%3D${SINCE}" --jq '.total_count')
           echo "Architect runs in last 24h (including this one): ${COUNT}"
-          if [ "${COUNT}" -gt 10 ]; then
-            echo "Daily limit of 10 architect runs reached - skipping."
+          if [ "${COUNT}" -gt 20 ]; then
+            echo "Daily limit of 20 architect runs reached - skipping."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"

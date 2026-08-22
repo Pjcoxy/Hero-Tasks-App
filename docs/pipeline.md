@@ -96,10 +96,21 @@ way:
 The queue skips anything that is an epic, already assigned to Copilot, or has
 an open issue named in a `Depends on #N` line in its body.
 
-**Pace: 4 builds/day** (~200 credits/day, so about 5 days of runway from a full
-1,500 allowance). Change the `cron` in `build-queue.yml` to go faster or
-slower. To jump the queue for one issue: Actions → *Build an issue with
-Copilot* → Run workflow → issue number.
+**Pace: every 30 minutes, up to 3 at a time.** This is deliberately fast — the
+initial build-out of the backlog is a watched, one-off exercise, not steady
+state. Expect it to consume the Copilot allowance quickly; it hard-stops rather
+than billing.
+
+**The dependency check is not a pacing device** and stays whatever the speed:
+it stops Copilot writing against code that does not exist yet.
+
+**When the backlog is built, slow it down.** In `build-queue.yml` set the cron
+to `0 */6 * * *` and `MAX_PER_RUN=1`, and drop the daily guards in
+`elaborate.yml` / `architect.yml` back to ~10. Ongoing feature work does not
+want a firehose.
+
+To jump the queue for one issue: Actions → *Build an issue with Copilot* → Run
+workflow → issue number.
 
 The Elaborator decides the architect question because it has just read the
 codebase and the issue, so it is better placed than you are to know whether a
@@ -122,9 +133,12 @@ rule is: build the sub-issues, not the parent.
 
 | Guard | Limit | Why |
 |---|---|---|
-| Elaborator runs | 10 / rolling 24h | Anthropic spend |
-| Architect runs | 10 / rolling 24h | Anthropic spend |
-| Copilot builds | 4 / day via the queue, 8 / rolling 24h hard cap | Copilot credits are finite and monthly |
+| Elaborator runs | 20 / rolling 24h | Anthropic spend |
+| Architect runs | 20 / rolling 24h | Anthropic spend |
+| Copilot builds | 3 per 30 min via the queue, 30 / rolling 24h hard cap | Copilot credits are finite and monthly |
+
+> Those numbers are raised for the initial build-out. See *The build queue*
+> below for what to set them back to afterwards.
 | Per session | $2.00 hard cap | A runaway session pauses rather than spends |
 | Epic guard | build refuses issues with sub-issues | Prevents unreviewable PRs |
 

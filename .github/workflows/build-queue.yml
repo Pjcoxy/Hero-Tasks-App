@@ -13,12 +13,17 @@ name: Build queue
 # So 'build' means "queued", and this picks one at a time, in order, skipping
 # anything whose dependencies are still open.
 #
-# Pace: every 6 hours = 4 builds/day = ~200 Copilot credits/day. Change the
-# cron below to go faster or slower.
+# Pace: every 30 minutes, up to 3 builds per run. This is deliberately fast for
+# the initial build-out of the backlog, which Peter is watching. The dependency
+# check below is NOT a pacing device - it prevents Copilot writing against code
+# that does not exist yet - so it stays regardless of speed.
+#
+# To slow down for ongoing feature work later: change the cron to "0 */6 * * *"
+# and MAX_PER_RUN to 1.
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -46,11 +51,15 @@ jobs:
           CANDIDATES=$(gh api "repos/${GITHUB_REPOSITORY}/issues?labels=build&state=open&sort=created&direction=asc&per_page=100" \
             --jq '[.[] | select(has("pull_request") | not) | {number, body: (.body // ""), assignees: [.assignees[].login]}]')
 
+          MAX_PER_RUN=3
+          READY=""
+          PICKED=0
+
           COUNT=$(echo "$CANDIDATES" | jq 'length')
           echo "Issues labelled 'build': ${COUNT}"
           if [ "$COUNT" -eq 0 ]; then
             echo "Queue empty - nothing to do."
-            echo "number=" >> "$GITHUB_OUTPUT"
+            echo "numbers=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -88,18 +97,24 @@ jobs:
             fi
 
             echo "    ready to build"
-            echo "number=${NUM}" >> "$GITHUB_OUTPUT"
-            exit 0
+            READY="${READY} ${NUM}"
+            PICKED=$((PICKED + 1))
+            if [ "$PICKED" -ge "$MAX_PER_RUN" ]; then break; fi
           done
 
-          echo "Nothing ready this round (all queued items are assigned, epics, or blocked)."
-          echo "number=" >> "$GITHUB_OUTPUT"
+          READY=$(echo "$READY" | xargs || true)
+          if [ -z "$READY" ]; then
+            echo "Nothing ready this round (all queued items are assigned, epics, or blocked)."
+          else
+            echo "Building:${READY}"
+          fi
+          echo "numbers=${READY}" >> "$GITHUB_OUTPUT"
 
       - name: Assign the Copilot coding agent
-        if: steps.pick.outputs.number != ''
+        if: steps.pick.outputs.numbers != ''
         env:
           GH_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
-          NUM: ${{ steps.pick.outputs.number }}
+          NUMBERS: ${{ steps.pick.outputs.numbers }}
         run: |
           set -euo pipefail
           OWNER="${GITHUB_REPOSITORY%/*}"
@@ -120,17 +135,19 @@ jobs:
             exit 1
           fi
 
-          ISSUE_ID=$(gh api graphql -f query='
-            query($owner:String!, $repo:String!, $num:Int!) {
-              repository(owner:$owner, name:$repo) { issue(number:$num) { id } }
-            }' -f owner="$OWNER" -f repo="$REPO" -F num="$NUM" \
-            --jq '.data.repository.issue.id')
+          for NUM in $NUMBERS; do
+            ISSUE_ID=$(gh api graphql -f query='
+              query($owner:String!, $repo:String!, $num:Int!) {
+                repository(owner:$owner, name:$repo) { issue(number:$num) { id } }
+              }' -f owner="$OWNER" -f repo="$REPO" -F num="$NUM" \
+              --jq '.data.repository.issue.id')
 
-          gh api graphql -f query='
-            mutation($assignable:ID!, $actor:ID!) {
-              replaceActorsForAssignable(input:{assignableId:$assignable, actorIds:[$actor]}) {
-                assignable { ... on Issue { number } }
-              }
-            }' -f assignable="$ISSUE_ID" -f actor="$BOT_ID"
+            gh api graphql -f query='
+              mutation($assignable:ID!, $actor:ID!) {
+                replaceActorsForAssignable(input:{assignableId:$assignable, actorIds:[$actor]}) {
+                  assignable { ... on Issue { number } }
+                }
+              }' -f assignable="$ISSUE_ID" -f actor="$BOT_ID"
 
-          echo "Copilot assigned to #${NUM}"
+            echo "Copilot assigned to #${NUM}"
+          done
