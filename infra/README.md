@@ -46,16 +46,34 @@ az deployment group create \
   --parameters @infra/parameters.dev.json
 ```
 
-To seed the LLM API key at deploy time instead of adding it to Key Vault
-manually afterward:
+### Seeding the secrets (required for voice and push to work)
+
+Two app settings resolve from Key Vault, and **neither works until the secret
+exists**: `LLM_API_KEY` (voice features, #12/#15) and `VAPID_PRIVATE_KEY` (web
+push notifications). An empty parameter means the secret is never created, and
+the Function App shows a red cross against the setting in the Portal.
+
+Generate a VAPID keypair first — it is a fresh keypair, not an account
+credential, so you can make it yourself:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Then deploy with all three values:
 
 ```bash
 az deployment group create \
   --resource-group herotasks-dev-rg \
   --template-file infra/main.bicep \
   --parameters @infra/parameters.dev.json \
-  --parameters llmApiKey=<your-llm-api-key>
+  --parameters llmApiKey=<your-llm-api-key> \
+    vapidPrivateKey=<vapid-private-key> \
+    vapidPublicKey=<vapid-public-key>
 ```
+
+Never commit these values. They are passed on the command line and stored in
+Key Vault; the repository only ever refers to them by secret URI.
 
 Repeat with `parameters.prod.json` and a separate resource group for prod.
 
@@ -83,7 +101,7 @@ ready for it.
 | `llmApiKey` | string (secure) | `''` | Voice-intent LLM API key; leave empty to skip seeding |
 | `vapidPrivateKey` | string (secure) | `''` | Web-push VAPID private key; leave empty to seed it later in Key Vault |
 | `vapidPublicKey` | string | `''` | Web-push VAPID public key exposed to the frontend via the API |
-| `enableKeyVaultPublicAccess` | bool | `false` | Leave `false` unless you specifically need it |
+| `enableKeyVaultPublicAccess` | bool | `false` | **`true` in `parameters.dev.json`** — see below |
 | `cosmosSharedThroughput` | int | `400` | RU/s shared across all Cosmos containers (well within the 1000 RU/s free-tier allowance) |
 
 ## Cosmos DB data model (v1)
@@ -124,3 +142,25 @@ Role assignment names are deterministic GUIDs derived from resource IDs — rede
 2. Write the actual Function App code (HTTP-triggered endpoints for chores/rewards/reminders/voice — this is the `developer` agent's job, issue-by-issue from here).
 3. Wire up GitHub Actions deployment once Azure credentials are set up on your end.
 4. Promote to `prod` with `parameters.prod.json` after `dev` is validated.
+
+## Why the dev Key Vault allows public network access
+
+`parameters.dev.json` sets `enableKeyVaultPublicAccess: true`. The default of
+`false` is the safer-looking option and it does not work here.
+
+With it `false`, the vault deploys with `publicNetworkAccess: 'Disabled'`, which
+means it is reachable only over a private endpoint. The Function App runs on a
+Consumption plan with no VNet integration, so it has no private route to the
+vault and the Key Vault references can never resolve. That is an architectural
+mismatch, not a permissions problem — no amount of RBAC fixes it.
+
+The three real options were:
+
+| Option | Verdict |
+|---|---|
+| Public network access on the vault | **Chosen.** "Public" means reachable, not unauthenticated: Entra auth plus the RBAC role assignment in `keyvault.bicep` still apply |
+| Upgrade the hosting plan for VNet integration + private endpoint | Correct for production, real monthly cost for a family app |
+| Drop Key Vault, use plain app settings | Fewer moving parts, but the keys then sit in Function App configuration |
+
+For prod, `parameters.prod.json` still defaults to `false` — revisit it there
+alongside a hosting plan that supports private endpoints.

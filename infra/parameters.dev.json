@@ -6,7 +6,7 @@
       "value": "dev"
     },
     "enableKeyVaultPublicAccess": {
-      "value": false
+      "value": true
     }
   }
 }
