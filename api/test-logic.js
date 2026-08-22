@@ -285,6 +285,215 @@ async function main() {
   assert.strictEqual(dailyChore.dueBy, null, 'daily task with no dueBy set should come back null, not undefined');
   console.log('✓ dueBy round-trips correctly for one-off tasks');
 
+  // ---- Planning items + calendar tests ----
+  const planningItems = mockContainer('planningItems');
+  let planningResult = await ROUTES.addPlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    type: 'event',
+    title: 'Family picnic',
+    notes: 'Pack snacks',
+    startAt: '2026-08-24T10:00:00.000Z',
+    endAt: '2026-08-24T12:00:00.000Z',
+    allDay: false,
+    personId: null,
+    prepLists: [{ personId: 'toby', items: [{ text: 'Bring hat', done: false }] }],
+    adultActions: [{ text: 'Drive to park', done: false }],
+    externalRef: 'ext-1',
+  });
+  assert.strictEqual(planningResult.ok, true, 'addPlanningItem should succeed for valid event');
+  assert.strictEqual(planningResult.item.source, 'manual', 'planning items default to manual source');
+  assert.strictEqual(planningResult.item.active, true, 'planning items start active');
+  assert.strictEqual(planningResult.item.externalRef, 'ext-1');
+  assert.ok(planningResult.item.id, 'planning item id should be set');
+
+  const planningCountBeforeDuplicate = (await planningItems.items.query({}).fetchAll()).resources.length;
+  const duplicateResult = await ROUTES.addPlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    type: 'event',
+    title: 'Duplicate should no-op',
+    startAt: '2026-08-24T10:00:00.000Z',
+    personId: null,
+    externalRef: 'ext-1',
+  });
+  const planningCountAfterDuplicate = (await planningItems.items.query({}).fetchAll()).resources.length;
+  assert.strictEqual(duplicateResult.ok, true, 'duplicate externalRef should return success');
+  assert.strictEqual(duplicateResult.item.id, planningResult.item.id, 'duplicate externalRef returns the existing item');
+  assert.strictEqual(
+    planningCountAfterDuplicate,
+    planningCountBeforeDuplicate,
+    'duplicate externalRef should not create a second planning item'
+  );
+  console.log('✓ planning items enforce externalRef idempotency for active documents');
+
+  const reminderWithEventFields = await ROUTES.addPlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    type: 'reminder',
+    title: 'No event-only fields',
+    startAt: '2026-08-24T08:00:00.000Z',
+    personId: 'toby',
+    endAt: '2026-08-24T09:00:00.000Z',
+  });
+  assert.deepStrictEqual(reminderWithEventFields, { ok: false, error: 'reminders cannot include endAt' });
+
+  planningResult = await ROUTES.addPlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    type: 'reminder',
+    title: 'Pack school bag',
+    startAt: '2026-08-25T07:30:00.000Z',
+    personId: 'toby',
+    allDay: false,
+    notes: 'Before breakfast',
+  });
+  assert.strictEqual(planningResult.ok, true, 'addPlanningItem should allow reminders without event-only fields');
+  assert.strictEqual(planningResult.item.endAt, null, 'reminders do not carry endAt');
+  assert.deepStrictEqual(planningResult.item.prepLists, [], 'reminders do not carry prep lists');
+  assert.deepStrictEqual(planningResult.item.adultActions, [], 'reminders do not carry adult actions');
+
+  const updateNotFound = await ROUTES.updatePlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    planningItemId: 'missing-planning-item',
+    title: 'Anything',
+  });
+  assert.deepStrictEqual(updateNotFound, { ok: false, error: 'Planning item not found' });
+  console.log('✓ planning item validation and missing-item update behavior match requirements');
+
+  const updatedFamilyEvent = await ROUTES.updatePlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    planningItemId: duplicateResult.item.id,
+    title: 'Family picnic (updated)',
+    notes: 'Bring sunscreen',
+    allDay: true,
+    prepLists: [{ personId: 'ollie', items: [{ text: 'Bring water bottle', done: false }] }],
+    adultActions: [{ text: 'Pack first aid kit', done: false }],
+  });
+  assert.strictEqual(updatedFamilyEvent.ok, true);
+  assert.strictEqual(updatedFamilyEvent.item.title, 'Family picnic (updated)');
+  assert.strictEqual(updatedFamilyEvent.item.allDay, true);
+
+  const toDeletePlanning = await ROUTES.addPlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    type: 'event',
+    title: 'Delete me',
+    startAt: '2026-08-24T14:00:00.000Z',
+    personId: null,
+  });
+  const deleteResult = await ROUTES.deletePlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    planningItemId: toDeletePlanning.item.id,
+  });
+  assert.deepStrictEqual(deleteResult, { ok: true });
+  const deletedPlanningDoc = (await planningItems.item(toDeletePlanning.item.id).read()).resource;
+  assert.strictEqual(deletedPlanningDoc.active, false, 'deletePlanningItem should soft-delete');
+  const deleteMissing = await ROUTES.deletePlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    planningItemId: 'missing-again',
+  });
+  assert.deepStrictEqual(deleteMissing, { ok: false, error: 'Planning item not found' });
+
+  await chores.items.create({
+    id: 'calendar-oneoff',
+    householdId: HOUSEHOLD_ID,
+    kidId: 'toby',
+    title: 'One-off calendar chore',
+    points: 4,
+    cycle: 'oneoff',
+    dueBy: '2026-08-25T09:00:00.000Z',
+    createdAt: '2026-08-20',
+    active: true,
+  });
+  await chores.items.create({
+    id: 'calendar-daily',
+    householdId: HOUSEHOLD_ID,
+    kidId: 'toby',
+    title: 'Daily calendar chore',
+    points: 2,
+    cycle: 'daily',
+    createdAt: '2026-08-20',
+    active: true,
+  });
+  await chores.items.create({
+    id: 'calendar-weekly',
+    householdId: HOUSEHOLD_ID,
+    kidId: 'toby',
+    title: 'Weekly calendar chore',
+    points: 3,
+    cycle: 'weekly',
+    createdAt: '2026-08-18',
+    active: true,
+  });
+  await chores.items.create({
+    id: 'calendar-ollie',
+    householdId: HOUSEHOLD_ID,
+    kidId: 'ollie',
+    title: 'Other kid chore',
+    points: 5,
+    cycle: 'daily',
+    createdAt: '2026-08-20',
+    active: true,
+  });
+
+  const tobyCalendar = await ROUTES.calendar({
+    personId: 'toby',
+    pin: '1234',
+    start: '2026-08-24T00:00:00.000Z',
+    end: '2026-08-26T23:59:59.000Z',
+  });
+  assert.strictEqual(tobyCalendar.ok, true);
+  const tobyKinds = new Set(tobyCalendar.items.map((item) => item.kind));
+  assert.ok(tobyKinds.has('event') && tobyKinds.has('reminder') && tobyKinds.has('chore'));
+  assert.ok(
+    tobyCalendar.items.every((item) => item.kind !== 'event' || !Object.prototype.hasOwnProperty.call(item, 'adultActions')),
+    'kid calendar responses should strip adultActions from planning items'
+  );
+  assert.ok(
+    tobyCalendar.items.some((item) => item.kind === 'event' && item.personId === null),
+    'whole-family planning items should be visible to kid callers'
+  );
+  const tobyChoreOccurrences = tobyCalendar.items.filter((item) => item.kind === 'chore');
+  assert.strictEqual(
+    tobyChoreOccurrences.filter((item) => item.taskId === 'calendar-daily').length,
+    3,
+    'daily chores expand to each day in range'
+  );
+  assert.strictEqual(
+    tobyChoreOccurrences.filter((item) => item.taskId === 'calendar-weekly').length,
+    1,
+    'weekly chores expand to matching weekday in range'
+  );
+  assert.strictEqual(
+    tobyChoreOccurrences.filter((item) => item.taskId === 'calendar-oneoff').length,
+    1,
+    'one-off chores expand once when dueBy is in range'
+  );
+  assert.strictEqual(
+    tobyChoreOccurrences.filter((item) => item.taskId === 'calendar-ollie').length,
+    0,
+    'kid calendar should not include another kid\'s chores'
+  );
+
+  const parentCalendar = await ROUTES.calendar({
+    parentId: 'peter',
+    parentPin: '1234',
+    personId: 'toby',
+    start: '2026-08-24T00:00:00.000Z',
+    end: '2026-08-24T23:59:59.000Z',
+  });
+  assert.strictEqual(parentCalendar.ok, true);
+  assert.ok(
+    parentCalendar.items.some((item) => item.kind === 'event' && Array.isArray(item.adultActions)),
+    'parent calendar responses include adultActions'
+  );
+  console.log('✓ calendar merges planning items with chore occurrences and enforces kid/parent visibility rules');
+
   // ---- Push notification flow tests ----
   await mockContainer('pushSubscriptions').items.create({
     id: 'push-parent-1',
@@ -997,7 +1206,10 @@ async function main() {
   console.log('✓ completeTask rejects acting as another kid and writes nothing');
 
   // ---- saveVoiceReminder tests ----
-  const planningItems = mockContainer('planningItems');
+  const voicePlanningItems = mockContainer('planningItems');
+  const beforeBlank = (
+    await voicePlanningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()
+  ).resources;
 
   // Blank title should be rejected
   const blankTitleResult = await ROUTES.saveVoiceReminder({
@@ -1009,8 +1221,10 @@ async function main() {
     transcript: '',
   });
   assert.deepStrictEqual(blankTitleResult, { ok: false, error: 'title is required' });
-  const afterBlank = (await planningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
-  assert.strictEqual(afterBlank.length, 0, 'blank title should not write a planningItem');
+  const afterBlank = (
+    await voicePlanningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()
+  ).resources;
+  assert.strictEqual(afterBlank.length, beforeBlank.length, 'blank title should not write a planningItem');
   console.log('✓ saveVoiceReminder rejects blank title without writing');
 
   // Valid save — kid saves a reminder for themselves
@@ -1023,9 +1237,12 @@ async function main() {
     transcript: 'remind me to take out the bins tomorrow morning',
   });
   assert.strictEqual(stateAfterSave.ok, true, 'saveVoiceReminder should return getState() with ok: true');
-  const savedItems = (await planningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
-  assert.strictEqual(savedItems.length, 1, 'one planningItem should be created');
-  const saved = savedItems[0];
+  const savedItems = (
+    await voicePlanningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()
+  ).resources;
+  assert.strictEqual(savedItems.length, beforeBlank.length + 1, 'one planningItem should be created');
+  const saved = savedItems.find((item) => item.source === 'voice' && item.title === 'Take out the bins');
+  assert.ok(saved, 'saved voice reminder should be present');
   assert.strictEqual(saved.kidId, 'toby', 'kidId should match');
   assert.strictEqual(saved.title, 'Take out the bins', 'title should match');
   assert.strictEqual(saved.source, 'voice', 'source should be voice');
@@ -1041,8 +1258,10 @@ async function main() {
     () => ROUTES.saveVoiceReminder({ personId: 'ollie', pin: '1234', kidId: 'toby', title: 'Sneaky reminder' }),
     (err) => err && err.status === 401
   );
-  const afterCrossKid = (await planningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
-  assert.strictEqual(afterCrossKid.length, 1, 'cross-kid save should be rejected without writing');
+  const afterCrossKid = (
+    await voicePlanningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()
+  ).resources;
+  assert.strictEqual(afterCrossKid.length, beforeBlank.length + 1, 'cross-kid save should be rejected without writing');
   console.log('✓ saveVoiceReminder rejects cross-kid save');
 
   console.log('\nALL LOGIC TESTS PASSED');
