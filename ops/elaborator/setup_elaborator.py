@@ -162,7 +162,11 @@ def main():
             "backlog issue into small sub-issues with checkable acceptance criteria. "
             "Planning only - never writes code."
         ),
-        model="claude-opus-5",
+        # Sonnet 5 at low effort: elaboration is a well-specified, structured
+        # task and the cost is dominated by input tokens (~165k/run reading the
+        # codebase). Roughly a third of Opus 5's cost per run. Bump the model or
+        # effort here if the audits start missing things.
+        model={"id": "claude-sonnet-5", "effort": "low"},
         system=SYSTEM_PROMPT,
         tools=TOOLS,
         mcp_servers=MCP_SERVERS,

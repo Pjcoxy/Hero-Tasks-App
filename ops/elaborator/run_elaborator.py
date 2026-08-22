@@ -7,7 +7,7 @@ Creates a fresh session against the stored agent (see agent_config.json,
 produced by setup_elaborator.py), with:
   - the Hero-Tasks-App repository mounted read-only in the sandbox
   - the GitHub MCP vault attached (so it can read/comment/create issues)
-  - a hard $5.00 budget cap - the session pauses if it hits the cap
+  - a hard $2.00 budget cap - the session pauses if it hits the cap
 
 Required environment variables:
   ANTHROPIC_API_KEY
@@ -22,7 +22,7 @@ import anthropic
 
 REPO_URL = "https://github.com/Pjcoxy/Hero-Tasks-App"
 MOUNT_PATH = "/workspace/hero-tasks-app"
-BUDGET_CENTS = "500"  # $5.00 hard cap per session
+BUDGET_CENTS = "200"  # $2.00 hard cap per session (a typical run is ~$0.35)
 MAX_RUNTIME_SECONDS = 25 * 60
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_config.json")
 
@@ -114,7 +114,7 @@ def main():
     print(f"\nOutcome: {outcome}; session status: {final.status}; list cost: {cost}")
     if outcome == "budget_reached":
         sys.exit(
-            "Session paused at its $5 budget cap before finishing. "
+            "Session paused at its budget cap before finishing. "
             "Raise the budget in the Console session view to let it finish, or review what it produced."
         )
     if outcome in ("timeout", "unknown", "requires_action"):
