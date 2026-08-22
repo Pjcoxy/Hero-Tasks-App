@@ -29,6 +29,9 @@ param vapidPrivateKeySecretUri string
 @description('Base64URL-encoded VAPID public key exposed to browsers.')
 param vapidPublicKey string = ''
 
+@description('Allowed CORS origin for browser calls to this Function App (the deployed Static Web App origin).')
+param staticWebAppOrigin string
+
 var functionAppName = 'herotasks-func-${env}'
 var hostingPlanName = 'herotasks-plan-${env}'
 
@@ -60,10 +63,9 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       cors: {
-        // The frontend calls this Function App directly by its own hostname (no SWA
-        // linkedBackends — that requires the Standard SWA tier, and Free is the goal).
-        // Tighten this to the real Static Web App hostname once known.
-        allowedOrigins: ['*']
+        allowedOrigins: [
+          staticWebAppOrigin
+        ]
       }
       appSettings: [
         {
