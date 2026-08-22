@@ -176,8 +176,38 @@ disabled, so it hard-stops rather than billing you.
 - **Copilot's review** (`request-review.yml`) is advisory. It does not block
   anything — read it after the fact, or turn on branch protection if you want
   it to gate.
-- **Deployment** (`deploy.yml`) runs on push to `main` and deploys only what
-  changed — API to `herotasks-func-dev`, frontend to `herotasks-swa-dev`.
+- **Deployment** (`deploy.yml`) deploys only what changed — API to
+  `herotasks-func-dev`, frontend to `herotasks-swa-dev`. It runs on push to
+  `main`, **and sweeps every 5 minutes** for anything merged that the push
+  event missed. See below for why that sweep is not optional.
+
+### Why deployment needs a sweep as well as a push trigger
+
+When `auto-merge.yml` merges a Copilot PR it acts as `github-actions[bot]`,
+using the built-in `GITHUB_TOKEN`. GitHub deliberately raises **no workflow
+events** for anything that token does — otherwise a workflow could trigger
+itself in a loop. So an auto-merged PR lands on `main` and **no deploy run
+fires at all**.
+
+This bit us for real: #48 and #49 (the Rewards UI) merged cleanly, sat on
+`main`, and never reached Azure. The dashboard looked correct on GitHub and the
+live app had no Rewards section.
+
+So `deploy.yml` keeps its own record of what is live — a git tag called
+**`deployed`** — and each run deploys everything changed *since that tag*,
+moving it forward only after a successful deploy. That means:
+
+- a failed deploy leaves the tag behind and the next sweep retries it;
+- a merge that fired no push event is picked up within 5 minutes;
+- the diff is against what is actually on Azure, not against `HEAD^`, so
+  nothing gets skipped when several commits land together.
+
+Worst-case lag between an auto-merge and the live app is about 10 minutes
+(5 for the merge poll, 5 for the deploy sweep). If you ever want it instant,
+give `HEROTASK_GITHUB_TOKEN` **Contents: Read and write** and **Pull requests:
+Read and write** and use it in `auto-merge.yml` — merges by a real token do
+raise events. The sweep exists so that is a nice-to-have rather than a
+requirement.
 
 ### Deployment secrets (add these once)
 
