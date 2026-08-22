@@ -29,6 +29,11 @@ check(/let parentTab = 'approvals';/.test(html), 'parent tab state defaults to a
 check(/function switchParentTab\(tab\)/.test(html), 'parent tab switcher exists');
 check(/id="p-approvals-badge"/.test(html), 'approvals badge exists');
 check(/parentEditTask\(\\'/.test(html), 'task rows wire an Edit button');
+const kidTabButtons = html.match(/id="tabbtn-(home|missions|rewards|leaderboard|calendar)"/g) || [];
+check(kidTabButtons.length === 5, `kid nav exposes 5 tab buttons (${kidTabButtons.length} found)`);
+check(/id="tab-calendar"/.test(html), 'calendar tab panel exists');
+check(/\['home', 'missions', 'rewards', 'leaderboard', 'calendar'\]/.test(html), 'kid tab switcher includes calendar');
+check(/function switchCalendarView\(view\)/.test(html), 'calendar view switcher exists');
 
 // Syntax-check each inline script body.
 const bodies = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
