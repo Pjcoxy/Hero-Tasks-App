@@ -1515,6 +1515,7 @@ function renderParent(person) {
       }).join('') + '</div>';
 
   var rewards = (state.rewards || []).filter(function(r) { return r.active !== false; });
+  document.getElementById('p-rewards').innerHTML = rewards.length === 0
     ? buildEmptyState('🎁', 'No rewards yet.', 'Add a reward above so kids have something to save for.')
     : rewards.map(function(r) {
         return '<div class="card parent-card">'
