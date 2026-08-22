@@ -371,6 +371,96 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .board-row .b-name { font-weight: var(--weight-medium); flex: 1; }
 .board-row .b-pts  { font-weight: var(--weight-bold); color: var(--brand); }
 
+/* ─── Calendar ──────────────────────────────────────────────────────────── */
+.calendar-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.calendar-chip {
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
+  border-radius: var(--radius-full);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  transition: transform var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.calendar-chip:active { transform: scale(0.97); }
+.calendar-chip.active {
+  background: var(--brand);
+  color: var(--on-brand);
+}
+.calendar-range {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  margin-bottom: var(--space-3);
+}
+.calendar-grid {
+  display: grid;
+  gap: var(--space-3);
+}
+.calendar-grid.week,
+.calendar-grid.month {
+  grid-template-columns: 1fr 1fr;
+}
+.calendar-day {
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-3);
+  min-height: 7.5rem;
+}
+.calendar-day.today {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+.calendar-day.outside {
+  opacity: 0.6;
+}
+.calendar-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.calendar-day-name {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+.calendar-day-num {
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
+}
+.calendar-events {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.calendar-event {
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+.calendar-event.approved {
+  background: var(--success-wash);
+  color: var(--success);
+}
+.calendar-event.pending {
+  background: var(--warning-wash);
+  color: var(--warning);
+}
+.calendar-event.rejected {
+  background: var(--danger-wash);
+  color: var(--danger);
+}
+
 /* ─── Buttons ─────────────────────────────────────────────────────────── */
 .btn {
   background: var(--brand); color: var(--on-brand);
@@ -762,6 +852,20 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
       </div>
     </div>
 
+    <!-- CALENDAR TAB -->
+    <div id="tab-calendar" class="tab-panel hidden">
+      <div class="tab-content">
+        <h2 class="section-title">📅 Calendar</h2>
+        <div class="calendar-controls" role="tablist" aria-label="Calendar view">
+          <button id="calendar-view-day" class="calendar-chip" onclick="switchCalendarView('day')">Day</button>
+          <button id="calendar-view-week" class="calendar-chip active" onclick="switchCalendarView('week')">Week</button>
+          <button id="calendar-view-month" class="calendar-chip" onclick="switchCalendarView('month')">Month</button>
+        </div>
+        <div id="k-calendar-range" class="calendar-range"></div>
+        <div id="k-calendar"></div>
+      </div>
+    </div>
+
   </main>
 
   <nav class="tab-bar" role="navigation" aria-label="Kid navigation">
@@ -776,6 +880,9 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
     </button>
     <button class="tab-btn"        id="tabbtn-leaderboard" onclick="switchTab('leaderboard')" aria-label="Leaderboard">
       <span class="tab-icon">🏆</span><span>Leaders</span>
+    </button>
+    <button class="tab-btn"        id="tabbtn-calendar" onclick="switchTab('calendar')" aria-label="Calendar">
+      <span class="tab-icon">📅</span><span>Calendar</span>
     </button>
   </nav>
 
@@ -1026,6 +1133,7 @@ let session = JSON.parse(localStorage.getItem('hero-session') || 'null');
 let pinTarget = null;
 let pushSetupPersonId = null;
 let kidTab = 'home';
+let kidCalendarView = 'week';
 let parentTab = 'approvals';
 
 async function api(payload) {
@@ -1161,7 +1269,7 @@ function show(id) {
 function switchTab(tab) {
   if (kidTab === tab) return;
   kidTab = tab;
-  ['home', 'missions', 'rewards', 'leaderboard'].forEach(function(t) {
+  ['home', 'missions', 'rewards', 'leaderboard', 'calendar'].forEach(function(t) {
     var panel = document.getElementById('tab-' + t);
     var btn   = document.getElementById('tabbtn-' + t);
     var active = t === tab;
@@ -1172,6 +1280,10 @@ function switchTab(tab) {
     }
     btn.classList.toggle('active', active);
   });
+  if (tab === 'calendar' && state && session && session.role === 'kid') {
+    var kid = state.people.find(function(person) { return person.id === session.personId && person.role === 'kid'; });
+    if (kid) renderKidCalendar(kid);
+  }
 }
 
 function syncParentTab(animate) {
@@ -1258,6 +1370,7 @@ function renderKid(kid) {
   renderRewardShop(kid, balance);
   renderRedemptions(kid);
   renderRecentActivity(kid);
+  renderKidCalendar(kid);
 
   var ranked = kidsOnly()
     .map(function(k) { return Object.assign({}, k, { pts: (state.stats[k.id] || {}).points || 0 }); })
@@ -1271,6 +1384,110 @@ function renderKid(kid) {
       + '<span class="b-pts">' + k.pts + ' pts</span>'
       + '</div>';
   }).join('');
+}
+
+function ymdOf(date) {
+  return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+}
+
+function addDays(date, delta) {
+  var d = new Date(date);
+  d.setDate(d.getDate() + delta);
+  return d;
+}
+
+function startOfWeek(date) {
+  var d = new Date(date);
+  var day = d.getDay();
+  var offset = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + offset);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function statusIcon(status) {
+  if (status === 'approved') return '✅';
+  if (status === 'pending') return '⏳';
+  if (status === 'rejected') return '❌';
+  return '•';
+}
+
+function buildCalendarDay(date, eventsByDate, outsideMonth) {
+  var key = ymdOf(date);
+  var events = eventsByDate[key] || [];
+  var isToday = key === todayStr();
+  var dayName = date.toLocaleDateString([], { weekday: 'short' });
+  var dayNum = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return '<div class="calendar-day' + (isToday ? ' today' : '') + (outsideMonth ? ' outside' : '') + '">'
+    + '<div class="calendar-day-head">'
+    + '<span class="calendar-day-name">' + dayName + '</span>'
+    + '<span class="calendar-day-num">' + dayNum + '</span>'
+    + '</div>'
+    + (events.length === 0
+      ? '<div class="empty-line2">No activity yet.</div>'
+      : '<div class="calendar-events">' + events.map(function(event) {
+          return '<div class="calendar-event ' + esc(event.status) + '">' + statusIcon(event.status) + ' ' + esc(event.title || 'Mission') + '</div>';
+        }).join('') + '</div>')
+    + '</div>';
+}
+
+function switchCalendarView(view) {
+  if (kidCalendarView === view) return;
+  kidCalendarView = view;
+  ['day', 'week', 'month'].forEach(function(name) {
+    document.getElementById('calendar-view-' + name).classList.toggle('active', name === view);
+  });
+  if (state && session && session.role === 'kid') {
+    var kid = state.people.find(function(person) { return person.id === session.personId && person.role === 'kid'; });
+    if (kid) renderKidCalendar(kid);
+  }
+}
+
+function renderKidCalendar(kid) {
+  var container = document.getElementById('k-calendar');
+  var range = document.getElementById('k-calendar-range');
+  if (!container || !range) return;
+
+  var eventsByDate = {};
+  (state.completions || []).forEach(function(completion) {
+    if (completion.kidId !== kid.id) return;
+    if (!completion.date || completion.status === 'deleted') return;
+    if (!eventsByDate[completion.date]) eventsByDate[completion.date] = [];
+    eventsByDate[completion.date].push({
+      title: completion.title,
+      status: completion.status || 'pending',
+    });
+  });
+
+  var now = new Date();
+  now.setHours(0, 0, 0, 0);
+  var blocks = [];
+  var gridClass = kidCalendarView;
+
+  if (kidCalendarView === 'day') {
+    range.textContent = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    blocks.push(buildCalendarDay(now, eventsByDate, false));
+  } else if (kidCalendarView === 'week') {
+    var weekStart = startOfWeek(now);
+    var weekEnd = addDays(weekStart, 6);
+    range.textContent = weekStart.toLocaleDateString([], { month: 'short', day: 'numeric' })
+      + ' – '
+      + weekEnd.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    for (var i = 0; i < 7; i++) blocks.push(buildCalendarDay(addDays(weekStart, i), eventsByDate, false));
+  } else {
+    var monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    var monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    var gridStart = startOfWeek(monthStart);
+    var gridEnd = startOfWeek(addDays(monthEnd, 1));
+    gridEnd = addDays(gridEnd, 6);
+    range.textContent = monthStart.toLocaleDateString([], { month: 'long', year: 'numeric' });
+    for (var day = new Date(gridStart); day <= gridEnd; day = addDays(day, 1)) {
+      blocks.push(buildCalendarDay(day, eventsByDate, day.getMonth() !== now.getMonth()));
+    }
+  }
+
+  container.className = 'calendar-grid ' + gridClass;
+  container.innerHTML = blocks.join('');
 }
 
 function formatDue(iso) {
