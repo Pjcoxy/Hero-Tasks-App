@@ -135,6 +135,7 @@ async function getState() {
       date: c.date,
       status: c.status,
       createdAt: c.createdAt,
+      decidedAt: c.decidedAt || null,
     })),
     stats,
     quietHours: household && household.quietHours ? household.quietHours : null,
@@ -378,6 +379,7 @@ async function approve(req) {
       completion.points = Number(req.points);
     }
     completion.status = 'approved';
+    completion.decidedAt = new Date().toISOString();
     await completions.item(req.completionId, HOUSEHOLD_ID).replace(completion);
     const quietHours = await getHouseholdQuietHours();
     await sendPushIfAllowed(completion.kidId, {
@@ -398,7 +400,14 @@ async function reject(req) {
     .catch(() => ({ resource: null }));
   if (completion) {
     completion.status = 'rejected';
+    completion.decidedAt = new Date().toISOString();
     await completions.item(req.completionId, HOUSEHOLD_ID).replace(completion);
+    const quietHours = await getHouseholdQuietHours();
+    await sendPushIfAllowed(completion.kidId, {
+      title: 'Chore reviewed',
+      body: `${completion.title} needs another try — give it another go!`,
+      url: '/',
+    }, quietHours);
   }
   return getState();
 }
