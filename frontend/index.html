@@ -372,6 +372,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .task .tick:active { transform: scale(0.97); }
 .task.done-pending .tick  { border-color: var(--warning); background: var(--warning-wash); }
 .task.done-approved .tick { border-color: var(--success); background: var(--success-wash); }
+.task.done-queued .tick   { border-color: var(--brand-soft); background: var(--brand-wash); }
 .task .info  { flex: 1; min-width: 0; }
 .task .title { font-weight: var(--weight-medium); font-size: var(--text-base); }
 .task.done-approved .title { text-decoration: line-through; color: var(--ink-muted); }
@@ -1293,6 +1294,18 @@ let parentApprovalsGlanceLoading = false;
 let parentApprovalsGlanceLoaded = false;
 let parentApprovalsGlanceStateRef = null;
 
+// Offline action queue — persisted to localStorage so it survives a page
+// reload while the device is still offline.
+var offlineQueue = (function() {
+  try { return JSON.parse(localStorage.getItem('hero-offline-queue') || '[]'); } catch (e) { return []; }
+})();
+function saveOfflineQueue() {
+  try { localStorage.setItem('hero-offline-queue', JSON.stringify(offlineQueue)); } catch (e) {}
+}
+function clientKey() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
 async function api(payload) {
   const res = await fetch(API_URL, {
     method: 'POST',
@@ -1302,6 +1315,7 @@ async function api(payload) {
   const data = await res.json();
   if (data.people) {
     state = data;
+    applyQueuedCompletions();
     localStorage.setItem('hero-state-cache', JSON.stringify(state));
     render();
   }
@@ -1309,6 +1323,26 @@ async function api(payload) {
 }
 
 function kidsOnly() { return state.people.filter(p => p.role === 'kid'); }
+
+// Re-inject any queued synthetic completions (and pending undos) into state so
+// they remain visible in the UI even after a state refresh from the server.
+function applyQueuedCompletions() {
+  if (!state || !offlineQueue.length) return;
+  offlineQueue.forEach(function(entry) {
+    if (entry.type === 'completeTask') {
+      var alreadyIn = state.completions.some(function(c) { return c.id === entry.syntheticId; });
+      if (!alreadyIn) {
+        state.completions.push({
+          id: entry.syntheticId, taskId: entry.taskId, kidId: entry.personId,
+          title: entry.taskTitle || '', points: entry.taskPoints || 0,
+          status: 'queued', date: todayStr(),
+        });
+      }
+    } else if (entry.type === 'uncomplete') {
+      state.completions = state.completions.filter(function(c) { return c.id !== entry.completionId; });
+    }
+  });
+}
 
 async function refresh() {
   try {
@@ -1318,6 +1352,7 @@ async function refresh() {
     if (cached) {
       try {
         state = JSON.parse(cached);
+        applyQueuedCompletions();
         document.getElementById('loading').classList.add('hidden');
         render();
         return;
@@ -2041,15 +2076,15 @@ function renderTaskList(elId, tasks, emptyEmoji, emptyLine1, emptyLine2) {
   }
   el.innerHTML = tasks.map(function(t) {
     var c = cycleCompletion(t);
-    var cls = c ? (c.status === 'approved' ? 'done-approved' : 'done-pending') : '';
-    var tickIcon = c ? (c.status === 'approved' ? '✅' : '⏳') : '';
+    var cls = c ? (c.status === 'approved' ? 'done-approved' : c.status === 'queued' ? 'done-queued' : 'done-pending') : '';
+    var tickIcon = c ? (c.status === 'approved' ? '✅' : c.status === 'queued' ? '📡' : '⏳') : '';
     var isOverdue = !c && t.dueBy && new Date(t.dueBy) < new Date();
     var sub = c
-      ? (c.status === 'approved' ? 'Done — points banked! 💰' : 'Waiting for a grown-up to check ⏳')
+      ? (c.status === 'approved' ? 'Done — points banked! 💰' : c.status === 'queued' ? 'Saved offline — syncing soon 📡' : 'Waiting for a grown-up to check ⏳')
       : (t.cycle === 'weekly' ? 'Any time this week' : '');
     if (!c && t.dueBy) sub = isOverdue ? '⚠️ Overdue — was due ' + formatDue(t.dueBy) : 'Due ' + formatDue(t.dueBy);
     var action = c
-      ? (c.status === 'pending' ? 'undoTask(\'' + c.id + '\')' : '')
+      ? ((c.status === 'pending' || c.status === 'queued') ? 'undoTask(\'' + c.id + '\')' : '')
       : 'doTask(\'' + t.id + '\')';
     return '<div class="task ' + cls + ' ' + (isOverdue ? 'overdue' : '') + '">'
       + '<button class="tick" ' + (action ? 'onclick="' + action + '"' : 'disabled') + '>' + tickIcon + '</button>'
@@ -2403,21 +2438,31 @@ async function doTask(taskId) {
     await new Promise(function(resolve) { setTimeout(resolve, 220); });
   }
 
+  var key = clientKey();
   var syntheticId = '_opt_' + taskId + '_' + Date.now();
   var prev = state.completions.slice();
   state.completions = prev.concat([{
     id: syntheticId, taskId: taskId, kidId: session.personId,
     title: task.title, points: task.points,
-    status: 'pending', date: todayStr(),
+    status: 'queued', date: todayStr(),
   }]);
   render();
 
+  // Enqueue before the network call so a crash mid-flight still persists.
+  offlineQueue.push({ type: 'completeTask', taskId, personId: session.personId, pin: session.pin, clientKey: key, syntheticId, taskTitle: task.title, taskPoints: task.points });
+  saveOfflineQueue();
+
   var res;
   try {
-    res = await api({ action: 'completeTask', taskId, personId: session.personId, pin: session.pin });
+    res = await api({ action: 'completeTask', taskId, personId: session.personId, pin: session.pin, idempotencyKey: key });
   } catch (e) {
-    state.completions = prev; render(); toast('Connection problem — try again.'); return;
+    // Network error — keep optimistic state and leave in queue to sync later.
+    toast('Saved offline — will sync when connected 📡');
+    return;
   }
+  // Succeeded or server-level error — either way remove from queue.
+  offlineQueue = offlineQueue.filter(function(q) { return q.clientKey !== key; });
+  saveOfflineQueue();
   if (res && res.ok === false) {
     state.completions = prev; render(); toast(res.error || 'Could not complete that task.'); return;
   }
@@ -2427,14 +2472,30 @@ async function doTask(taskId) {
 }
 
 async function undoTask(completionId) {
+  // If this is a locally-queued completion that hasn't reached the server yet,
+  // just remove it from the queue and update state — no API call needed.
+  var queuedEntry = offlineQueue.find(function(q) { return q.type === 'completeTask' && q.syntheticId === completionId; });
+  if (queuedEntry) {
+    offlineQueue = offlineQueue.filter(function(q) { return q !== queuedEntry; });
+    saveOfflineQueue();
+    state.completions = state.completions.filter(function(c) { return c.id !== completionId; });
+    render();
+    return;
+  }
+
   var prev = state.completions.slice();
   state.completions = prev.filter(function(c) { return c.id !== completionId; });
   render();
+  var key = clientKey();
   var res;
   try {
     res = await api({ action: 'uncomplete', completionId, personId: session.personId, pin: session.pin });
   } catch (e) {
-    state.completions = prev; render(); toast('Connection problem — try again.'); return;
+    // Queue the undo so it syncs when connectivity returns.
+    offlineQueue.push({ type: 'uncomplete', completionId, personId: session.personId, pin: session.pin, clientKey: key, syntheticId: completionId });
+    saveOfflineQueue();
+    toast('Saved offline — will sync when connected 📡');
+    return;
   }
   if (res && res.ok === false) {
     state.completions = prev; render(); toast(res.error || 'Could not undo that task.'); return;
@@ -3043,10 +3104,37 @@ function setOfflineIndicator(offline) {
   if (parentPill) parentPill.classList.toggle('visible', offline);
 }
 
+// Replay queued offline actions one by one when connectivity returns.
+// Terminal server errors (e.g. task deleted) drop the queue entry with a toast.
+// Network errors leave the entry in the queue for the next reconnect.
+async function drainOfflineQueue() {
+  if (!offlineQueue.length) return;
+  var queue = offlineQueue.slice();
+  for (var i = 0; i < queue.length; i++) {
+    var entry = queue[i];
+    var res;
+    try {
+      if (entry.type === 'completeTask') {
+        res = await api({ action: 'completeTask', taskId: entry.taskId, personId: entry.personId, pin: entry.pin, idempotencyKey: entry.clientKey });
+      } else if (entry.type === 'uncomplete') {
+        res = await api({ action: 'uncomplete', completionId: entry.completionId, personId: entry.personId, pin: entry.pin });
+      }
+    } catch (e) {
+      continue;
+    }
+    // Terminal server error — drop entry and notify.
+    if (res && res.ok === false) {
+      toast(res.error === 'Task not found' ? 'A chore changed while offline — one action was dropped.' : (res.error || 'Could not sync an offline action.'));
+    }
+    offlineQueue = offlineQueue.filter(function(q) { return q.clientKey !== entry.clientKey; });
+    saveOfflineQueue();
+  }
+}
+
 if (!navigator.onLine) { setOfflineIndicator(true); }
 
 window.addEventListener('offline', function() { setOfflineIndicator(true); });
-window.addEventListener('online',  function() { setOfflineIndicator(false); refresh(); });
+window.addEventListener('online',  function() { setOfflineIndicator(false); drainOfflineQueue().then(refresh); });
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() { navigator.serviceWorker.register('sw.js').catch(function() {}); });

@@ -1382,6 +1382,27 @@ async function main() {
   );
   console.log('✓ completeTask rejects acting as another kid and writes nothing');
 
+  // Idempotency: replaying completeTask with the same key must not create a duplicate.
+  const idempotencyChore = await chores.items.create({
+    id: 'chore-idem',
+    householdId: HOUSEHOLD_ID,
+    kidId: 'toby',
+    title: 'Idempotency chore',
+    points: 3,
+    cycle: 'daily',
+    createdAt: '2026-01-01',
+    active: true,
+  });
+  const idemKey = 'test-idem-key-' + Date.now();
+  const completionsBefore = (await completions.items.query({}).fetchAll()).resources.length;
+  await ROUTES.completeTask({ taskId: 'chore-idem', personId: 'toby', pin: '1234', idempotencyKey: idemKey });
+  const completionsAfterFirst = (await completions.items.query({}).fetchAll()).resources.length;
+  assert.strictEqual(completionsAfterFirst, completionsBefore + 1, 'first completeTask with idempotency key creates one completion');
+  await ROUTES.completeTask({ taskId: 'chore-idem', personId: 'toby', pin: '1234', idempotencyKey: idemKey });
+  const completionsAfterSecond = (await completions.items.query({}).fetchAll()).resources.length;
+  assert.strictEqual(completionsAfterSecond, completionsAfterFirst, 'duplicate completeTask with same idempotency key does not create a second completion');
+  console.log('✓ completeTask idempotency key prevents duplicate completion on replay');
+
   // ---- saveVoicePlan tests ----
   const voicePlanningItems = mockContainer('planningItems');
   const beforeBlank = (
