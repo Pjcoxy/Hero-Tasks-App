@@ -70,6 +70,6 @@ jobs:
       - name: Run the Elaborator
         if: steps.guard.outputs.ok == 'true'
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.HEROTASK_ANTHROPIC_KEY }}
           HEROTASK_GITHUB_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
         run: python ops/elaborator/run_elaborator.py "${{ steps.issue.outputs.number }}"

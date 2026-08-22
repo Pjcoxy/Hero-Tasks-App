@@ -56,15 +56,18 @@ scheduled sweep should be created with `timezone: "Australia/Perth"`.
 ## One-time setup (Peter)
 
 1. **Anthropic API key** — at [platform.claude.com](https://platform.claude.com):
-   sign in → API keys → Create key. Make sure billing has credit.
+   sign in → API keys → Create key, named `herotasks-agents` (that label is
+   Anthropic-side only — it is how you spot this project's spend in the key
+   list). Make sure billing has credit.
 2. **GitHub token** — GitHub → Settings → Developer settings →
-   Fine-grained personal access tokens → Generate new token:
+   Fine-grained personal access tokens → Generate new token, named
+   `herotasks-agents`:
    - Repository access: *Only select repositories* → `Hero-Tasks-App`
    - Permissions: **Contents: Read-only**, **Issues: Read and write**,
      **Metadata: Read-only** (auto-selected)
 3. **Add both as repo secrets** — Hero-Tasks-App → Settings → Secrets and
    variables → Actions → New repository secret:
-   - `ANTHROPIC_API_KEY`
+   - `HEROTASK_ANTHROPIC_KEY`
    - `HEROTASK_GITHUB_TOKEN`
 4. **Run setup** — Actions tab → *Elaborator — one-time setup* → Run
    workflow. It creates the agent/environment/vault and commits their IDs to
