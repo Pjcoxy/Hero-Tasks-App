@@ -19,7 +19,7 @@ step is yours to run (or wire into GitHub Actions once you're ready).
 | **Cosmos DB** | `modules/cosmosdb.bicep` | Free-tier account, one database, containers: `households`, `people`, `chores`, `completions`, `rewards`, `pushSubscriptions`, `planningItems` (reminders/voice notes/calendar items), `auditEvents` |
 | **Key Vault** | `modules/keyvault.bicep` | Secrets store (currently `llm-api-key` plus the web-push `vapid-private-key`), RBAC-only, Function App reads via managed identity |
 | **Function App** | `modules/functionapp.bicep` | Consumption-plan API with HTTP endpoints and timer-trigger support, system-assigned managed identity for all Azure access |
-| **Static Web App** | `modules/staticwebapp.bicep` | Free tier, with the Function App linked as its backend (`linkedBackends`) so auth/CORS is handled by the platform instead of hand-rolled |
+| **Static Web App** | `modules/staticwebapp.bicep` | Free tier frontend. It calls the Function App directly by the Function App's own hostname; Function App CORS is scoped to the deployed Static Web App origin |
 
 `main.bicep` wires these together and grants the Function App's managed
 identity exactly three roles: Storage Blob Data Contributor (its own
