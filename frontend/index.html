@@ -1224,6 +1224,11 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
           <button class="btn ghost" onclick="parentAddKid()">Add kid</button>
         </div>
       </section>
+
+      <section class="parent-section">
+        <h2 class="parent-section-title">History</h2>
+        <div id="p-history"></div>
+      </section>
     </div>
   </main>
 </div>
@@ -1347,6 +1352,10 @@ let parentApprovalsGlanceItems = [];
 let parentApprovalsGlanceLoading = false;
 let parentApprovalsGlanceLoaded = false;
 let parentApprovalsGlanceStateRef = null;
+let parentHistoryItems = [];
+let parentHistoryLoading = false;
+let parentHistoryLoaded = false;
+let parentHistoryStateRef = null;
 
 async function api(payload) {
   const res = await fetch(API_URL, {
@@ -1531,6 +1540,8 @@ function switchParentTab(tab) {
   syncParentTab(true);
   if (tab === 'calendar') {
     loadParentCalendar();
+  } else if (tab === 'settings') {
+    loadParentHistory();
   }
 }
 
@@ -2068,6 +2079,30 @@ async function loadParentApprovalsGlance() {
   renderParentApprovalsGlance();
 }
 
+async function loadParentHistory() {
+  if (!session || session.role !== 'parent' || parentHistoryLoading) return;
+  parentHistoryLoading = true;
+  renderParentHistory();
+  var result;
+  try {
+    result = await api({
+      action: 'auditLog',
+      parentId: session.personId,
+      parentPin: session.pin,
+    });
+  } catch (e) {
+    parentHistoryLoading = false;
+    parentHistoryLoaded = true;
+    parentHistoryItems = [];
+    renderParentHistory();
+    return;
+  }
+  parentHistoryItems = Array.isArray(result && result.events) ? result.events : [];
+  parentHistoryLoading = false;
+  parentHistoryLoaded = true;
+  renderParentHistory();
+}
+
 function formatDue(iso) {
   var d = new Date(iso);
   var now = new Date();
@@ -2088,6 +2123,30 @@ function rewardStatusText(status) {
   if (status === 'rejected')  return '✗ declined';
   if (status === 'cancelled') return '↩️ cancelled';
   return esc(status || 'unknown');
+}
+
+function formatAuditAction(event) {
+  var details = event && event.details || {};
+  var title = details.title ? esc(details.title) : '';
+  var kidName = details.name ? esc(details.name) : '';
+  if (!event) return 'Made a change';
+  if (event.action === 'task.created') return 'Created task' + (title ? ': ' + title : '');
+  if (event.action === 'task.updated') return 'Updated task' + (title ? ': ' + title : '');
+  if (event.action === 'task.deleted') return 'Deleted task' + (title ? ': ' + title : '');
+  if (event.action === 'kid.created') return 'Added kid' + (kidName ? ': ' + kidName : '');
+  if (event.action === 'reward.created') return 'Added reward' + (title ? ': ' + title : '');
+  if (event.action === 'reward.updated') return 'Updated reward' + (title ? ': ' + title : '');
+  if (event.action === 'reward.deleted') return 'Deleted reward' + (title ? ': ' + title : '');
+  if (event.action === 'completion.approved') return 'Approved completion' + (title ? ': ' + title : '');
+  if (event.action === 'completion.rejected') return 'Rejected completion' + (title ? ': ' + title : '');
+  if (event.action === 'redemption.approved') return 'Approved reward request' + (title ? ': ' + title : '');
+  if (event.action === 'redemption.rejected') return 'Rejected reward request' + (title ? ': ' + title : '');
+  if (event.action === 'quietHours.updated') {
+    return details.quietHours
+      ? 'Updated quiet hours: ' + esc(details.quietHours.start + ' to ' + details.quietHours.end)
+      : 'Turned off quiet hours';
+  }
+  return esc(event.action || 'Made a change');
 }
 
 function renderTaskList(elId, tasks, emptyEmoji, emptyLine1, emptyLine2) {
@@ -2199,6 +2258,27 @@ function renderRecentActivity(kid) {
   }).join('');
 }
 
+function renderParentHistory() {
+  var el = document.getElementById('p-history');
+  if (!el) return;
+  if (parentHistoryLoading && !parentHistoryLoaded) {
+    el.innerHTML = '';
+    return;
+  }
+  if (parentHistoryLoaded && parentHistoryItems.length === 0) {
+    el.innerHTML = buildEmptyState('🗂️', 'No history yet.', 'Changes parents make will show up here.');
+    return;
+  }
+  el.innerHTML = '<div class="parent-list">' + parentHistoryItems.map(function(event) {
+    return '<div class="parent-list-row">'
+      + '<div class="parent-copy">'
+      + '<span class="parent-list-title">' + esc(event.actorName || 'Parent') + '</span>'
+      + '<div class="sub">' + formatAuditAction(event) + ' · ' + formatRewardDate(event.createdAt) + '</div>'
+      + '</div>'
+      + '</div>';
+  }).join('') + '</div>';
+}
+
 function renderParent(person) {
   document.getElementById('p-hq-title').textContent = '👑 ' + person.name + '\'s HQ';
   var pending = state.completions.filter(function(c) { return c.status === 'pending'; });
@@ -2213,7 +2293,14 @@ function renderParent(person) {
     parentApprovalsGlanceLoaded = false;
     loadParentApprovalsGlance();
   }
+  if (parentHistoryStateRef !== state) {
+    parentHistoryStateRef = state;
+    parentHistoryLoaded = false;
+    parentHistoryItems = [];
+    if (parentTab === 'settings') loadParentHistory();
+  }
   renderParentApprovalsGlance();
+  renderParentHistory();
 
   var el = document.getElementById('p-pending');
   if (pending.length === 0) {

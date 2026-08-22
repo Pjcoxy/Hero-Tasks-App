@@ -5,6 +5,7 @@ const path = require('path');
 const Module = require('module');
 
 const store = {}; // { containerName: Map<id, doc> }
+const createOverrides = {};
 
 function getMap(name) {
   if (!store[name]) store[name] = new Map();
@@ -16,6 +17,7 @@ function mockContainer(name) {
   return {
     items: {
       create: async (doc) => {
+        if (createOverrides[name]) return createOverrides[name](doc);
         map.set(doc.id, doc);
         return { resource: doc };
       },
@@ -1381,6 +1383,233 @@ async function main() {
     'cross-kid completeTask should be rejected without writing a new completion'
   );
   console.log('✓ completeTask rejects acting as another kid and writes nothing');
+
+  // ---- audit log tests ----
+  const auditEvents = mockContainer('auditEvents');
+  const rewards = mockContainer('rewards');
+  let auditDocs = (await auditEvents.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
+  const auditCountBefore = auditDocs.length;
+
+  const originalWarn = console.warn;
+  const auditWarnings = [];
+  console.warn = (...args) => auditWarnings.push(args.join(' '));
+  createOverrides.auditEvents = async () => {
+    throw new Error('audit offline');
+  };
+  const failSoftAddKid = await ROUTES.addKid({
+    parentId: 'peter',
+    parentPin: '1234',
+    name: 'Ada',
+    emoji: '🦄',
+    pin: '2468',
+  });
+  delete createOverrides.auditEvents;
+  console.warn = originalWarn;
+  assert.strictEqual(failSoftAddKid.ok, true, 'failed audit writes should not block the underlying mutation');
+  assert.ok(
+    failSoftAddKid.people.some((person) => person.name === 'Ada' && person.role === 'kid'),
+    'addKid should still create the kid when audit logging fails'
+  );
+  assert.ok(
+    auditWarnings.some((line) => line.includes('logAuditEvent failed') && line.includes('audit offline')),
+    'audit logging failures should be warned and swallowed'
+  );
+  console.log('✓ audit logging is fail-soft and never blocks a mutation');
+
+  await ROUTES.addTask({
+    parentId: 'peter',
+    parentPin: '1234',
+    kidId: 'toby',
+    title: 'Audit task',
+    points: 6,
+    cycle: 'oneoff',
+    dueBy: '2026-09-01T09:00:00.000Z',
+  });
+  let auditTask = (await chores.items.query({}).fetchAll()).resources.find((task) => task.title === 'Audit task');
+  assert.ok(auditTask, 'expected audit test task to be created');
+
+  await ROUTES.updateTask({
+    parentId: 'peter',
+    parentPin: '1234',
+    taskId: auditTask.id,
+    title: 'Audit task updated',
+    points: 8,
+    cycle: 'daily',
+    kidId: 'ollie',
+  });
+  auditTask = (await chores.item(auditTask.id).read()).resource;
+  assert.strictEqual(auditTask.title, 'Audit task updated');
+  await ROUTES.deleteTask({ parentId: 'peter', parentPin: '1234', taskId: auditTask.id });
+
+  await ROUTES.addKid({
+    parentId: 'peter',
+    parentPin: '1234',
+    name: 'Mia',
+    emoji: '🦊',
+    pin: '4321',
+  });
+
+  await ROUTES.addReward({
+    parentId: 'peter',
+    parentPin: '1234',
+    title: 'Audit reward',
+    cost: 15,
+    needsApproval: true,
+  });
+  let auditReward = (await rewards.items.query({}).fetchAll()).resources.find(
+    (reward) => reward.type === 'reward' && reward.title === 'Audit reward'
+  );
+  assert.ok(auditReward, 'expected audit test reward to be created');
+  await ROUTES.updateReward({
+    parentId: 'peter',
+    parentPin: '1234',
+    rewardId: auditReward.id,
+    title: 'Audit reward deluxe',
+    cost: 18,
+    needsApproval: false,
+  });
+  auditReward = (await rewards.item(auditReward.id).read()).resource;
+  assert.strictEqual(auditReward.title, 'Audit reward deluxe');
+  await ROUTES.deleteReward({ parentId: 'peter', parentPin: '1234', rewardId: auditReward.id });
+
+  await completions.items.create({
+    id: 'audit-approve-completion',
+    householdId: HOUSEHOLD_ID,
+    taskId: '',
+    kidId: 'toby',
+    title: 'Audit approve completion',
+    points: 3,
+    date: '2026-08-22',
+    status: 'pending',
+    createdAt: '2026-08-22T09:00:00.000Z',
+  });
+  await ROUTES.approve({
+    parentId: 'peter',
+    parentPin: '1234',
+    completionId: 'audit-approve-completion',
+  });
+
+  await completions.items.create({
+    id: 'audit-reject-completion',
+    householdId: HOUSEHOLD_ID,
+    taskId: '',
+    kidId: 'ollie',
+    title: 'Audit reject completion',
+    points: 2,
+    date: '2026-08-22',
+    status: 'pending',
+    createdAt: '2026-08-22T09:05:00.000Z',
+  });
+  await ROUTES.reject({
+    parentId: 'peter',
+    parentPin: '1234',
+    completionId: 'audit-reject-completion',
+  });
+
+  await rewards.items.create({
+    id: 'audit-approve-redemption',
+    householdId: HOUSEHOLD_ID,
+    type: 'redemption',
+    rewardId: 'reward-audit',
+    kidId: 'toby',
+    title: 'Audit approve redemption',
+    cost: 9,
+    status: 'pending',
+    createdAt: '2026-08-22T09:10:00.000Z',
+    decidedAt: null,
+  });
+  await ROUTES.approveRedemption({
+    parentId: 'peter',
+    parentPin: '1234',
+    redemptionId: 'audit-approve-redemption',
+  });
+
+  await rewards.items.create({
+    id: 'audit-reject-redemption',
+    householdId: HOUSEHOLD_ID,
+    type: 'redemption',
+    rewardId: 'reward-audit-2',
+    kidId: 'ollie',
+    title: 'Audit reject redemption',
+    cost: 11,
+    status: 'pending',
+    createdAt: '2026-08-22T09:15:00.000Z',
+    decidedAt: null,
+  });
+  await ROUTES.rejectRedemption({
+    parentId: 'peter',
+    parentPin: '1234',
+    redemptionId: 'audit-reject-redemption',
+  });
+
+  await ROUTES.updateQuietHours({
+    parentId: 'peter',
+    parentPin: '1234',
+    start: '20:00',
+    end: '07:00',
+  });
+
+  auditDocs = (await auditEvents.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
+  assert.ok(auditDocs.length >= auditCountBefore + 12, 'expected each audited parent mutation to create an event');
+  const auditTaskCreated = auditDocs.find(
+    (event) => event.action === 'task.created' && event.details && event.details.title === 'Audit task'
+  );
+  assert.ok(auditTaskCreated, 'task.created event should be recorded');
+  assert.strictEqual(auditTaskCreated.actorId, 'peter');
+  assert.strictEqual(auditTaskCreated.actorName, 'Peter');
+  assert.strictEqual(auditTaskCreated.entityType, 'task');
+  assert.strictEqual(auditTaskCreated.entityId, auditTask.id);
+  assert.ok(auditTaskCreated.createdAt, 'audit event should include a createdAt timestamp');
+
+  [
+    'task.updated',
+    'task.deleted',
+    'kid.created',
+    'reward.created',
+    'reward.updated',
+    'reward.deleted',
+    'completion.approved',
+    'completion.rejected',
+    'redemption.approved',
+    'redemption.rejected',
+    'quietHours.updated',
+  ].forEach((action) => {
+    assert.ok(auditDocs.some((event) => event.action === action), `expected audit event for ${action}`);
+  });
+  console.log('✓ parent mutations write audit events with actor metadata');
+
+  for (let i = 0; i < 105; i += 1) {
+    await auditEvents.items.create({
+      id: `audit-old-${i}`,
+      householdId: HOUSEHOLD_ID,
+      actorId: 'peter',
+      actorName: 'Peter',
+      action: 'audit.seeded',
+      entityType: 'test',
+      entityId: `old-${i}`,
+      details: null,
+      createdAt: new Date(Date.UTC(2024, 0, 1, 0, Math.floor(i / 60), i % 60)).toISOString(),
+    });
+  }
+  const auditLogResult = await ROUTES.auditLog({ parentId: 'peter', parentPin: '1234' });
+  assert.strictEqual(auditLogResult.ok, true, 'auditLog should succeed for parents');
+  assert.strictEqual(auditLogResult.events.length, 100, 'auditLog should cap results at the latest 100 events');
+  assert.ok(auditLogResult.events.every((event) => event.actorName), 'auditLog should include actorName on each row');
+  for (let i = 1; i < auditLogResult.events.length; i += 1) {
+    assert.ok(
+      String(auditLogResult.events[i - 1].createdAt || '') >= String(auditLogResult.events[i].createdAt || ''),
+      'auditLog should be sorted newest first'
+    );
+  }
+  assert.ok(
+    auditLogResult.events.some((event) => event.action === 'task.created' && event.details && event.details.title === 'Audit task'),
+    'auditLog should include recent audit entries'
+  );
+  await assert.rejects(
+    () => ROUTES.auditLog({ parentId: 'toby', parentPin: '1234' }),
+    (err) => err && err.status === 401 && err.message === 'Wrong parent PIN'
+  );
+  console.log('✓ auditLog is parent-only, newest-first, and limited to 100 rows');
 
   // ---- saveVoicePlan tests ----
   const voicePlanningItems = mockContainer('planningItems');

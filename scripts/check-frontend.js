@@ -99,6 +99,13 @@ check(/function switchParentCalendarView\(view\)/.test(html), 'parent calendar v
 check(/action:\s*'addPlanningItem'/.test(html), 'parent calendar form calls addPlanningItem');
 check(/action:\s*'updatePlanningItem'/.test(html), 'parent calendar edit calls updatePlanningItem');
 check(/action:\s*'deletePlanningItem'/.test(html), 'parent calendar delete calls deletePlanningItem');
+check(/id="p-history"/.test(html), 'settings tab includes history container');
+check(/function loadParentHistory\(\)/.test(html), 'parent history loader exists');
+check(/action:\s*'auditLog'[\s\S]*parentId:\s*session\.personId[\s\S]*parentPin:\s*session\.pin/.test(html), 'parent history loads auditLog with parent credentials');
+check(/buildEmptyState\('🗂️', 'No history yet\.', 'Changes parents make will show up here\.'\)/.test(html), 'parent history empty state matches the spec');
+const addKidIndex = html.indexOf('<h2 class="parent-section-title">Add a kid</h2>');
+const historyIndex = html.indexOf('id="p-history"');
+check(addKidIndex !== -1 && historyIndex !== -1 && addKidIndex < historyIndex, 'history section appears after Add a kid');
 check(/id="p-approvals-badge"/.test(html), 'approvals badge exists');
 check(/id="p-approvals-glance"/.test(html), 'approvals tab includes at-a-glance container');
 check(/Today &amp; this week/.test(html), 'approvals tab includes Today & this week title');

@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto');
 const { container } = require('../lib/cosmos');
 const { ensureSeeded, HOUSEHOLD_ID } = require('../lib/seed');
 const { sendPush } = require('../lib/push');
+const { logAuditEvent } = require('../lib/audit');
 const { extractVoiceIntent } = require('../lib/llm');
 const { findConflicts, suggestAlternateSlots } = require('../lib/calendar');
 
@@ -177,6 +178,7 @@ async function requireParent(parentId, parentPin) {
   if (!person || person.role !== 'parent' || String(person.pin) !== String(parentPin)) {
     throw Object.assign(new Error('Wrong parent PIN'), { status: 401 });
   }
+  return person;
 }
 
 async function requireSelf(personId, pin, expectedId) {
@@ -433,8 +435,8 @@ async function removePushSubscription(req) {
 }
 
 async function addTask(req) {
-  await requireParent(req.parentId, req.parentPin);
-  await container('chores').items.create({
+  const parent = await requireParent(req.parentId, req.parentPin);
+  const task = {
     id: randomUUID(),
     householdId: HOUSEHOLD_ID,
     kidId: req.kidId,
@@ -447,12 +449,21 @@ async function addTask(req) {
     dueBy: req.cycle === 'oneoff' && req.dueBy ? req.dueBy : null,
     createdAt: todayStr(),
     active: true,
+  };
+  await container('chores').items.create(task);
+  await logAuditEvent({
+    actorId: parent.id,
+    actorName: parent.name,
+    action: 'task.created',
+    entityType: 'task',
+    entityId: task.id,
+    details: { title: task.title, kidId: task.kidId, points: task.points, cycle: task.cycle, dueBy: task.dueBy },
   });
   return getState();
 }
 
 async function updateTask(req) {
-  await requireParent(req.parentId, req.parentPin);
+  const parent = await requireParent(req.parentId, req.parentPin);
   const chores = container('chores');
   const { resource: chore } = await chores
     .item(req.taskId, HOUSEHOLD_ID)
@@ -487,11 +498,19 @@ async function updateTask(req) {
     chore.dueBy = req.dueBy || null;
   }
   await chores.item(req.taskId, HOUSEHOLD_ID).replace(chore);
+  await logAuditEvent({
+    actorId: parent.id,
+    actorName: parent.name,
+    action: 'task.updated',
+    entityType: 'task',
+    entityId: chore.id,
+    details: { title: chore.title, kidId: chore.kidId, points: chore.points, cycle: chore.cycle, dueBy: chore.dueBy || null },
+  });
   return getState();
 }
 
 async function deleteTask(req) {
-  await requireParent(req.parentId, req.parentPin);
+  const parent = await requireParent(req.parentId, req.parentPin);
   const chores = container('chores');
   const { resource: chore } = await chores
     .item(req.taskId, HOUSEHOLD_ID)
@@ -500,6 +519,14 @@ async function deleteTask(req) {
   if (chore) {
     chore.active = false;
     await chores.item(req.taskId, HOUSEHOLD_ID).replace(chore);
+    await logAuditEvent({
+      actorId: parent.id,
+      actorName: parent.name,
+      action: 'task.deleted',
+      entityType: 'task',
+      entityId: chore.id,
+      details: { title: chore.title, kidId: chore.kidId },
+    });
   }
   return getState();
 }
@@ -804,7 +831,7 @@ async function validateVoiceNote(req) {
 }
 
 async function approve(req) {
-  await requireParent(req.parentId, req.parentPin);
+  const parent = await requireParent(req.parentId, req.parentPin);
   const completions = container('completions');
   const { resource: completion } = await completions
     .item(req.completionId, HOUSEHOLD_ID)
@@ -817,6 +844,14 @@ async function approve(req) {
     completion.status = 'approved';
     completion.decidedAt = new Date().toISOString();
     await completions.item(req.completionId, HOUSEHOLD_ID).replace(completion);
+    await logAuditEvent({
+      actorId: parent.id,
+      actorName: parent.name,
+      action: 'completion.approved',
+      entityType: 'completion',
+      entityId: completion.id,
+      details: { title: completion.title, kidId: completion.kidId, points: completion.points || 0 },
+    });
     const quietHours = await getHouseholdQuietHours();
     await sendPushIfAllowed(completion.kidId, {
       title: 'Nice work! 🎉',
@@ -828,7 +863,7 @@ async function approve(req) {
 }
 
 async function reject(req) {
-  await requireParent(req.parentId, req.parentPin);
+  const parent = await requireParent(req.parentId, req.parentPin);
   const completions = container('completions');
   const { resource: completion } = await completions
     .item(req.completionId, HOUSEHOLD_ID)
@@ -838,6 +873,14 @@ async function reject(req) {
     completion.status = 'rejected';
     completion.decidedAt = new Date().toISOString();
     await completions.item(req.completionId, HOUSEHOLD_ID).replace(completion);
+    await logAuditEvent({
+      actorId: parent.id,
+      actorName: parent.name,
+      action: 'completion.rejected',
+      entityType: 'completion',
+      entityId: completion.id,
+      details: { title: completion.title, kidId: completion.kidId },
+    });
     const quietHours = await getHouseholdQuietHours();
     await sendPushIfAllowed(completion.kidId, {
       title: 'Chore reviewed',
@@ -849,25 +892,34 @@ async function reject(req) {
 }
 
 async function addKid(req) {
-  await requireParent(req.parentId, req.parentPin);
-  await container('people').items.create({
+  const parent = await requireParent(req.parentId, req.parentPin);
+  const kid = {
     id: randomUUID(),
     householdId: HOUSEHOLD_ID,
     name: req.name,
     emoji: req.emoji || '🙂',
     pin: req.pin || '',
     role: 'kid',
+  };
+  await container('people').items.create(kid);
+  await logAuditEvent({
+    actorId: parent.id,
+    actorName: parent.name,
+    action: 'kid.created',
+    entityType: 'kid',
+    entityId: kid.id,
+    details: { name: kid.name, emoji: kid.emoji },
   });
   return getState();
 }
 
 async function addReward(req) {
-  await requireParent(req.parentId, req.parentPin);
+  const parent = await requireParent(req.parentId, req.parentPin);
   const title = (req.title || '').trim();
   if (!title) return { ok: false, error: 'title is required' };
   const cost = Number(req.cost);
   if (!Number.isInteger(cost) || cost <= 0) return { ok: false, error: 'cost must be a positive integer' };
-  await container('rewards').items.create({
+  const reward = {
     id: randomUUID(),
     householdId: HOUSEHOLD_ID,
     type: 'reward',
@@ -876,12 +928,21 @@ async function addReward(req) {
     needsApproval: !!req.needsApproval,
     active: true,
     createdAt: new Date().toISOString(),
+  };
+  await container('rewards').items.create(reward);
+  await logAuditEvent({
+    actorId: parent.id,
+    actorName: parent.name,
+    action: 'reward.created',
+    entityType: 'reward',
+    entityId: reward.id,
+    details: { title: reward.title, cost: reward.cost, needsApproval: reward.needsApproval },
   });
   return getState();
 }
 
 async function deleteReward(req) {
-  await requireParent(req.parentId, req.parentPin);
+  const parent = await requireParent(req.parentId, req.parentPin);
   const rewards = container('rewards');
   const { resource: reward } = await rewards
     .item(req.rewardId, HOUSEHOLD_ID)
@@ -890,12 +951,20 @@ async function deleteReward(req) {
   if (reward) {
     reward.active = false;
     await rewards.item(req.rewardId, HOUSEHOLD_ID).replace(reward);
+    await logAuditEvent({
+      actorId: parent.id,
+      actorName: parent.name,
+      action: 'reward.deleted',
+      entityType: 'reward',
+      entityId: reward.id,
+      details: { title: reward.title, cost: reward.cost },
+    });
   }
   return getState();
 }
 
 async function updateReward(req) {
-  await requireParent(req.parentId, req.parentPin);
+  const parent = await requireParent(req.parentId, req.parentPin);
   const rewards = container('rewards');
   const { resource: reward } = await rewards
     .item(req.rewardId, HOUSEHOLD_ID)
@@ -914,11 +983,19 @@ async function updateReward(req) {
   }
   if (req.needsApproval !== undefined) reward.needsApproval = !!req.needsApproval;
   await rewards.item(req.rewardId, HOUSEHOLD_ID).replace(reward);
+  await logAuditEvent({
+    actorId: parent.id,
+    actorName: parent.name,
+    action: 'reward.updated',
+    entityType: 'reward',
+    entityId: reward.id,
+    details: { title: reward.title, cost: reward.cost, needsApproval: reward.needsApproval },
+  });
   return getState();
 }
 
 async function updateQuietHours(req) {
-  await requireParent(req.parentId, req.parentPin);
+  const parent = await requireParent(req.parentId, req.parentPin);
   const start = req.start;
   const end = req.end;
   const clearQuietHours = start === null && end === null;
@@ -936,6 +1013,14 @@ async function updateQuietHours(req) {
   if (!household) return { ok: false, error: 'Household not found' };
   household.quietHours = clearQuietHours ? null : { start, end };
   await households.item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(household);
+  await logAuditEvent({
+    actorId: parent.id,
+    actorName: parent.name,
+    action: 'quietHours.updated',
+    entityType: 'household',
+    entityId: household.id,
+    details: { quietHours: household.quietHours },
+  });
   return getState();
 }
 
@@ -989,7 +1074,7 @@ async function redeemReward(req) {
 }
 
 async function approveRedemption(req) {
-  await requireParent(req.parentId, req.parentPin);
+  const parent = await requireParent(req.parentId, req.parentPin);
   const rewards = container('rewards');
   const { resource: redemption } = await rewards
     .item(req.redemptionId, HOUSEHOLD_ID)
@@ -999,12 +1084,20 @@ async function approveRedemption(req) {
     redemption.status = 'approved';
     redemption.decidedAt = new Date().toISOString();
     await rewards.item(req.redemptionId, HOUSEHOLD_ID).replace(redemption);
+    await logAuditEvent({
+      actorId: parent.id,
+      actorName: parent.name,
+      action: 'redemption.approved',
+      entityType: 'redemption',
+      entityId: redemption.id,
+      details: { title: redemption.title, kidId: redemption.kidId, cost: redemption.cost },
+    });
   }
   return getState();
 }
 
 async function rejectRedemption(req) {
-  await requireParent(req.parentId, req.parentPin);
+  const parent = await requireParent(req.parentId, req.parentPin);
   const rewards = container('rewards');
   const { resource: redemption } = await rewards
     .item(req.redemptionId, HOUSEHOLD_ID)
@@ -1014,8 +1107,38 @@ async function rejectRedemption(req) {
     redemption.status = 'rejected';
     redemption.decidedAt = new Date().toISOString();
     await rewards.item(req.redemptionId, HOUSEHOLD_ID).replace(redemption);
+    await logAuditEvent({
+      actorId: parent.id,
+      actorName: parent.name,
+      action: 'redemption.rejected',
+      entityType: 'redemption',
+      entityId: redemption.id,
+      details: { title: redemption.title, kidId: redemption.kidId, cost: redemption.cost },
+    });
   }
   return getState();
+}
+
+async function auditLog(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const events = await queryHousehold('auditEvents');
+  return {
+    ok: true,
+    events: events
+      .slice()
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      .slice(0, 100)
+      .map((event) => ({
+        id: event.id,
+        actorId: event.actorId,
+        actorName: event.actorName,
+        action: event.action,
+        entityType: event.entityType,
+        entityId: event.entityId,
+        details: event.details || null,
+        createdAt: event.createdAt,
+      })),
+  };
 }
 
 async function cancelRedemption(req) {
@@ -1129,6 +1252,7 @@ const ROUTES = {
   deleteReward,
   updateReward,
   updateQuietHours,
+  auditLog,
   redeemReward,
   approveRedemption,
   rejectRedemption,
