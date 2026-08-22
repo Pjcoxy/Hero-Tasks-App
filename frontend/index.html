@@ -749,6 +749,75 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
+.parent-calendar-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+.parent-calendar-chip {
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  transition: transform var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.parent-calendar-chip:active { transform: scale(0.97); }
+.parent-calendar-chip.active {
+  background: var(--brand);
+  color: var(--on-brand);
+}
+.parent-calendar-range {
+  margin-top: var(--space-3);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+  color: var(--ink);
+}
+.parent-calendar-list {
+  margin-top: var(--space-3);
+}
+.parent-calendar-kind {
+  text-transform: capitalize;
+}
+.parent-calendar-checklist {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.parent-calendar-checklist .check-row {
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+}
+.parent-calendar-inline-actions {
+  margin-top: var(--space-2);
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.parent-calendar-inline-actions .btn.small { min-height: 2.5rem; }
+.parent-calendar-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.parent-calendar-skel {
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-3);
+}
+.parent-calendar-skel-line {
+  height: 0.9rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  animation: skel-pulse 1.4s ease-in-out infinite;
+}
+.parent-calendar-skel-line + .parent-calendar-skel-line { margin-top: var(--space-2); }
+.parent-calendar-skel-line.short { width: 55%; }
 .modal-actions {
   display: flex;
   flex-direction: column;
@@ -932,6 +1001,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
     </button>
     <button class="choice-pill" id="p-tabbtn-tasks" onclick="switchParentTab('tasks')">Tasks</button>
     <button class="choice-pill" id="p-tabbtn-rewards" onclick="switchParentTab('rewards')">Rewards</button>
+    <button class="choice-pill" id="p-tabbtn-calendar" onclick="switchParentTab('calendar')">Calendar</button>
     <button class="choice-pill" id="p-tabbtn-settings" onclick="switchParentTab('settings')">Settings</button>
   </nav>
 
@@ -1004,6 +1074,40 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
       <section class="parent-section">
         <h2 class="parent-section-title">Rewards</h2>
         <div id="p-rewards"></div>
+      </section>
+    </div>
+
+    <div id="p-tab-calendar" class="parent-panel hidden">
+      <section class="parent-section">
+        <h2 class="parent-section-title">Add event or reminder</h2>
+        <div class="card parent-card">
+          <div class="field"><label>Title</label><input id="p-plan-title" type="text" placeholder="e.g. School trip" autocomplete="off"></div>
+          <div class="field">
+            <label>Type</label>
+            <select id="p-plan-type" onchange="updatePlanningTypeVisibility()">
+              <option value="event">Event</option>
+              <option value="reminder">Reminder</option>
+            </select>
+          </div>
+          <div class="field"><label>Starts</label><input id="p-plan-start" type="datetime-local"></div>
+          <div class="field" id="p-plan-end-wrap"><label>Ends (optional)</label><input id="p-plan-end" type="datetime-local"></div>
+          <div class="field"><label>Who</label><select id="p-plan-person"></select></div>
+          <div class="field"><label>Notes (optional)</label><input id="p-plan-notes" type="text" placeholder="e.g. Bring hat + water" autocomplete="off"></div>
+          <button class="btn" onclick="parentAddPlanningItem()">Add to calendar</button>
+        </div>
+      </section>
+
+      <section class="parent-section">
+        <h2 class="parent-section-title">Calendar</h2>
+        <div class="card parent-card">
+          <div class="parent-calendar-controls" role="tablist" aria-label="Parent calendar view">
+            <button id="p-calendar-view-day" class="parent-calendar-chip" onclick="switchParentCalendarView('day')">Day</button>
+            <button id="p-calendar-view-week" class="parent-calendar-chip active" onclick="switchParentCalendarView('week')">Week</button>
+            <button id="p-calendar-view-month" class="parent-calendar-chip" onclick="switchParentCalendarView('month')">Month</button>
+          </div>
+          <div id="p-calendar-range" class="parent-calendar-range"></div>
+        </div>
+        <div id="p-calendar-list" class="parent-calendar-list"></div>
       </section>
     </div>
 
@@ -1161,6 +1265,9 @@ let pushSetupPersonId = null;
 let kidTab = 'home';
 let kidCalendarView = 'week';
 let parentTab = 'approvals';
+let parentCalendarView = 'week';
+let parentCalendarItems = [];
+let parentCalendarLoading = false;
 
 async function api(payload) {
   const res = await fetch(API_URL, {
@@ -1313,7 +1420,7 @@ function switchTab(tab) {
 }
 
 function syncParentTab(animate) {
-  ['approvals', 'tasks', 'rewards', 'settings'].forEach(function(t) {
+  ['approvals', 'tasks', 'rewards', 'calendar', 'settings'].forEach(function(t) {
     var panel = document.getElementById('p-tab-' + t);
     var btn = document.getElementById('p-tabbtn-' + t);
     var active = t === parentTab;
@@ -1330,6 +1437,9 @@ function switchParentTab(tab) {
   if (parentTab === tab) return;
   parentTab = tab;
   syncParentTab(true);
+  if (tab === 'calendar') {
+    loadParentCalendar();
+  }
 }
 
 function renderWho() {
@@ -1516,6 +1626,235 @@ function renderKidCalendar(kid) {
   container.innerHTML = blocks.join('');
 }
 
+function jsq(value) {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, '\\\'');
+}
+
+function planningDateToLocalInput(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  var year = d.getFullYear();
+  var month = String(d.getMonth() + 1).padStart(2, '0');
+  var day = String(d.getDate()).padStart(2, '0');
+  var hour = String(d.getHours()).padStart(2, '0');
+  var minute = String(d.getMinutes()).padStart(2, '0');
+  return year + '-' + month + '-' + day + 'T' + hour + ':' + minute;
+}
+
+function updatePlanningTypeVisibility() {
+  var typeEl = document.getElementById('p-plan-type');
+  if (!typeEl) return;
+  var isEvent = typeEl.value === 'event';
+  document.getElementById('p-plan-end-wrap').classList.toggle('hidden', !isEvent);
+}
+
+function parentCalendarBounds() {
+  var now = new Date();
+  now.setHours(0, 0, 0, 0);
+  var start = new Date(now);
+  var end = new Date(now);
+  var label = '';
+
+  if (parentCalendarView === 'week') {
+    start = startOfWeek(now);
+    end = addDays(start, 6);
+    label = start.toLocaleDateString([], { month: 'short', day: 'numeric' })
+      + ' – '
+      + end.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  } else if (parentCalendarView === 'month') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    label = start.toLocaleDateString([], { month: 'long', year: 'numeric' });
+  } else {
+    label = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  }
+
+  end.setHours(23, 59, 59, 999);
+  return { start: start, end: end, label: label };
+}
+
+function parentCalendarDayKey(item) {
+  if (item.occurrenceDate) return item.occurrenceDate;
+  var when = item.startAt || item.occurrenceAt || '';
+  return String(when).slice(0, 10);
+}
+
+function parentCalendarItemTime(item) {
+  if (item.kind === 'chore') {
+    if (item.cycle === 'daily') return 'Daily chore';
+    if (item.cycle === 'weekly') return 'Weekly chore';
+    if (!item.occurrenceAt) return 'One-off chore';
+    return new Date(item.occurrenceAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  if (!item.startAt) return '';
+  var start = new Date(item.startAt);
+  var startText = start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (item.kind === 'event' && item.endAt) {
+    var end = new Date(item.endAt);
+    return startText + ' – ' + end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  return startText;
+}
+
+function parentCalendarWho(item) {
+  if (item.kind === 'chore') {
+    var kid = state.people.find(function(person) { return person.id === item.kidId; });
+    return kid ? kid.emoji + ' ' + kid.name : 'Kid';
+  }
+  if (item.personId === null || item.personId === undefined) return 'Whole family';
+  var person = state.people.find(function(p) { return p.id === item.personId; });
+  return person ? person.emoji + ' ' + person.name : 'Assigned kid';
+}
+
+function renderParentCalendarChecklists(item) {
+  if (item.kind !== 'event') return '';
+  var prepLists = Array.isArray(item.prepLists) ? item.prepLists : [];
+  var adultActions = Array.isArray(item.adultActions) ? item.adultActions : [];
+  var prepHtml = prepLists.map(function(list, listIndex) {
+    var kid = state.people.find(function(person) { return person.id === list.personId; });
+    var kidLabel = kid ? kid.emoji + ' ' + kid.name : 'Kid prep';
+    var items = (list.items || []).map(function(entry, itemIndex) {
+      return '<label class="check-row">'
+        + '<input type="checkbox" ' + (entry.done ? 'checked' : '')
+        + ' onchange="parentTogglePrepItem(\'' + jsq(item.id) + '\', ' + listIndex + ', ' + itemIndex + ', this.checked)">'
+        + '<span>' + esc(entry.text) + '</span>'
+        + '</label>';
+    }).join('') || '<div class="sub">No prep items yet.</div>';
+    return '<div class="parent-calendar-checklist">'
+      + '<strong>' + esc(kidLabel) + '</strong>'
+      + items
+      + '</div>';
+  }).join('') || '<div class="sub">No kid prep lists yet.</div>';
+  var adultHtml = adultActions.map(function(action, index) {
+    return '<label class="check-row">'
+      + '<input type="checkbox" ' + (action.done ? 'checked' : '')
+      + ' onchange="parentToggleAdultAction(\'' + jsq(item.id) + '\', ' + index + ', this.checked)">'
+      + '<span>' + esc(action.text) + '</span>'
+      + '</label>';
+  }).join('') || '<div class="sub">No adult actions yet.</div>';
+  return '<div class="parent-calendar-inline-actions">'
+      + '<button class="btn ghost small" onclick="parentAddPrepItem(\'' + jsq(item.id) + '\')">+ Prep item</button>'
+      + '<button class="btn ghost small" onclick="parentAddAdultAction(\'' + jsq(item.id) + '\')">+ Adult action</button>'
+    + '</div>'
+    + '<div class="parent-calendar-checklist"><strong>Prep lists</strong>' + prepHtml + '</div>'
+    + '<div class="parent-calendar-checklist"><strong>Adult actions</strong>' + adultHtml + '</div>';
+}
+
+function renderParentCalendar() {
+  var range = document.getElementById('p-calendar-range');
+  var list = document.getElementById('p-calendar-list');
+  if (!range || !list) return;
+
+  ['day', 'week', 'month'].forEach(function(name) {
+    var btn = document.getElementById('p-calendar-view-' + name);
+    if (btn) btn.classList.toggle('active', name === parentCalendarView);
+  });
+
+  var bounds = parentCalendarBounds();
+  range.textContent = bounds.label;
+
+  if (parentCalendarLoading) {
+    list.innerHTML = '<div class="parent-calendar-loading">'
+      + '<div class="parent-calendar-skel"><div class="parent-calendar-skel-line short"></div><div class="parent-calendar-skel-line"></div><div class="parent-calendar-skel-line short"></div></div>'
+      + '<div class="parent-calendar-skel"><div class="parent-calendar-skel-line short"></div><div class="parent-calendar-skel-line"></div><div class="parent-calendar-skel-line short"></div></div>'
+      + '</div>';
+    return;
+  }
+
+  var byDay = {};
+  (parentCalendarItems || []).forEach(function(item) {
+    var key = parentCalendarDayKey(item);
+    if (!key) return;
+    if (!byDay[key]) byDay[key] = [];
+    byDay[key].push(item);
+  });
+  var days = Object.keys(byDay).sort();
+  if (days.length === 0) {
+    list.innerHTML = buildEmptyState('🗓️', 'No calendar items in this range.', 'Add an event or reminder above.');
+    return;
+  }
+
+  list.innerHTML = days.map(function(dayKey) {
+    var dayItems = byDay[dayKey].slice().sort(function(a, b) {
+      var aWhen = a.startAt || a.occurrenceAt || '';
+      var bWhen = b.startAt || b.occurrenceAt || '';
+      return aWhen < bWhen ? -1 : aWhen > bWhen ? 1 : 0;
+    });
+    var heading = new Date(dayKey + 'T12:00:00').toLocaleDateString([], {
+      weekday: 'long',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    return '<div class="card parent-card">'
+      + '<h3 class="parent-section-title">' + esc(heading) + '</h3>'
+      + '<div class="parent-list">' + dayItems.map(function(item) {
+          var canManage = item.kind === 'event' || item.kind === 'reminder';
+          var notes = item.notes ? '<div class="sub">📝 ' + esc(item.notes) + '</div>' : '';
+          var actions = canManage
+            ? '<div class="parent-actions">'
+              + '<button class="btn ghost small" onclick="parentEditPlanningItem(\'' + jsq(item.id) + '\')">Edit</button>'
+              + '<button class="btn red-ghost small" onclick="parentDeletePlanningItem(\'' + jsq(item.id) + '\')">Delete</button>'
+              + '</div>'
+            : '';
+          return '<div class="parent-list-row">'
+            + '<div class="parent-copy">'
+            + '<span class="parent-list-title">' + esc(item.title || 'Untitled') + '</span>'
+            + '<div class="sub"><span class="tag parent-calendar-kind">' + esc(item.kind || 'item') + '</span>'
+            + ' · ' + esc(parentCalendarItemTime(item))
+            + ' · ' + esc(parentCalendarWho(item))
+            + (item.kind === 'chore' && item.points ? ' · ' + item.points + ' pts' : '')
+            + '</div>'
+            + notes
+            + renderParentCalendarChecklists(item)
+            + actions
+            + '</div>'
+            + '</div>';
+        }).join('') + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function switchParentCalendarView(view) {
+  if (parentCalendarView === view) return;
+  parentCalendarView = view;
+  renderParentCalendar();
+  loadParentCalendar();
+}
+
+async function loadParentCalendar() {
+  if (!session || session.role !== 'parent') return;
+  parentCalendarLoading = true;
+  renderParentCalendar();
+  var bounds = parentCalendarBounds();
+  var result;
+  try {
+    result = await api({
+      action: 'calendar',
+      parentId: session.personId,
+      parentPin: session.pin,
+      start: bounds.start.toISOString(),
+      end: bounds.end.toISOString(),
+    });
+  } catch (e) {
+    parentCalendarLoading = false;
+    parentCalendarItems = [];
+    renderParentCalendar();
+    toast('Could not load the calendar right now.');
+    return;
+  }
+  if (result && result.ok === false) {
+    parentCalendarLoading = false;
+    renderParentCalendar();
+    toast(result.error || 'Could not load the calendar right now.');
+    return;
+  }
+  parentCalendarItems = Array.isArray(result && result.items) ? result.items : [];
+  parentCalendarLoading = false;
+  renderParentCalendar();
+}
+
 function formatDue(iso) {
   var d = new Date(iso);
   var now = new Date();
@@ -1682,10 +2021,17 @@ function renderParent(person) {
 
   var sel = document.getElementById('p-kid');
   var current = sel.value;
-  sel.innerHTML = kidsOnly().map(function(k) {
+  var kidOptions = kidsOnly().map(function(k) {
     return '<option value="' + k.id + '">' + k.emoji + ' ' + esc(k.name) + '</option>';
   }).join('');
+  sel.innerHTML = kidOptions;
   if (current) sel.value = current;
+  var planningSel = document.getElementById('p-plan-person');
+  if (planningSel) {
+    var planningCurrent = planningSel.value;
+    planningSel.innerHTML = '<option value="">👨‍👩‍👧‍👦 Whole family</option>' + kidOptions;
+    if (planningCurrent) planningSel.value = planningCurrent;
+  }
 
   var cycleLabel = { daily: 'daily', weekly: 'weekly', oneoff: 'one-off' };
   var kids = kidsOnly();
@@ -1783,6 +2129,8 @@ function renderParent(person) {
   document.getElementById('p-quiet-hours-start').value = quietHours ? quietHours.start : '';
   document.getElementById('p-quiet-hours-end').value = quietHours ? quietHours.end : '';
 
+  updatePlanningTypeVisibility();
+  renderParentCalendar();
   syncParentTab(false);
 }
 
@@ -2026,6 +2374,197 @@ async function parentAddTask() {
   document.getElementById('p-due').value   = '';
   toast('Task allocated! 📬');
   await api(payload);
+}
+
+async function parentAddPlanningItem() {
+  var title = document.getElementById('p-plan-title').value.trim();
+  if (!title) { toast('Enter a title first.'); return; }
+  var type = document.getElementById('p-plan-type').value;
+  var startInput = document.getElementById('p-plan-start').value;
+  if (!startInput) { toast('Choose a start date and time.'); return; }
+  var start = new Date(startInput);
+  if (Number.isNaN(start.getTime())) { toast('Choose a valid start date and time.'); return; }
+  var endInput = document.getElementById('p-plan-end').value;
+  var endAt = null;
+  if (type === 'event' && endInput) {
+    var end = new Date(endInput);
+    if (Number.isNaN(end.getTime())) { toast('Choose a valid end date and time.'); return; }
+    endAt = end.toISOString();
+  }
+  var result = await api({
+    action: 'addPlanningItem',
+    parentId: session.personId,
+    parentPin: session.pin,
+    title: title,
+    type: type,
+    startAt: start.toISOString(),
+    endAt: endAt,
+    personId: document.getElementById('p-plan-person').value || null,
+    notes: document.getElementById('p-plan-notes').value.trim() || null,
+  });
+  if (toastApiError(result)) return;
+  document.getElementById('p-plan-title').value = '';
+  document.getElementById('p-plan-start').value = '';
+  document.getElementById('p-plan-end').value = '';
+  document.getElementById('p-plan-notes').value = '';
+  toast(type === 'event' ? 'Event added.' : 'Reminder added.');
+  await loadParentCalendar();
+}
+
+function planningUpdatePayload(item) {
+  return {
+    action: 'updatePlanningItem',
+    parentId: session.personId,
+    parentPin: session.pin,
+    planningItemId: item.id,
+    title: item.title,
+    type: item.kind || item.type,
+    startAt: item.startAt,
+    endAt: item.endAt || null,
+    personId: item.personId === undefined ? null : item.personId,
+    notes: item.notes || null,
+    prepLists: Array.isArray(item.prepLists) ? item.prepLists.map(function(list) {
+      return {
+        personId: list.personId,
+        items: (list.items || []).map(function(entry) {
+          return { text: entry.text, done: !!entry.done };
+        }),
+      };
+    }) : [],
+    adultActions: Array.isArray(item.adultActions) ? item.adultActions.map(function(action) {
+      return { text: action.text, done: !!action.done };
+    }) : [],
+  };
+}
+
+async function parentUpdatePlanningItem(itemId, mutatePayload, successMessage) {
+  var item = (parentCalendarItems || []).find(function(entry) { return entry.id === itemId; });
+  if (!item) { toast('Calendar item not found.'); return false; }
+  var payload = planningUpdatePayload(item);
+  if (mutatePayload) mutatePayload(payload, item);
+  var result = await api(payload);
+  if (toastApiError(result)) return false;
+  if (successMessage) toast(successMessage);
+  await loadParentCalendar();
+  return true;
+}
+
+async function parentEditPlanningItem(itemId) {
+  var item = (parentCalendarItems || []).find(function(entry) { return entry.id === itemId; });
+  if (!item) { toast('Calendar item not found.'); return; }
+  var title = prompt('Title?', item.title || '');
+  if (title === null) return;
+  title = title.trim();
+  if (!title) { toast('Enter a title first.'); return; }
+  var typeDefault = (item.kind || item.type) === 'reminder' ? '2' : '1';
+  var typeInput = prompt('Type?\n1) Event  2) Reminder', typeDefault);
+  if (typeInput === null) return;
+  var type = String(typeInput).trim() === '2' ? 'reminder' : String(typeInput).trim() === '1' ? 'event' : '';
+  if (!type) { toast('Choose 1 or 2 for type.'); return; }
+  var startInput = prompt('Starts (YYYY-MM-DDTHH:mm)', planningDateToLocalInput(item.startAt));
+  if (startInput === null) return;
+  var start = new Date(startInput.trim());
+  if (Number.isNaN(start.getTime())) { toast('Choose a valid start date and time.'); return; }
+  var endAt = null;
+  if (type === 'event') {
+    var endInput = prompt('Ends (optional, YYYY-MM-DDTHH:mm)', planningDateToLocalInput(item.endAt));
+    if (endInput === null) return;
+    if (endInput.trim()) {
+      var end = new Date(endInput.trim());
+      if (Number.isNaN(end.getTime())) { toast('Choose a valid end date and time.'); return; }
+      endAt = end.toISOString();
+    }
+  }
+  var kidChoices = ['0) Whole family'].concat(kidsOnly().map(function(kid, index) {
+    return (index + 1) + ') ' + kid.emoji + ' ' + kid.name;
+  }));
+  var defaultChoice = 0;
+  if (item.personId) {
+    defaultChoice = Math.max(0, kidsOnly().findIndex(function(kid) { return kid.id === item.personId; }) + 1);
+  }
+  var whoInput = prompt('Assign to:\n' + kidChoices.join('\n'), String(defaultChoice));
+  if (whoInput === null) return;
+  var whoIndex = Number(whoInput.trim());
+  if (!Number.isInteger(whoIndex) || whoIndex < 0 || whoIndex > kidsOnly().length) {
+    toast('Choose a valid person number.');
+    return;
+  }
+  var personId = whoIndex === 0 ? null : kidsOnly()[whoIndex - 1].id;
+  var notesInput = prompt('Notes (optional)', item.notes || '');
+  if (notesInput === null) return;
+  await parentUpdatePlanningItem(itemId, function(payload) {
+    payload.title = title;
+    payload.type = type;
+    payload.startAt = start.toISOString();
+    payload.endAt = type === 'event' ? endAt : null;
+    payload.personId = personId;
+    payload.notes = notesInput.trim() || null;
+    if (type === 'reminder') {
+      payload.prepLists = [];
+      payload.adultActions = [];
+    }
+  }, 'Calendar item updated.');
+}
+
+async function parentDeletePlanningItem(itemId) {
+  if (!confirm('Delete this calendar item?')) return;
+  var result = await api({
+    action: 'deletePlanningItem',
+    parentId: session.personId,
+    parentPin: session.pin,
+    planningItemId: itemId,
+  });
+  if (toastApiError(result)) return;
+  toast('Calendar item deleted.');
+  await loadParentCalendar();
+}
+
+async function parentTogglePrepItem(itemId, listIndex, itemIndex, checked) {
+  await parentUpdatePlanningItem(itemId, function(payload) {
+    if (!payload.prepLists[listIndex] || !payload.prepLists[listIndex].items[itemIndex]) return;
+    payload.prepLists[listIndex].items[itemIndex].done = !!checked;
+  });
+}
+
+async function parentToggleAdultAction(itemId, actionIndex, checked) {
+  await parentUpdatePlanningItem(itemId, function(payload) {
+    if (!payload.adultActions[actionIndex]) return;
+    payload.adultActions[actionIndex].done = !!checked;
+  });
+}
+
+async function parentAddPrepItem(itemId) {
+  var kids = kidsOnly();
+  if (kids.length === 0) { toast('Add a kid first.'); return; }
+  var choice = prompt('Which kid prep list?\n' + kids.map(function(kid, index) {
+    return (index + 1) + ') ' + kid.emoji + ' ' + kid.name;
+  }).join('\n'), '1');
+  if (choice === null) return;
+  var choiceIndex = Number(choice.trim()) - 1;
+  var kid = kids[choiceIndex];
+  if (!kid) { toast('Choose a valid kid number.'); return; }
+  var text = prompt('Prep item?');
+  if (text === null) return;
+  text = text.trim();
+  if (!text) { toast('Enter a prep item.'); return; }
+  await parentUpdatePlanningItem(itemId, function(payload) {
+    var prepList = payload.prepLists.find(function(list) { return list.personId === kid.id; });
+    if (!prepList) {
+      prepList = { personId: kid.id, items: [] };
+      payload.prepLists.push(prepList);
+    }
+    prepList.items.push({ text: text, done: false });
+  }, 'Prep item added.');
+}
+
+async function parentAddAdultAction(itemId) {
+  var text = prompt('Adult action?');
+  if (text === null) return;
+  text = text.trim();
+  if (!text) { toast('Enter an adult action.'); return; }
+  await parentUpdatePlanningItem(itemId, function(payload) {
+    payload.adultActions.push({ text: text, done: false });
+  }, 'Adult action added.');
 }
 
 async function parentApprove(completionId, isExtra) {
