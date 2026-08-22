@@ -13,7 +13,7 @@ Four labels drive everything. You add a label; agents do the rest.
        ▼
   ARCHITECT (Claude)    → posts "Technical approach" as a comment
        │
-       │  BUILD QUEUE drains 4/day, oldest first,
+       │  BUILD QUEUE wakes on merges and labels, oldest first,
        │  skipping epics and anything with an open dependency
        ▼
   DEVELOPER (Copilot)   → branch + pull request
@@ -96,18 +96,26 @@ way:
 The queue skips anything that is an epic, already assigned to Copilot, or has
 an open issue named in a `Depends on #N` line in its body.
 
-**Pace: every 30 minutes, up to 3 at a time.** This is deliberately fast — the
-initial build-out of the backlog is a watched, one-off exercise, not steady
-state. Expect it to consume the Copilot allowance quickly; it hard-stops rather
-than billing.
+**It runs on events, not a clock.** The queue wakes whenever something could
+have changed what is buildable:
+
+| Event | Why it matters |
+|---|---|
+| A `build` label is added | That issue may be ready to start immediately |
+| A pull request is merged or closed | Whatever depended on it may now be unblocked |
+| An issue is closed | Same |
+| Hourly schedule | Safety net only, for events that get missed |
+
+So a chain like #33 → #34 → #35 flows straight through: #33's PR merges, #33
+closes, the queue wakes within seconds and starts #34 and #35 — no waiting for
+a timer.
+
+**Up to 3 start at once** (`MAX_PER_RUN` in the workflow). That is set for the
+initial build-out; drop it to 1 for ongoing feature work, along with the daily
+guards in `elaborate.yml` / `architect.yml` back to ~10.
 
 **The dependency check is not a pacing device** and stays whatever the speed:
 it stops Copilot writing against code that does not exist yet.
-
-**When the backlog is built, slow it down.** In `build-queue.yml` set the cron
-to `0 */6 * * *` and `MAX_PER_RUN=1`, and drop the daily guards in
-`elaborate.yml` / `architect.yml` back to ~10. Ongoing feature work does not
-want a firehose.
 
 To jump the queue for one issue: Actions → *Build an issue with Copilot* → Run
 workflow → issue number.
@@ -135,7 +143,7 @@ rule is: build the sub-issues, not the parent.
 |---|---|---|
 | Elaborator runs | 20 / rolling 24h | Anthropic spend |
 | Architect runs | 20 / rolling 24h | Anthropic spend |
-| Copilot builds | 3 per 30 min via the queue, 30 / rolling 24h hard cap | Copilot credits are finite and monthly |
+| Copilot builds | 3 at a time via the queue, 30 / rolling 24h hard cap | Copilot credits are finite and monthly |
 
 > Those numbers are raised for the initial build-out. See *The build queue*
 > below for what to set them back to afterwards.
