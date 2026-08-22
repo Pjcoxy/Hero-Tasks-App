@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "14626833612456619636"
+      "templateHash": "5753917081134753069"
     }
   },
   "parameters": {
@@ -51,11 +51,39 @@
         "description": "Azure Static Web App SKU. Free (F1) is sufficient for this project."
       }
     },
+    "staticWebAppLocation": {
+      "type": "string",
+      "defaultValue": "eastasia",
+      "allowedValues": [
+        "centralus",
+        "eastus2",
+        "westus2",
+        "westeurope",
+        "eastasia"
+      ],
+      "metadata": {
+        "description": "Azure region for the Static Web App. Static Web Apps only runs in a small subset of regions (independent of where everything else is deployed) — allowed values are exactly the regions Azure currently supports for this resource type."
+      }
+    },
     "llmApiKey": {
       "type": "securestring",
       "defaultValue": "",
       "metadata": {
         "description": "Optional secure value for seeding the llm-api-key secret in Key Vault (the voice-note intent-validation LLM)."
+      }
+    },
+    "vapidPrivateKey": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional secure value for seeding the VAPID private key secret in Key Vault."
+      }
+    },
+    "vapidPublicKey": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Base64URL-encoded VAPID public key exposed to the frontend via the Function App."
       }
     },
     "storageBlobDataContributorRoleDefinitionId": {
@@ -86,6 +114,7 @@
     "keyVaultName": "[format('herotasks-kv-{0}', parameters('env'))]",
     "keyVaultDnsSuffix": "[environment().suffixes.keyvaultDns]",
     "llmApiKeySecretUri": "[format('https://{0}.{1}/secrets/llm-api-key/', variables('keyVaultName'), variables('keyVaultDnsSuffix'))]",
+    "vapidPrivateKeySecretUri": "[format('https://{0}.{1}/secrets/vapid-private-key/', variables('keyVaultName'), variables('keyVaultDnsSuffix'))]",
     "cosmosAccountName": "[toLower(replace(format('herotasks-cosmos-{0}', parameters('env')), '-', ''))]",
     "cosmosEndpoint": "[format('https://{0}.documents.azure.com:443/', variables('cosmosAccountName'))]",
     "cosmosDatabaseName": "herotasks"
@@ -130,12 +159,13 @@
         },
         "template": {
           "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "languageVersion": "2.0",
           "contentVersion": "1.0.0.0",
           "metadata": {
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "8286788855793327528"
+              "templateHash": "7540399389437580298"
             }
           },
           "parameters": {
@@ -162,8 +192,8 @@
           "variables": {
             "storageAccountName": "[toLower(replace(format('herotasksstorage{0}', parameters('env')), '-', ''))]"
           },
-          "resources": [
-            {
+          "resources": {
+            "storageAccount": {
               "type": "Microsoft.Storage/storageAccounts",
               "apiVersion": "2023-05-01",
               "name": "[variables('storageAccountName')]",
@@ -175,12 +205,12 @@
               "properties": {
                 "accessTier": "Hot",
                 "allowBlobPublicAccess": false,
-                "allowSharedKeyAccess": false,
+                "allowSharedKeyAccess": true,
                 "minimumTlsVersion": "TLS1_2",
                 "supportsHttpsTrafficOnly": true
               }
             }
-          ],
+          },
           "outputs": {
             "storageAccountId": {
               "type": "string",
@@ -189,6 +219,10 @@
             "storageAccountName": {
               "type": "string",
               "value": "[variables('storageAccountName')]"
+            },
+            "connectionString": {
+              "type": "securestring",
+              "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', variables('storageAccountName'), listKeys('storageAccount', '2023-05-01').keys[0].value, environment().suffixes.storage)]"
             }
           }
         }
@@ -210,8 +244,8 @@
           "location": {
             "value": "[parameters('location')]"
           },
-          "storageAccountName": {
-            "value": "[reference('storage').outputs.storageAccountName.value]"
+          "storageConnectionString": {
+            "value": "[listOutputsWithSecureValues('storage', '2025-04-01').connectionString]"
           },
           "workerRuntime": {
             "value": "[parameters('functionWorkerRuntime')]"
@@ -227,6 +261,12 @@
           },
           "llmApiKeySecretUri": {
             "value": "[variables('llmApiKeySecretUri')]"
+          },
+          "vapidPrivateKeySecretUri": {
+            "value": "[variables('vapidPrivateKeySecretUri')]"
+          },
+          "vapidPublicKey": {
+            "value": "[parameters('vapidPublicKey')]"
           }
         },
         "template": {
@@ -236,7 +276,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "11994255678477450852"
+              "templateHash": "14140101707973752752"
             }
           },
           "parameters": {
@@ -252,10 +292,10 @@
                 "description": "Azure region for the Function App and its hosting plan."
               }
             },
-            "storageAccountName": {
-              "type": "string",
+            "storageConnectionString": {
+              "type": "securestring",
               "metadata": {
-                "description": "Storage account name backing the Function host runtime state."
+                "description": "Connection string for the storage account backing the Function host runtime state."
               }
             },
             "workerRuntime": {
@@ -289,6 +329,19 @@
               "type": "string",
               "metadata": {
                 "description": "Key Vault secret URI for the voice-intent LLM API key."
+              }
+            },
+            "vapidPrivateKeySecretUri": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault secret URI for the web push VAPID private key."
+              }
+            },
+            "vapidPublicKey": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Base64URL-encoded VAPID public key exposed to browsers."
               }
             }
           },
@@ -354,12 +407,16 @@
                       "value": "[format('@Microsoft.KeyVault(SecretUri={0})', parameters('llmApiKeySecretUri'))]"
                     },
                     {
-                      "name": "AzureWebJobsStorage__accountName",
-                      "value": "[parameters('storageAccountName')]"
+                      "name": "VAPID_PRIVATE_KEY",
+                      "value": "[format('@Microsoft.KeyVault(SecretUri={0})', parameters('vapidPrivateKeySecretUri'))]"
                     },
                     {
-                      "name": "AzureWebJobsStorage__credential",
-                      "value": "managedidentity"
+                      "name": "VAPID_PUBLIC_KEY",
+                      "value": "[parameters('vapidPublicKey')]"
+                    },
+                    {
+                      "name": "AzureWebJobsStorage",
+                      "value": "[parameters('storageConnectionString')]"
                     }
                   ]
                 }
@@ -415,6 +472,9 @@
           "llmApiKey": {
             "value": "[parameters('llmApiKey')]"
           },
+          "vapidPrivateKey": {
+            "value": "[parameters('vapidPrivateKey')]"
+          },
           "enablePublicNetworkAccess": {
             "value": "[parameters('enableKeyVaultPublicAccess')]"
           }
@@ -426,7 +486,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "13752764176501468457"
+              "templateHash": "1926968206821968668"
             }
           },
           "parameters": {
@@ -453,6 +513,13 @@
               "defaultValue": "",
               "metadata": {
                 "description": "Secure value for the voice-intent LLM API key. Leave empty to skip seeding this secret."
+              }
+            },
+            "vapidPrivateKey": {
+              "type": "securestring",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Secure VAPID private key for browser push subscriptions. Leave empty to skip seeding this secret."
               }
             },
             "keyVaultRoleDefinitionId": {
@@ -518,6 +585,18 @@
               "dependsOn": [
                 "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
               ]
+            },
+            {
+              "condition": "[not(empty(parameters('vapidPrivateKey')))]",
+              "type": "Microsoft.KeyVault/vaults/secrets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}/{1}', variables('keyVaultName'), 'vapid-private-key')]",
+              "properties": {
+                "value": "[parameters('vapidPrivateKey')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+              ]
             }
           ],
           "outputs": {
@@ -573,7 +652,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "13823117976463526779"
+              "templateHash": "7397736350690117187"
             }
           },
           "parameters": {
@@ -618,6 +697,7 @@
               "chores",
               "completions",
               "rewards",
+              "pushSubscriptions",
               "planningItems",
               "auditEvents"
             ]
@@ -752,16 +832,10 @@
             "value": "[parameters('env')]"
           },
           "location": {
-            "value": "[parameters('location')]"
+            "value": "[parameters('staticWebAppLocation')]"
           },
           "sku": {
             "value": "[parameters('staticWebAppSku')]"
-          },
-          "linkedFunctionAppId": {
-            "value": "[reference('functionApp').outputs.functionAppId.value]"
-          },
-          "linkedFunctionAppLocation": {
-            "value": "[parameters('location')]"
           }
         },
         "template": {
@@ -772,7 +846,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "2941807685387417589"
+              "templateHash": "1524535071112845832"
             }
           },
           "parameters": {
@@ -795,19 +869,7 @@
                 "Free"
               ],
               "metadata": {
-                "description": "Azure Static Web App SKU. Free is sufficient at this scale."
-              }
-            },
-            "linkedFunctionAppId": {
-              "type": "string",
-              "metadata": {
-                "description": "Resource ID of the Function App to link as this Static Web App's backend (shares auth/CORS automatically, no manual CORS config needed on the frontend side)."
-              }
-            },
-            "linkedFunctionAppLocation": {
-              "type": "string",
-              "metadata": {
-                "description": "Region the linked Function App is deployed in."
+                "description": "Azure Static Web App SKU. Free is sufficient at this scale. Note: linkedBackends (linking a separate Function App as this SWA's backend) requires the Standard tier — not used here on purpose, to stay on Free. The frontend calls the Function App directly by its own hostname instead; CORS on the Function App (see functionapp.bicep) covers this."
               }
             }
           },
@@ -827,18 +889,6 @@
               "properties": {
                 "provider": "None"
               }
-            },
-            "linkedBackend": {
-              "type": "Microsoft.Web/staticSites/linkedBackends",
-              "apiVersion": "2024-04-01",
-              "name": "[format('{0}/{1}', variables('staticWebAppName'), 'herotasks-api')]",
-              "properties": {
-                "backendResourceId": "[parameters('linkedFunctionAppId')]",
-                "region": "[parameters('linkedFunctionAppLocation')]"
-              },
-              "dependsOn": [
-                "staticWebApp"
-              ]
             }
           },
           "outputs": {
@@ -856,10 +906,7 @@
             }
           }
         }
-      },
-      "dependsOn": [
-        "functionApp"
-      ]
+      }
     }
   },
   "outputs": {

@@ -57,6 +57,7 @@ async function getState() {
 
   return {
     ok: true,
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY || '',
     people: people.map((p) => ({ id: p.id, name: p.name, emoji: p.emoji, role: p.role, hasPin: !!p.pin })),
     rewards: rewardDocs.map((r) => ({ id: r.id, title: r.title, cost: r.cost, needsApproval: r.needsApproval })),
     redemptions: redemptionDocs
@@ -118,6 +119,56 @@ async function login(req) {
     return { ok: false, error: 'Wrong PIN' };
   }
   return { ok: true, role: person.role };
+}
+
+async function savePushSubscription(req) {
+  const personId = String(req.personId || '').trim();
+  const subscription = req.subscription || {};
+  const endpoint = String(subscription.endpoint || '').trim();
+  const p256dh = String(subscription.keys && subscription.keys.p256dh || '').trim();
+  const auth = String(subscription.keys && subscription.keys.auth || '').trim();
+
+  if (!personId || !endpoint || !p256dh || !auth) {
+    return { ok: false, error: 'Invalid push subscription' };
+  }
+
+  const { resource: person } = await container('people')
+    .item(personId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!person) return { ok: false, error: 'Person not found' };
+
+  const existing = (await queryHousehold('pushSubscriptions')).find(
+    (doc) => doc.personId === personId && doc.endpoint === endpoint
+  );
+  await container('pushSubscriptions').items.upsert({
+    id: existing && existing.id ? existing.id : randomUUID(),
+    householdId: HOUSEHOLD_ID,
+    personId,
+    endpoint,
+    keys: { p256dh, auth },
+    createdAt: existing && existing.createdAt ? existing.createdAt : new Date().toISOString(),
+  });
+  return { ok: true };
+}
+
+async function removePushSubscription(req) {
+  const personId = String(req.personId || '').trim();
+  const endpoint = String(req.endpoint || '').trim();
+  if (!personId || !endpoint) return { ok: false, error: 'personId and endpoint are required' };
+
+  const matches = (await queryHousehold('pushSubscriptions')).filter(
+    (doc) => doc.personId === personId && doc.endpoint === endpoint
+  );
+  await Promise.all(
+    matches.map((doc) =>
+      container('pushSubscriptions')
+        .item(doc.id, HOUSEHOLD_ID)
+        .delete()
+        .catch(() => {})
+    )
+  );
+  return { ok: true };
 }
 
 async function addTask(req) {
@@ -400,6 +451,8 @@ async function cancelRedemption(req) {
 const ROUTES = {
   state: () => getState(),
   login,
+  savePushSubscription,
+  removePushSubscription,
   addTask,
   deleteTask,
   completeTask,
@@ -442,4 +495,4 @@ app.http('hero', {
   },
 });
 
-module.exports = { getState, calcStreak };
+module.exports = { getState, calcStreak, ROUTES };

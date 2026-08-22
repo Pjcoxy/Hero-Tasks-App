@@ -25,6 +25,7 @@ var householdScopedContainers = [
   'chores'
   'completions'
   'rewards'
+  'pushSubscriptions'
   'planningItems'
   'auditEvents'
 ]

@@ -23,6 +23,12 @@ param cosmosDatabaseName string = 'herotasks'
 @description('Key Vault secret URI for the voice-intent LLM API key.')
 param llmApiKeySecretUri string
 
+@description('Key Vault secret URI for the web push VAPID private key.')
+param vapidPrivateKeySecretUri string
+
+@description('Base64URL-encoded VAPID public key exposed to browsers.')
+param vapidPublicKey string = ''
+
 var functionAppName = 'herotasks-func-${env}'
 var hostingPlanName = 'herotasks-plan-${env}'
 
@@ -79,6 +85,14 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'LLM_API_KEY'
           value: '@Microsoft.KeyVault(SecretUri=${llmApiKeySecretUri})'
+        }
+        {
+          name: 'VAPID_PRIVATE_KEY'
+          value: '@Microsoft.KeyVault(SecretUri=${vapidPrivateKeySecretUri})'
+        }
+        {
+          name: 'VAPID_PUBLIC_KEY'
+          value: vapidPublicKey
         }
         {
           name: 'AzureWebJobsStorage'

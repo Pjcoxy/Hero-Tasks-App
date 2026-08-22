@@ -23,6 +23,13 @@ param staticWebAppLocation string = 'eastasia'
 @secure()
 param llmApiKey string = ''
 
+@description('Optional secure value for seeding the VAPID private key secret in Key Vault.')
+@secure()
+param vapidPrivateKey string = ''
+
+@description('Base64URL-encoded VAPID public key exposed to the frontend via the Function App.')
+param vapidPublicKey string = ''
+
 @description('Built-in Storage Blob Data Contributor role definition ID.')
 param storageBlobDataContributorRoleDefinitionId string = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 
@@ -37,6 +44,7 @@ var functionAppName = 'herotasks-func-${env}'
 var keyVaultName = 'herotasks-kv-${env}'
 var keyVaultDnsSuffix = environment().suffixes.keyvaultDns
 var llmApiKeySecretUri = 'https://${keyVaultName}.${keyVaultDnsSuffix}/secrets/llm-api-key/'
+var vapidPrivateKeySecretUri = 'https://${keyVaultName}.${keyVaultDnsSuffix}/secrets/vapid-private-key/'
 var cosmosAccountName = toLower(replace('herotasks-cosmos-${env}', '-', ''))
 var cosmosEndpoint = 'https://${cosmosAccountName}.documents.azure.com:443/'
 var cosmosDatabaseName = 'herotasks'
@@ -60,6 +68,8 @@ module functionApp './modules/functionapp.bicep' = {
     cosmosEndpoint: cosmosEndpoint
     cosmosDatabaseName: cosmosDatabaseName
     llmApiKeySecretUri: llmApiKeySecretUri
+    vapidPrivateKeySecretUri: vapidPrivateKeySecretUri
+    vapidPublicKey: vapidPublicKey
   }
 }
 
@@ -70,6 +80,7 @@ module keyVault './modules/keyvault.bicep' = {
     location: location
     functionPrincipalId: functionApp.outputs.functionPrincipalId
     llmApiKey: llmApiKey
+    vapidPrivateKey: vapidPrivateKey
     enablePublicNetworkAccess: enableKeyVaultPublicAccess
   }
 }

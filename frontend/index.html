@@ -243,6 +243,7 @@ const CHEERS = [
 let state = null;
 let session = JSON.parse(localStorage.getItem('hero-session') || 'null');
 let pinTarget = null;
+let pushSetupPersonId = null;
 
 async function api(payload) {
   const res = await fetch(API_URL, {
@@ -264,6 +265,47 @@ async function refresh() {
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('setup-warn').classList.remove('hidden');
   }
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const normalized = (base64String + '='.repeat((4 - (base64String.length % 4 || 4)) % 4))
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
+  const rawData = atob(normalized);
+  return Uint8Array.from(rawData, c => c.charCodeAt(0));
+}
+
+async function ensurePushSubscription() {
+  if (!session || !state || pushSetupPersonId === session.personId) return;
+  pushSetupPersonId = session.personId;
+
+  if (!state.vapidPublicKey || !('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    if (!registration.pushManager) return;
+
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      if (Notification.permission === 'denied') return;
+      const permission = Notification.permission === 'granted'
+        ? 'granted'
+        : await Notification.requestPermission();
+      if (permission !== 'granted') return;
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(state.vapidPublicKey),
+      });
+    }
+
+    await api({
+      action: 'savePushSubscription',
+      personId: session.personId,
+      subscription: subscription.toJSON ? subscription.toJSON() : subscription,
+    });
+  } catch (_) {}
 }
 
 function todayStr() {
@@ -304,9 +346,11 @@ function render() {
   } else if (session.role === 'kid') {
     renderKid(person);
     show('screen-kid');
+    ensurePushSubscription();
   } else {
     renderParent(person);
     show('screen-parent');
+    ensurePushSubscription();
   }
 }
 
@@ -600,6 +644,7 @@ async function submitPin() {
 function saveSession() { localStorage.setItem('hero-session', JSON.stringify(session)); }
 function logout() {
   session = null;
+  pushSetupPersonId = null;
   localStorage.removeItem('hero-session');
   render();
 }

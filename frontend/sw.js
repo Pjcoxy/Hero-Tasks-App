@@ -4,7 +4,7 @@
 // cached copy if the network request actually fails. A cache-first strategy
 // here would silently keep serving old code forever after every deploy,
 // which is exactly the bug this replaced.
-const CACHE_NAME = 'hero-tasks-shell-v2';
+const CACHE_NAME = 'hero-tasks-shell-v3';
 const SHELL_FILES = ['/', '/index.html', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
@@ -36,5 +36,43 @@ self.addEventListener('fetch', (event) => {
         return res;
       })
       .catch(() => caches.match(event.request))
+  );
+});
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (_) {
+    data = {};
+  }
+
+  const title = data.title || 'Hero Tasks';
+  const body = data.body || '';
+  const url = data.url || '/';
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      data: { url },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = new URL((event.notification.data && event.notification.data.url) || '/', self.location.origin).href;
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const existingClient = clients.find((client) => client.url === targetUrl || client.url.startsWith(self.location.origin));
+      if (existingClient) {
+        if ('navigate' in existingClient && existingClient.url !== targetUrl) {
+          return existingClient.navigate(targetUrl).then(() => existingClient.focus());
+        }
+        return existingClient.focus();
+      }
+      return self.clients.openWindow(targetUrl);
+    })
   );
 });
