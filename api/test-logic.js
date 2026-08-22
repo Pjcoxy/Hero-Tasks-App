@@ -1206,7 +1206,10 @@ async function main() {
   console.log('✓ completeTask rejects acting as another kid and writes nothing');
 
   // ---- saveVoiceReminder tests ----
-  const planningItems = mockContainer('planningItems');
+  const voicePlanningItems = mockContainer('planningItems');
+  const beforeBlank = (
+    await voicePlanningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()
+  ).resources;
 
   // Blank title should be rejected
   const blankTitleResult = await ROUTES.saveVoiceReminder({
@@ -1218,8 +1221,10 @@ async function main() {
     transcript: '',
   });
   assert.deepStrictEqual(blankTitleResult, { ok: false, error: 'title is required' });
-  const afterBlank = (await planningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
-  assert.strictEqual(afterBlank.length, 0, 'blank title should not write a planningItem');
+  const afterBlank = (
+    await voicePlanningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()
+  ).resources;
+  assert.strictEqual(afterBlank.length, beforeBlank.length, 'blank title should not write a planningItem');
   console.log('✓ saveVoiceReminder rejects blank title without writing');
 
   // Valid save — kid saves a reminder for themselves
@@ -1232,9 +1237,12 @@ async function main() {
     transcript: 'remind me to take out the bins tomorrow morning',
   });
   assert.strictEqual(stateAfterSave.ok, true, 'saveVoiceReminder should return getState() with ok: true');
-  const savedItems = (await planningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
-  assert.strictEqual(savedItems.length, 1, 'one planningItem should be created');
-  const saved = savedItems[0];
+  const savedItems = (
+    await voicePlanningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()
+  ).resources;
+  assert.strictEqual(savedItems.length, beforeBlank.length + 1, 'one planningItem should be created');
+  const saved = savedItems.find((item) => item.source === 'voice' && item.title === 'Take out the bins');
+  assert.ok(saved, 'saved voice reminder should be present');
   assert.strictEqual(saved.kidId, 'toby', 'kidId should match');
   assert.strictEqual(saved.title, 'Take out the bins', 'title should match');
   assert.strictEqual(saved.source, 'voice', 'source should be voice');
@@ -1250,8 +1258,10 @@ async function main() {
     () => ROUTES.saveVoiceReminder({ personId: 'ollie', pin: '1234', kidId: 'toby', title: 'Sneaky reminder' }),
     (err) => err && err.status === 401
   );
-  const afterCrossKid = (await planningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
-  assert.strictEqual(afterCrossKid.length, 1, 'cross-kid save should be rejected without writing');
+  const afterCrossKid = (
+    await voicePlanningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()
+  ).resources;
+  assert.strictEqual(afterCrossKid.length, beforeBlank.length + 1, 'cross-kid save should be rejected without writing');
   console.log('✓ saveVoiceReminder rejects cross-kid save');
 
   console.log('\nALL LOGIC TESTS PASSED');
