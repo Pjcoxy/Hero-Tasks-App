@@ -1,0 +1,26 @@
+name: Request Copilot review
+
+# The tester role: asks GitHub Copilot to review every pull request the coding
+# agent opens. Its findings appear as review comments on the PR.
+
+on:
+  pull_request_target:
+    types: [opened, ready_for_review]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  request:
+    if: github.event.pull_request.user.login == 'Copilot' || endsWith(github.event.pull_request.user.login, '[bot]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask Copilot to review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/requested_reviewers" \
+            -X POST -f "reviewers[]=copilot-pull-request-reviewer[bot]" \
+            && echo "Copilot review requested" \
+            || echo "Could not request Copilot review (it may not be enabled for this repo) - continuing"

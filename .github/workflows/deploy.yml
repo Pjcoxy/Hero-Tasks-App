@@ -1,0 +1,116 @@
+name: Deploy to Azure
+
+# Deploys whichever part of the app changed, on every push to main. Replaces
+# the manual Cloud Shell steps in docs/deploy-app.md (those still work as a
+# fallback).
+#
+# Required repository secrets:
+#   AZURE_STATIC_WEB_APPS_API_TOKEN  - Static Web App deployment token
+#                                      (Portal -> herotasks-swa-dev -> Manage
+#                                      deployment token)
+#   AZURE_FUNCTIONAPP_PUBLISH_PROFILE - Function App publish profile XML
+#                                      (Portal -> herotasks-func-dev ->
+#                                      Get publish profile)
+#
+# Until both secrets exist the relevant job is skipped with a notice rather
+# than failing the run, so merges are never blocked by missing credentials.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Detect what changed
+        id: filter
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "api=true" >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run - deploying both."
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only HEAD^ HEAD || echo "")
+          echo "Changed files:"; echo "$CHANGED"
+          echo "api=$(echo "$CHANGED" | grep -q '^api/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(echo "$CHANGED" | grep -q '^frontend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+  deploy-api:
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for publish profile
+        id: check
+        run: |
+          if [ -z "${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}" ]; then
+            echo "::notice::AZURE_FUNCTIONAPP_PUBLISH_PROFILE not set - skipping API deploy. Add it in Settings -> Secrets -> Actions."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.ok == 'true'
+        with:
+          node-version: "20"
+
+      - name: Install production dependencies
+        if: steps.check.outputs.ok == 'true'
+        working-directory: api
+        run: npm install --omit=dev --no-audit --no-fund
+
+      - name: Deploy to Function App
+        if: steps.check.outputs.ok == 'true'
+        uses: Azure/functions-action@v1
+        with:
+          app-name: herotasks-func-dev
+          package: api
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+
+  deploy-frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for deployment token
+        id: check
+        run: |
+          if [ -z "${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}" ]; then
+            echo "::notice::AZURE_STATIC_WEB_APPS_API_TOKEN not set - skipping frontend deploy. Add it in Settings -> Secrets -> Actions."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy to Static Web App
+        if: steps.check.outputs.ok == 'true'
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          app_location: frontend
+          skip_app_build: true
+          skip_api_build: true

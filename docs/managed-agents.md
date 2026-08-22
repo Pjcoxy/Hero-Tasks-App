@@ -29,10 +29,12 @@ Key ideas:
   *session* pointing at that agent. Updating the persona = edit
   `setup_elaborator.py` and re-run the setup workflow (it versions the agent
   in place).
-- **Audit-first rule.** The backlog is stale against the code (several open
-  issues are already partly built). The Elaborator's standing instructions
-  make it read the actual code before elaborating, report what already
-  exists, and spec only the gap.
+- **Audit-first rule.** The Elaborator reads the actual code before writing a
+  spec. This is where the cost goes (~165k input tokens a run) and also where
+  the value is: it catches work that is already built, corrects wrong
+  dependencies, and — the part that matters most — grounds acceptance criteria
+  in real function names, so a coding agent can build from them without
+  inventing anything structural.
 - **One issue per run, confirmed by you.** Nothing runs until you add the
   `elaborate` label (or dispatch manually). That is the per-item confirmation
   gate.

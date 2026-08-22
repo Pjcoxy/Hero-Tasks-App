@@ -40,11 +40,20 @@ Work in this order:
    docs/mvp-scope-v1.md in the mounted repository for product rules.
 
 2. AUDIT THE CODE FIRST. The repository is mounted read-only in your sandbox.
-   The backlog is known to be stale relative to the code: several open issues
-   describe features that are already partly or fully built. Read the real
-   code (frontend/index.html, api/src/functions/hero.js, api/src/lib/) and
-   establish exactly which parts of the issue already exist. Never spec work
-   that is already built.
+   Backlog items are written at a point in time and the app moves on, so an
+   issue may describe behaviour that already exists, or depend on something
+   that has since been built. Read the real code - frontend/index.html,
+   api/src/functions/hero.js, api/src/lib/, and infra/ for what is already
+   provisioned - and establish what actually exists today.
+
+   This serves two purposes and both matter:
+   - Never spec work that is already built, and correct the issue where its
+     stated dependencies are wrong.
+   - Ground the spec in the real codebase. Name the actual functions,
+     containers and conventions a developer should follow (for example
+     requireParent, getState, the ROUTES table, the soft-delete pattern in
+     deleteTask). Acceptance criteria that name real code are buildable;
+     generic ones are not.
 
 3. Produce the elaboration:
    - "Already built" - what exists today, with file references. May be empty.

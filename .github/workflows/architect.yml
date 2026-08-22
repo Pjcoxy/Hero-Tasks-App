@@ -1,18 +1,15 @@
-name: Elaborate backlog issue
+name: Architect an issue
 
-# Two ways to trigger, both deliberate (one issue per run, per Peter's
-# confirmation-per-item rule):
-#   1. Add the "elaborate" label to an issue.
-#   2. Actions tab -> "Elaborate backlog issue" -> Run workflow -> enter issue number.
+# Trigger: add the "architect" label to an issue, or dispatch manually with an
+# issue number. Posts a technical approach as a comment; writes no code.
 #
-# Guard: refuses to start more than 10 elaborator runs in any rolling 24h window,
-# so with the $2/session budget cap the worst case is ~$20/day.
+# Guard: at most 10 architect runs per rolling 24h.
 
 on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: "Issue number to elaborate"
+        description: "Issue number to design"
         required: true
   issues:
     types: [labeled]
@@ -23,12 +20,12 @@ permissions:
   issues: write
 
 concurrency:
-  group: elaborator-run
+  group: architect-run
   cancel-in-progress: false
 
 jobs:
-  elaborate:
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'elaborate'
+  architect:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'architect'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -38,10 +35,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           SINCE=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
-          COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/elaborate.yml/runs?created=%3E%3D${SINCE}" --jq '.total_count')
-          echo "Elaborator runs in last 24h (including this one): ${COUNT}"
+          COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/architect.yml/runs?created=%3E%3D${SINCE}" --jq '.total_count')
+          echo "Architect runs in last 24h (including this one): ${COUNT}"
           if [ "${COUNT}" -gt 10 ]; then
-            echo "Daily limit of 10 elaborator runs reached - skipping. Try again later or raise the limit in elaborate.yml."
+            echo "Daily limit of 10 architect runs reached - skipping."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
@@ -69,9 +66,9 @@ jobs:
         if: steps.guard.outputs.ok == 'true'
         run: pip install anthropic
 
-      - name: Run the Elaborator
+      - name: Run the Architect
         if: steps.guard.outputs.ok == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.HEROTASK_ANTHROPIC_KEY }}
           HEROTASK_GITHUB_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
-        run: python ops/elaborator/run_elaborator.py "${{ steps.issue.outputs.number }}"
+        run: python ops/architect/run_architect.py "${{ steps.issue.outputs.number }}"

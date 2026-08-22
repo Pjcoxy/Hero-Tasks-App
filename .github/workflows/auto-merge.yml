@@ -1,0 +1,32 @@
+name: Auto-merge agent PRs
+
+# Enables GitHub's auto-merge on pull requests opened by the Copilot coding
+# agent, so they merge themselves once CI is green. Human-authored PRs are
+# untouched - you merge those yourself.
+#
+# Auto-merge only completes when required checks pass; a red CI run leaves the
+# PR open. To stop a specific PR merging, mark it draft or disable auto-merge
+# on the PR itself.
+
+on:
+  pull_request_target:
+    types: [opened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable-auto-merge:
+    # Only PRs authored by the Copilot coding agent.
+    if: github.event.pull_request.user.login == 'Copilot' || endsWith(github.event.pull_request.user.login, '[bot]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          echo "Enabling auto-merge on PR #${PR} by ${{ github.event.pull_request.user.login }}"
+          gh pr ready "$PR" --repo "$GITHUB_REPOSITORY" || echo "PR already ready for review"
+          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --squash --auto
