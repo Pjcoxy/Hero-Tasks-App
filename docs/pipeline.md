@@ -52,10 +52,25 @@ agent-authored PR (`request-review.yml`).
 issues carrying `role:architect` (#12, #15, #16, #21, #5, #43). CRUD-shaped
 work goes straight from `elaborate` to `build`.
 
-**`role:developer` is not applied any more.** Every sub-issue is developer work
-by default, so the label carried no information. `role:architect` still does:
-it means design this before building it. Older issues still carry
-`role:developer` — harmless, ignore it.
+### Label kinds
+
+Every label in this repo is one of three things. Keeping the distinction sharp
+matters, because two of them cost money and one does not.
+
+| Kind | Labels | Effect |
+|---|---|---|
+| **Trigger** | `elaborate`, `architect`, `build` | Live wire — adding it starts an agent and spends |
+| **Marker** | `elaborated`, `architected` | Applied *by* an agent; records what has been done |
+| **Flag** | `role:architect` | A note to yourself: this one needs design before building |
+
+`role:developer` and `role:tester` were deleted — every sub-issue is developer
+work by default, and the tester runs automatically on every PR, so neither
+label carried information.
+
+`role:architect` is deliberately a flag rather than a trigger: if the
+Elaborator applied `architect` directly it would fire the agent and spend
+money without you deciding. Filter the backlog by it to see exactly what to
+run the architect over.
 
 **Never label an epic `build`.** The workflow refuses and says so, but the
 rule is: build the sub-issues, not the parent.
