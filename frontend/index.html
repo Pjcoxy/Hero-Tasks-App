@@ -737,6 +737,8 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 }
 .tag.extra { background: var(--brand-wash); color: var(--brand); }
 .tag.approved { background: var(--success-wash); color: var(--success); }
+.tag.waiting { background: var(--warning-wash); color: var(--warning); }
+.tag.not-started { background: var(--brand-wash); color: var(--brand); }
 .tag.rejected { background: var(--danger-wash); color: var(--danger); }
 .check-row {
   display: flex;
@@ -1076,6 +1078,10 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
       <section class="parent-section">
         <h2 class="parent-section-title">Today &amp; this week</h2>
         <div id="p-approvals-glance"></div>
+      </section>
+      <section class="parent-section">
+        <h2 class="parent-section-title">Today, by kid</h2>
+        <div id="p-approvals-today-by-kid"></div>
       </section>
       <section class="parent-section">
         <h2 class="parent-section-title">Awaiting your approval</h2>
@@ -1810,20 +1816,31 @@ function parentCalendarSortWhen(a, b) {
 }
 
 function parentCalendarIsComplete(item) {
-  if (!item || item.kind !== 'chore' || !item.taskId) return false;
+  return !!parentCalendarLiveCompletion(item);
+}
+
+function parentCalendarLiveCompletion(item) {
+  if (!item || item.kind !== 'chore' || !item.taskId) return null;
   var live = (state.completions || []).filter(function(c) {
     return c.taskId === item.taskId && (c.status === 'pending' || c.status === 'approved');
   });
-  if (live.length === 0) return false;
+  if (live.length === 0) return null;
   if (item.cycle === 'daily') {
     var dayKey = parentCalendarDayKey(item);
-    return !!dayKey && live.some(function(c) { return c.date === dayKey; });
+    return dayKey ? (live.find(function(c) { return c.date === dayKey; }) || null) : null;
   }
   if (item.cycle === 'weekly') {
     var weekKey = parentCalendarDayKey(item);
-    return !!weekKey && live.some(function(c) { return isoWeek(c.date) === isoWeek(weekKey); });
+    return weekKey ? (live.find(function(c) { return isoWeek(c.date) === isoWeek(weekKey); }) || null) : null;
   }
-  return true;
+  return live[0] || null;
+}
+
+function parentCalendarOverviewStatus(item) {
+  var completion = parentCalendarLiveCompletion(item);
+  if (!completion) return { className: 'not-started', label: 'Not started' };
+  if (completion.status === 'approved') return { className: 'approved', label: 'Done' };
+  return { className: 'waiting', label: 'Waiting on you' };
 }
 
 function renderParentGlanceRows(items, emptyText) {
@@ -1875,6 +1892,50 @@ function renderParentApprovalsGlance() {
     + '<div class="parent-actions">'
     + '<button class="btn ghost small" onclick="switchParentTab(\'calendar\')">View calendar</button>'
     + '</div>';
+}
+
+function renderParentApprovalsTodayByKid() {
+  var el = document.getElementById('p-approvals-today-by-kid');
+  if (!el) return;
+  if (parentApprovalsGlanceLoading || !parentApprovalsGlanceLoaded) {
+    el.innerHTML = parentCalendarSkeletonHtml();
+    return;
+  }
+  var todayKey = todayStr();
+  var kids = kidsOnly();
+  el.innerHTML = kids.map(function(kid) {
+    var todayItems = (parentApprovalsGlanceItems || [])
+      .filter(function(item) {
+        return item.kind === 'chore' && item.kidId === kid.id && parentCalendarDayKey(item) === todayKey;
+      })
+      .sort(parentCalendarSortWhen);
+    return '<div class="card parent-card">'
+      + '<div class="parent-item-head">'
+      + '<div class="parent-copy">'
+      + '<strong>' + kid.emoji + ' ' + esc(kid.name) + '</strong>'
+      + '<div class="sub">Today’s chores overview</div>'
+      + '</div>'
+      + '<span class="parent-badge">' + todayItems.length + ' chore' + (todayItems.length === 1 ? '' : 's') + '</span>'
+      + '</div>'
+      + (todayItems.length === 0
+          ? buildEmptyState('🗓️', 'No chores today.', 'Nothing is due for ' + esc(kid.name) + ' today.')
+          : '<div class="parent-list">' + todayItems.map(function(item) {
+              var status = parentCalendarOverviewStatus(item);
+              return '<div class="parent-list-row">'
+                + '<div class="parent-copy">'
+                + '<span class="parent-list-title">' + esc(item.title || 'Untitled') + '</span>'
+                + '<div class="sub">' + esc(parentCalendarItemTime(item)) + (item.points ? ' · ' + item.points + ' pts' : '') + '</div>'
+                + '</div>'
+                + '<span class="tag ' + status.className + '">' + esc(status.label) + '</span>'
+                + '</div>';
+            }).join('') + '</div>')
+      + '</div>';
+  }).join('') || buildEmptyState('👧', 'Add a kid to start assigning tasks.', 'Once a kid is added, today’s overview will show up here.');
+}
+
+function renderParentApprovalsSummary() {
+  renderParentApprovalsGlance();
+  renderParentApprovalsTodayByKid();
 }
 
 function renderParentCalendarChecklists(item) {
@@ -2034,7 +2095,7 @@ async function loadParentApprovalsGlance() {
   if (!session || session.role !== 'parent') return;
   if (parentApprovalsGlanceLoading) return;
   parentApprovalsGlanceLoading = true;
-  renderParentApprovalsGlance();
+  renderParentApprovalsSummary();
   var bounds = parentApprovalsGlanceBounds();
   var result;
   try {
@@ -2049,19 +2110,19 @@ async function loadParentApprovalsGlance() {
     parentApprovalsGlanceLoading = false;
     parentApprovalsGlanceLoaded = true;
     parentApprovalsGlanceItems = [];
-    renderParentApprovalsGlance();
+    renderParentApprovalsSummary();
     return;
   }
   if (result && result.ok === false) {
     parentApprovalsGlanceLoading = false;
     parentApprovalsGlanceLoaded = true;
-    renderParentApprovalsGlance();
+    renderParentApprovalsSummary();
     return;
   }
   parentApprovalsGlanceItems = Array.isArray(result && result.items) ? result.items : [];
   parentApprovalsGlanceLoading = false;
   parentApprovalsGlanceLoaded = true;
-  renderParentApprovalsGlance();
+  renderParentApprovalsSummary();
 }
 
 function formatDue(iso) {
@@ -2209,7 +2270,7 @@ function renderParent(person) {
     parentApprovalsGlanceLoaded = false;
     loadParentApprovalsGlance();
   }
-  renderParentApprovalsGlance();
+  renderParentApprovalsSummary();
 
   var el = document.getElementById('p-pending');
   if (pending.length === 0) {
