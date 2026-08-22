@@ -12,7 +12,8 @@ Copilot. You are the gate between them.
 | **Elaborator** | Claude Managed Agents | `elaborate` label | Sub-issues with acceptance criteria + an audit comment |
 | **Architect** | Claude Managed Agents | `architect` label | A technical-approach comment on the issue |
 | **Developer** | GitHub Copilot | `build` label | A branch + pull request |
-| **Tester** | GitHub Copilot | Automatic on every agent PR | Review comments on the PR — **advisory, does not block the merge** |
+| **Tester** | GitHub Copilot | Automatic on every agent PR | Review comments — **advisory, does not block the merge** |
+| *(CI)* | GitHub Actions | Automatic on every PR | Pass/fail — **the actual gate** |
 
 The project-manager role was dropped — with one person and a labelled backlog
 there is nothing for it to sequence.
@@ -49,8 +50,8 @@ on the cheaper thinking roles.
    `role:architect`, and links each as a **native GitHub sub-issue** of the
    parent so the parent shows a real "N of M complete" progress bar. The
    parent stays open as the umbrella and loses its `role:*` label.
-3. *(Future)* **Architect** reviews anything labelled `role:architect` and
-   posts the technical approach.
+3. You add `architect` to anything with a genuine design decision — the
+   **Architect** posts the technical approach as a comment.
 4. You add `build` to a sub-issue — **Copilot** writes the code and opens a PR.
 5. **CI** runs the tests and **Copilot review** checks the diff.
 6. The PR **auto-merges** once CI is green, and **deploys to Azure** on merge.
@@ -60,10 +61,13 @@ integration code between them, and neither engine calls the other.
 
 ## Ground rules
 
-- **One issue per Elaborator run**, triggered deliberately. Nothing runs on a
-  schedule yet.
-- **Agents never merge.** Every code change reaches `main` through a PR you
-  approve.
+- **One issue per agent run**, triggered by a label you add. Nothing runs on a
+  schedule, so no work starts that you did not ask for.
+- **Agent PRs auto-merge on green CI; your own do not.** This was originally
+  "agents never merge" — that changed deliberately when the pipeline went
+  unattended. CI is the gate, and it is the only automatic check that can stop
+  a change: Copilot's review is advisory. To put a human back in the loop,
+  turn on branch protection requiring a review, or disable `auto-merge.yml`.
 - **Claude agents never get Azure credentials.** They read the repo and write
   GitHub issues; deployment stays outside their reach.
 - **Epics are not implementation tasks.** Once elaborated, a parent issue
