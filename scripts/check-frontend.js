@@ -146,8 +146,16 @@ bodies.forEach((body, i) => {
 });
 
 function extractFunctionSource(name) {
-  const signature = `async function ${name}(`;
-  const start = html.indexOf(signature);
+  // Handles both `async function f(` and plain `function f(` - avatarText is
+  // synchronous, and only looking for the async form silently returned ''.
+  let start = html.indexOf(`async function ${name}(`);
+  if (start === -1) {
+    const plain = html.indexOf(`function ${name}(`);
+    // Guard against matching the tail of "async function f(" as "function f(".
+    if (plain !== -1 && !/async\s+$/.test(html.slice(Math.max(0, plain - 8), plain))) {
+      start = plain;
+    }
+  }
   if (start === -1) return '';
   const openBrace = html.indexOf('{', start);
   if (openBrace === -1) return '';
@@ -168,6 +176,14 @@ async function runParentEditTaskChecks() {
   check(Boolean(source), 'parentEditTask exists');
   if (!source) return;
 
+  // parentEditTask builds its prompt text through avatarText(), so the real
+  // implementation is lifted out of the page rather than stubbed - otherwise
+  // these checks would pass against behaviour the app does not have.
+  const fallbackSrc = (html.match(/var SVG_AVATAR_FALLBACK = \{[\s\S]*?\};/) || [''])[0];
+  const avatarTextSrc = extractFunctionSource('avatarText');
+  check(Boolean(fallbackSrc), 'SVG_AVATAR_FALLBACK found for the sandbox');
+  check(Boolean(avatarTextSrc), 'avatarText source found for the sandbox');
+
   const factory = new Function(
     'state',
     'session',
@@ -176,7 +192,8 @@ async function runParentEditTaskChecks() {
     'kidsOnly',
     'api',
     'toastApiError',
-    source.replace(/^async function parentEditTask/, 'return async function')
+    `${fallbackSrc}\n${avatarTextSrc}\n` +
+      source.replace(/^async function parentEditTask/, 'return async function')
   );
 
   async function exercise(prompts, options) {
@@ -299,6 +316,64 @@ async function runParentEditTaskChecks() {
     check(run.apiCalls.length === 0, 'missing task aborts before API call');
     check(run.toasts.includes('Task not found.'), 'missing task shows the not-found toast');
   }
+}
+
+// ---------------------------------------------------------------------------
+// Avatars must never reach the screen as their raw stored value.
+//
+// A person's avatar can be an emoji character OR the string "svg:<key>". When
+// #88 introduced the second form it converted only the two render sites its
+// acceptance criteria named, so every other place printed "svg:3d-printer Toby"
+// at the user. Tests passed; the app was wrong. These checks close that gap.
+// ---------------------------------------------------------------------------
+{
+  const svgKeys = [...html.matchAll(/^\s*'([a-z0-9-]+)':\s*function\s*\(color\)/gm)].map((m) => m[1]);
+  const fallbackBlock = (html.match(/var SVG_AVATAR_FALLBACK = \{[\s\S]*?\};/) || [''])[0];
+
+  check(svgKeys.length > 0, `built-in SVG avatars found (${svgKeys.length})`);
+  check(/function avatarText\(value\)/.test(html), 'avatarText() text stand-in exists');
+
+  const missing = svgKeys.filter((k) => !fallbackBlock.includes(`'${k}'`));
+  check(
+    missing.length === 0,
+    `every SVG avatar has a text fallback${missing.length ? ` — missing: ${missing.join(', ')}` : ''}`
+  );
+
+  // A person's .emoji may only be read inside one of the renderers. Anything
+  // else concatenates the raw value into the UI.
+  // True when index `at` sits inside the argument list of a call to one of the
+  // renderers. Walks paren depth, so a nested call in an earlier argument -
+  // setAvatar(document.getElementById('x'), kid.emoji, c) - does not fool it.
+  function insideRendererCall(line, at) {
+    for (const call of line.matchAll(/\b(?:avatarText|renderAvatarHtml|setAvatar)\(/g)) {
+      const open = call.index + call[0].length - 1;
+      if (open > at) continue;
+      let depth = 0;
+      for (let i = open; i < line.length; i += 1) {
+        if (line[i] === '(') depth += 1;
+        else if (line[i] === ')') {
+          depth -= 1;
+          if (depth === 0) { if (at > open && at < i) return true; break; }
+        }
+      }
+      if (depth > 0 && at > open) return true;  // call continues onto the next line
+    }
+    return false;
+  }
+
+  const raw = [];
+  html.split('\n').forEach((line, i) => {
+    if (/^\s*\/\//.test(line)) return;
+    for (const m of line.matchAll(/\b([A-Za-z_$][\w$]*)\.emoji\b/g)) {
+      if (m[1] === 'lvl' || m[1] === 'next') continue;   // level badges, not avatars
+      if (insideRendererCall(line, m.index)) continue;
+      raw.push(`${i + 1}: ${line.trim().slice(0, 70)}`);
+    }
+  });
+  check(
+    raw.length === 0,
+    `no avatar rendered as its raw stored value${raw.length ? `\n       ${raw.join('\n       ')}` : ''}`
+  );
 }
 
 check(/<\/html>\s*$/i.test(html.trim() + '\n') || /<\/html>/i.test(html), 'closing </html> present');
