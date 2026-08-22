@@ -7,7 +7,10 @@ const DEFAULT_FALLBACK_CONFIDENCE = Object.freeze({
   what: 0,
   when: 0,
   who: 0,
+  type: 0,
 });
+
+const VALID_TYPES = Object.freeze(['reminder', 'task', 'event']);
 
 const defaultCreateAnthropicClient = (apiKey) => new Anthropic({ apiKey });
 
@@ -20,6 +23,7 @@ function fallbackResult(transcript, available) {
       what: String(transcript || '').trim(),
       when: null,
       who: null,
+      type: 'reminder',
     },
     confidence: { ...DEFAULT_FALLBACK_CONFIDENCE },
   };
@@ -81,12 +85,13 @@ function buildPrompt(transcript, kids, requesterId) {
     kidLines || '- none supplied',
     '',
     'Return JSON only with this shape:',
-    '{"intent":{"what":"string","when":"string|null","who":"kid-id-or-null"},"confidence":{"what":0,"when":0,"who":0}}',
+    '{"intent":{"what":"string","when":"string|null","who":"kid-id-or-null","type":"reminder|task|event"},"confidence":{"what":0,"when":0,"who":0,"type":0}}',
     '',
     'Rules:',
     '- Clean up the task/reminder wording into intent.what.',
     '- intent.when is an ISO date/time string, a coarse time label from the transcript, or null.',
     '- intent.who must be one of the listed kid ids. If no other kid is named, default to the requesting kid.',
+    '- intent.type must be "reminder" (one-off nudge), "task" (something the kid intends to do/complete), or "event" (time-boxed occurrence like a match or appointment). Default to "reminder" when ambiguous.',
     '- Use null and a low confidence instead of guessing.',
   ].join('\n');
 }
@@ -134,6 +139,8 @@ async function extractVoiceIntent(transcript, kids) {
     const what = String(intent.what || '').trim() || cleanTranscript;
     const when = String(intent.when || '').trim() || null;
     const resolvedWho = resolveKidId(intent.who, safeKids);
+    const rawType = String(intent.type || '').trim().toLowerCase();
+    const type = VALID_TYPES.includes(rawType) ? rawType : 'reminder';
 
     return {
       available: true,
@@ -141,11 +148,13 @@ async function extractVoiceIntent(transcript, kids) {
         what,
         when,
         who: resolvedWho,
+        type,
       },
       confidence: {
         what: normalizeConfidence(confidence.what),
         when: normalizeConfidence(confidence.when),
         who: normalizeConfidence(confidence.who),
+        type: VALID_TYPES.includes(rawType) ? normalizeConfidence(confidence.type) : 0,
       },
     };
   } catch (err) {
