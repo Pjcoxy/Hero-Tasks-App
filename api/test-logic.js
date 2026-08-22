@@ -494,6 +494,95 @@ async function main() {
   );
   console.log('✓ calendar merges planning items with chore occurrences and enforces kid/parent visibility rules');
 
+  // ---- Conflict detection tests ----
+  // Two overlapping events for the same kid
+  const conflictEvent1 = await ROUTES.addPlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    type: 'event',
+    title: 'Soccer match',
+    startAt: '2026-09-10T14:00:00.000Z',
+    endAt: '2026-09-10T15:00:00.000Z',
+    personId: 'toby',
+  });
+  assert.strictEqual(conflictEvent1.ok, true);
+  assert.deepStrictEqual(conflictEvent1.conflicts, [], 'first event has no prior conflicts');
+  assert.deepStrictEqual(conflictEvent1.suggestedTimes, [], 'no suggestions needed when no conflicts');
+
+  const conflictEvent2 = await ROUTES.addPlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    type: 'event',
+    title: 'Piano lesson',
+    startAt: '2026-09-10T14:30:00.000Z',
+    endAt: '2026-09-10T15:30:00.000Z',
+    personId: 'toby',
+  });
+  assert.strictEqual(conflictEvent2.ok, true, 'a conflict should not block the save');
+  assert.ok(conflictEvent2.conflicts.length > 0, 'overlapping events for same kid should be flagged');
+  assert.strictEqual(conflictEvent2.conflicts[0].id, conflictEvent1.item.id, 'conflict should reference the first event');
+  assert.strictEqual(conflictEvent2.conflicts[0].kind, 'event');
+  assert.strictEqual(conflictEvent2.conflicts[0].title, 'Soccer match');
+  assert.ok(Array.isArray(conflictEvent2.suggestedTimes), 'suggestedTimes should be an array');
+  assert.ok(conflictEvent2.suggestedTimes.length > 0, 'should suggest alternate times when conflict exists');
+  const conflictItemsInStore = (await planningItems.items.query({}).fetchAll()).resources;
+  assert.ok(
+    conflictItemsInStore.some((pi) => pi.id === conflictEvent2.item.id),
+    'conflicting item should still be saved to the store'
+  );
+  console.log('✓ same-kid overlapping events are flagged, conflict does not block save, alternatives suggested');
+
+  // Whole-family event conflicts with a kid's reminder at the same time
+  const familyConflictEvent = await ROUTES.addPlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    type: 'event',
+    title: 'Family movie night',
+    startAt: '2026-09-11T19:00:00.000Z',
+    endAt: '2026-09-11T21:00:00.000Z',
+    personId: null,
+  });
+  assert.strictEqual(familyConflictEvent.ok, true);
+  assert.deepStrictEqual(familyConflictEvent.conflicts, [], 'no prior items on that day');
+
+  const kidReminderDuringFamily = await ROUTES.addPlanningItem({
+    parentId: 'peter',
+    parentPin: '1234',
+    type: 'reminder',
+    title: 'Bedtime reminder',
+    startAt: '2026-09-11T20:00:00.000Z',
+    personId: 'toby',
+  });
+  assert.strictEqual(kidReminderDuringFamily.ok, true, 'conflict should not block save');
+  assert.ok(
+    kidReminderDuringFamily.conflicts.length > 0,
+    'whole-family event should conflict with toby\'s reminder at overlapping time'
+  );
+  assert.strictEqual(kidReminderDuringFamily.conflicts[0].id, familyConflictEvent.item.id);
+  console.log('✓ whole-family event conflicts with kid\'s reminder at overlapping time');
+
+  // Daily/weekly chore occurrences must never appear in conflictsWith
+  const conflictCalendar = await ROUTES.calendar({
+    personId: 'toby',
+    pin: '1234',
+    start: '2026-08-24T00:00:00.000Z',
+    end: '2026-08-26T23:59:59.000Z',
+  });
+  assert.strictEqual(conflictCalendar.ok, true);
+  const recurringChoreItems = conflictCalendar.items.filter(
+    (item) => item.kind === 'chore' && (item.cycle === 'daily' || item.cycle === 'weekly')
+  );
+  assert.ok(recurringChoreItems.length > 0, 'daily/weekly chores should appear in calendar');
+  assert.ok(
+    recurringChoreItems.every((item) => Array.isArray(item.conflictsWith) && item.conflictsWith.length === 0),
+    'daily/weekly chore occurrences should never have conflicts'
+  );
+  assert.ok(
+    conflictCalendar.items.every((item) => Array.isArray(item.conflictsWith) && Array.isArray(item.suggestedTimes)),
+    'every calendar item should have conflictsWith and suggestedTimes arrays'
+  );
+  console.log('✓ daily/weekly chore occurrences never flagged for conflicts; all calendar items carry conflictsWith/suggestedTimes');
+
   // ---- Push notification flow tests ----
   await mockContainer('pushSubscriptions').items.create({
     id: 'push-parent-1',
