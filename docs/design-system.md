@@ -250,6 +250,44 @@ Same tokens, different register:
 
 ---
 
+## The one thing that separates an app from a web page
+
+**Everything is an object.**
+
+A web page is text with links and thin borders. An app is a set of chunky,
+obviously-tappable shapes. Look at any kids app that feels right and the pattern
+is the same: no bare text links, no 1px rules, no dense paragraphs, nothing small
+enough to doubt whether you can press it.
+
+Concretely, in this app:
+
+- **No text-only actions.** Anything tappable is a filled pill, a card, or a
+  round icon button. If it does something, it looks like it does something.
+- **No thin borders as the main definition of a shape.** Use surface colour,
+  radius and `--shadow-1`. A border is for a subtle divider, not for drawing a
+  control.
+- **Coloured chrome, light content.** A brand-coloured header band and a
+  bottom tab bar, with the scrolling content on `--bg` between them. That
+  sandwich is most of the effect on its own, before any other polish.
+- **Nothing important below `--text-base`.** `--text-xs` is for timestamps and
+  meta, never for something a kid needs to read or act on.
+- **Round icon buttons in the tab bar**, at least 44px, well spaced. Icons alone
+  are fine there; everywhere else an icon needs a label.
+
+### Calibrating the age
+
+Much published kids design is aimed at pre-schoolers — heavy cartoon characters,
+very saturated primaries, everything bouncing. Toby and Ollie are past that, and
+Peter uses the same app.
+
+Take the **object-ness** from that style — the chunk, the generous hit areas,
+the confident colour, the visible reward. Leave the toddler cues: no mascot, no
+comic outlines, no rainbow of unrelated hues on one screen. The palette above is
+deliberately one confident brand colour plus per-kid accents, not six primaries.
+
+The test: it should look like something a ten-year-old would be happy to open in
+front of a friend.
+
 ## Reference patterns
 
 Taken from published kids/lifestyle app design that reads as premium. These are
