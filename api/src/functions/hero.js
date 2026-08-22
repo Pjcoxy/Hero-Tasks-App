@@ -1009,22 +1009,38 @@ async function sendDueReminders(now = new Date()) {
   }
 }
 
-async function saveVoiceReminder(req) {
+async function saveVoicePlan(req) {
   await requireSelf(req.personId, req.pin, req.kidId);
   const title = String(req.title || '').trim();
   if (!title) return { ok: false, error: 'title is required' };
-  await container('planningItems').items.create({
+  const ALLOWED_TYPES = ['reminder', 'task', 'event'];
+  const type = String(req.type || '').trim();
+  if (!ALLOWED_TYPES.includes(type)) {
+    return { ok: false, error: `type must be one of: ${ALLOWED_TYPES.join(', ')}` };
+  }
+  const whenRaw = req.when || null;
+  const parsedWhen = whenRaw ? parseIso(whenRaw) : null;
+  // Determine allDay: true when the raw value looks like a date-only string
+  const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const allDay = parsedWhen !== null && DATE_ONLY_RE.test(String(whenRaw).trim());
+  const startAt = parsedWhen ? (allDay ? `${String(whenRaw).trim()}T00:00:00.000Z` : parsedWhen) : null;
+  // When no parseable date, preserve the raw text in notes so nothing is silently dropped
+  const notes = startAt === null && whenRaw ? String(whenRaw) : undefined;
+  const doc = {
     id: randomUUID(),
     householdId: HOUSEHOLD_ID,
-    type: 'reminder',
-    source: 'voice',
-    kidId: req.kidId,
+    type,
     title,
-    when: req.when || null,
+    source: 'voice',
+    personId: req.kidId,
+    startAt,
+    allDay,
+    active: true,
     transcript: req.transcript || '',
-    status: 'confirmed',
     createdAt: new Date().toISOString(),
-  });
+  };
+  if (notes !== undefined) doc.notes = notes;
+  await container('planningItems').items.create(doc);
   return getState();
 }
 
@@ -1055,7 +1071,7 @@ const ROUTES = {
   approveRedemption,
   rejectRedemption,
   cancelRedemption,
-  saveVoiceReminder,
+  saveVoicePlan,
 };
 
 app.http('hero', {
