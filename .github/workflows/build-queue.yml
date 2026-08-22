@@ -1,0 +1,136 @@
+name: Build queue
+
+# Drains the build queue: every few hours, picks the next issue labelled
+# 'build' that is ready to work on, and hands it to the Copilot coding agent.
+#
+# Why a queue rather than building on the label directly:
+#   - Copilot credits are finite and monthly (~20-28 builds). Labelling four
+#     sub-issues at once would blow through a daily cap, and skipped runs never
+#     retry, so work would silently never get built.
+#   - Sub-issues have dependencies. #34 built before #33 lands means Copilot
+#     writes against an API that does not exist yet and invents one.
+#
+# So 'build' means "queued", and this picks one at a time, in order, skipping
+# anything whose dependencies are still open.
+#
+# Pace: every 6 hours = 4 builds/day = ~200 Copilot credits/day. Change the
+# cron below to go faster or slower.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: copilot-build
+  cancel-in-progress: false
+
+jobs:
+  next:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Pick the next buildable issue
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Open issues labelled 'build', oldest first so sub-issues are built
+          # in the order the Elaborator created them.
+          CANDIDATES=$(gh api "repos/${GITHUB_REPOSITORY}/issues?labels=build&state=open&sort=created&direction=asc&per_page=100" \
+            --jq '[.[] | select(has("pull_request") | not) | {number, body: (.body // ""), assignees: [.assignees[].login]}]')
+
+          COUNT=$(echo "$CANDIDATES" | jq 'length')
+          echo "Issues labelled 'build': ${COUNT}"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "Queue empty - nothing to do."
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for NUM in $(echo "$CANDIDATES" | jq -r '.[].number'); do
+            echo "--- considering #${NUM}"
+
+            # Already handed to Copilot? Skip.
+            ASSIGNED=$(echo "$CANDIDATES" | jq -r --argjson n "$NUM" '.[] | select(.number==$n) | .assignees | join(",")')
+            if echo "$ASSIGNED" | grep -qi 'copilot'; then
+              echo "    already assigned to Copilot - skipping"
+              continue
+            fi
+
+            # An epic (has sub-issues) is never built directly.
+            SUBS=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${NUM}/sub_issues" --jq 'length' 2>/dev/null || echo 0)
+            if [ "$SUBS" -gt 0 ]; then
+              echo "    has ${SUBS} sub-issues (epic) - skipping"
+              continue
+            fi
+
+            # Dependencies: the Elaborator writes "Depends on #N" / "depends on
+            # #32 and #33". If any referenced issue is still open, wait.
+            BODY=$(echo "$CANDIDATES" | jq -r --argjson n "$NUM" '.[] | select(.number==$n) | .body')
+            DEPS=$(echo "$BODY" | grep -ioE 'depends on[^.]*' | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true)
+            BLOCKED=""
+            for D in $DEPS; do
+              STATE=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${D}" --jq '.state' 2>/dev/null || echo "unknown")
+              if [ "$STATE" = "open" ]; then
+                BLOCKED="${BLOCKED} #${D}"
+              fi
+            done
+            if [ -n "$BLOCKED" ]; then
+              echo "    blocked by open dependency:${BLOCKED} - skipping"
+              continue
+            fi
+
+            echo "    ready to build"
+            echo "number=${NUM}" >> "$GITHUB_OUTPUT"
+            exit 0
+          done
+
+          echo "Nothing ready this round (all queued items are assigned, epics, or blocked)."
+          echo "number=" >> "$GITHUB_OUTPUT"
+
+      - name: Assign the Copilot coding agent
+        if: steps.pick.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
+          NUM: ${{ steps.pick.outputs.number }}
+        run: |
+          set -euo pipefail
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+
+          BOT_ID=$(gh api graphql -f query='
+            query($owner:String!, $repo:String!) {
+              repository(owner:$owner, name:$repo) {
+                suggestedActors(capabilities:[CAN_BE_ASSIGNED], first:100) {
+                  nodes { login __typename ... on Bot { id } ... on User { id } }
+                }
+              }
+            }' -f owner="$OWNER" -f repo="$REPO" \
+            --jq '.data.repository.suggestedActors.nodes[] | select(.login=="copilot-swe-agent") | .id')
+
+          if [ -z "$BOT_ID" ]; then
+            echo "::error::Copilot coding agent is not assignable on this repository."
+            exit 1
+          fi
+
+          ISSUE_ID=$(gh api graphql -f query='
+            query($owner:String!, $repo:String!, $num:Int!) {
+              repository(owner:$owner, name:$repo) { issue(number:$num) { id } }
+            }' -f owner="$OWNER" -f repo="$REPO" -F num="$NUM" \
+            --jq '.data.repository.issue.id')
+
+          gh api graphql -f query='
+            mutation($assignable:ID!, $actor:ID!) {
+              replaceActorsForAssignable(input:{assignableId:$assignable, actorIds:[$actor]}) {
+                assignable { ... on Issue { number } }
+              }
+            }' -f assignable="$ISSUE_ID" -f actor="$BOT_ID"
+
+          echo "Copilot assigned to #${NUM}"

@@ -100,8 +100,17 @@ Work in this order:
      developer, and you should simply write it into the acceptance criteria.
 
    When you do apply it, say in your comment on the parent WHICH sub-issues got
-   it and WHY in one line each, so the decision is reviewable. If a label does
-   not exist in the repository, skip it rather than failing.
+   it and WHY in one line each, so the decision is reviewable.
+
+   Also apply the 'build' label to EVERY sub-issue you create. This does not
+   start a build immediately - it queues the sub-issue, and a scheduled worker
+   picks queued items up a few a day, in order, skipping any whose stated
+   dependencies are still open. So write dependencies as "Depends on #N" in
+   the body (that exact wording, with the # number) wherever one sub-issue
+   needs another finished first - the queue reads it, and a sub-issue built
+   out of order gets written against code that does not exist yet.
+
+   If a label does not exist in the repository, skip it rather than failing.
 
 5. Comment once on the original issue with: the already-built audit summary,
    links to every sub-issue you created, and the open questions. If an

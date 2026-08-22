@@ -4,15 +4,17 @@ Four labels drive everything. You add a label; agents do the rest.
 
 ```
   backlog issue
-       │  add label: elaborate
+       │  YOU add label: elaborate     <- the only click
        ▼
   ELABORATOR (Claude)   → audits the code, writes sub-issues with
        │                   acceptance criteria, links them to the parent
-       │  add label: architect   (only where the design isn't obvious)
+       │  Elaborator adds 'architect' where design is genuinely needed,
+       │  and 'build' on every sub-issue (which queues, does not start)
        ▼
   ARCHITECT (Claude)    → posts "Technical approach" as a comment
        │
-       │  add label: build
+       │  BUILD QUEUE drains 4/day, oldest first,
+       │  skipping epics and anything with an open dependency
        ▼
   DEVELOPER (Copilot)   → branch + pull request
        │
@@ -74,7 +76,30 @@ every PR), and `role:architect` was replaced by the Elaborator applying
 |---|---|---|
 | `elaborate` | **You** — deciding an item is worth working on | ~$0.35 |
 | `architect` | **The Elaborator**, on sub-issues it judges need design | ~$0.50 each |
-| `build` | **You** — Copilot credits are finite and monthly | ~40–55 credits |
+| `build` | **The Elaborator**, on every sub-issue — but it *queues* rather than builds | ~40–55 credits, when the queue reaches it |
+
+### The build queue
+
+`build` means **queued**, not "build now". A scheduled worker
+(`build-queue.yml`, every 6 hours) picks the next queued issue and hands it to
+Copilot — one at a time, oldest first.
+
+Two reasons it is a queue rather than a direct trigger, both learned the hard
+way:
+
+- **Credits are finite and monthly** (~20–28 builds). Labelling four
+  sub-issues at once would blow through a daily cap, and a skipped workflow run
+  never retries — that work would silently never get built.
+- **Sub-issues have dependencies.** Building #34 before #33 lands means Copilot
+  writes against an API that does not exist yet, and invents one.
+
+The queue skips anything that is an epic, already assigned to Copilot, or has
+an open issue named in a `Depends on #N` line in its body.
+
+**Pace: 4 builds/day** (~200 credits/day, so about 5 days of runway from a full
+1,500 allowance). Change the `cron` in `build-queue.yml` to go faster or
+slower. To jump the queue for one issue: Actions → *Build an issue with
+Copilot* → Run workflow → issue number.
 
 The Elaborator decides the architect question because it has just read the
 codebase and the issue, so it is better placed than you are to know whether a
@@ -85,9 +110,10 @@ choice between approaches the existing code does not already settle. CRUD
 following an existing pattern does not qualify. It must say in its comment
 which sub-issues it flagged and why, so the call is reviewable.
 
-`build` stays yours deliberately: Copilot credits are the scarce resource
-(~20–28 per month), so that is the one place worth a human deciding what is
-worth spending them on.
+Nothing needs a click from you after `elaborate`: the Elaborator queues the
+work and decides what needs design, and the queue paces the spend. Your control
+is the pace (the cron), the daily caps, and removing `build` from anything you
+do not want built.
 
 **Never label an epic `build`.** The workflow refuses and says so, but the
 rule is: build the sub-issues, not the parent.
@@ -98,7 +124,7 @@ rule is: build the sub-issues, not the parent.
 |---|---|---|
 | Elaborator runs | 10 / rolling 24h | Anthropic spend |
 | Architect runs | 10 / rolling 24h | Anthropic spend |
-| Copilot builds | 8 / rolling 24h | Copilot credits are finite and monthly |
+| Copilot builds | 4 / day via the queue, 8 / rolling 24h hard cap | Copilot credits are finite and monthly |
 | Per session | $2.00 hard cap | A runaway session pauses rather than spends |
 | Epic guard | build refuses issues with sub-issues | Prevents unreviewable PRs |
 
