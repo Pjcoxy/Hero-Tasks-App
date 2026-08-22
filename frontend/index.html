@@ -23,9 +23,14 @@
   --ink-subtle: #9a94ad;
   /* Colour — brand */
   --brand:       #6d3bf5;
+  --brand-soft:  #9d6ffa;
   --brand-hover: #5c2fe0;
   --brand-wash:  #ede7ff;
   --on-brand:    #ffffff;
+  --on-brand-muted:  rgba(255,255,255,0.65);
+  --on-brand-faint:  rgba(255,255,255,0.22);
+  --on-brand-soft:   rgba(255,255,255,0.3);
+  --on-brand-strong: rgba(255,255,255,0.88);
   /* Colour — status */
   --success:      #12a06a;
   --success-wash: #dff5eb;
@@ -33,6 +38,7 @@
   --warning-wash: #fdf0dc;
   --danger:       #d93a4a;
   --danger-wash:  #fce4e6;
+  --overlay:      rgba(28,24,48,0.5);
   /* Colour — per-kid */
   --kid-1: #0ea5a5;
   --kid-2: #f0873a;
@@ -110,7 +116,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 
 /* ─── Who screen ──────────────────────────────────────────────────────── */
 .who-band {
-  background: linear-gradient(155deg, var(--brand) 0%, #9d6ffa 100%);
+  background: linear-gradient(155deg, var(--brand) 0%, var(--brand-soft) 100%);
   padding: calc(env(safe-area-inset-top, 0px) + var(--space-7)) var(--space-5) calc(var(--space-7) + var(--space-4));
   text-align: center;
   color: var(--on-brand);
@@ -157,7 +163,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .who-tile .tile-emoji { font-size: var(--text-2xl); line-height: 1; }
 .who-tile .tile-name  { font-size: var(--text-lg); font-weight: var(--weight-bold); color: inherit; }
 .who-tile .tile-sub   { font-size: var(--text-sm); color: var(--ink-muted); }
-.who-tile.parent .tile-sub { color: rgba(255,255,255,0.65); }
+.who-tile.parent .tile-sub { color: var(--on-brand-muted); }
 
 /* Skeleton tiles */
 .skeleton-grid {
@@ -240,13 +246,13 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .k-level-text { font-size: var(--text-lg); font-weight: var(--weight-bold); line-height: var(--leading-tight); }
 .k-streak {
   display: inline-block; margin-top: var(--space-2);
-  background: rgba(255,255,255,0.22); border-radius: var(--radius-full);
+  background: var(--on-brand-faint); border-radius: var(--radius-full);
   padding: var(--space-1) var(--space-3);
   font-size: var(--text-sm); font-weight: var(--weight-medium);
 }
 .progress-wrap { margin-top: var(--space-3); }
-.progress-bar  { background: rgba(255,255,255,0.3); border-radius: var(--radius-full); height: 14px; overflow: hidden; }
-.progress-fill { height: 100%; border-radius: var(--radius-full); background: rgba(255,255,255,0.88); transition: width var(--dur-slow) var(--ease-out); }
+.progress-bar  { background: var(--on-brand-soft); border-radius: var(--radius-full); height: 14px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: var(--radius-full); background: var(--on-brand-strong); transition: width var(--dur-slow) var(--ease-out); }
 .progress-lbl  { font-size: var(--text-xs); opacity: 0.88; margin-top: var(--space-1); text-align: center; }
 
 .home-content-sheet {
@@ -631,7 +637,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 #toast { position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 5.5rem); left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--on-brand); border-radius: var(--radius-full); padding: var(--space-3) var(--space-5); font-weight: var(--weight-medium); z-index: 100; box-shadow: var(--shadow-3); white-space: nowrap; }
 
 /* ─── Modal ───────────────────────────────────────────────────────────── */
-.modal-bg { position: fixed; inset: 0; background: rgba(28,24,48,0.5); display: flex; align-items: center; justify-content: center; z-index: 50; padding: var(--space-5); }
+.modal-bg { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; z-index: 50; padding: var(--space-5); }
 .modal { background: var(--surface); border-radius: var(--radius-lg); padding: var(--space-6); width: 100%; max-width: 320px; text-align: center; box-shadow: var(--shadow-3); display: flex; flex-direction: column; gap: var(--space-3); }
 .modal h3 { margin-bottom: var(--space-3); font-size: var(--text-lg); font-weight: var(--weight-bold); }
 .pin-input { font-size: var(--text-2xl); text-align: center; letter-spacing: 0.4em; width: 100%; padding: var(--space-3); border: 2px solid var(--border); border-radius: var(--radius-md); font-family: inherit; color: var(--ink); background: var(--surface-sunken); }
