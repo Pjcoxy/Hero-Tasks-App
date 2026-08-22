@@ -76,7 +76,7 @@ async function main() {
   // "test mode" warning only) but its internal functions aren't exported individually,
   // so drive it the same way the real HTTP layer would: through getState + direct Cosmos
   // writes mirroring what each action does, then assert getState()'s derived fields.
-  const { getState, calcStreak } = require('./src/functions/hero.js');
+  const { getState, calcStreak, updateQuietHours } = require('./src/functions/hero.js');
 
   const chores = mockContainer('chores');
   await chores.items.create({
@@ -105,6 +105,7 @@ async function main() {
 
   let state = await getState();
   assert.strictEqual(state.ok, true);
+  assert.strictEqual(state.quietHours, null, 'quietHours should default to off');
   assert.strictEqual(state.tasks.length, 1);
   assert.strictEqual(state.stats.toby.points, 0, 'pending completion should not award points yet');
   console.log('✓ pending completion correctly awards 0 points');
@@ -445,6 +446,62 @@ async function main() {
     assert.ok(dates[i - 1] >= dates[i], 'redemptions sorted newest first');
   }
   console.log('✓ getState().redemptions has correct shape and is sorted newest first');
+
+  // ---- Quiet hours settings tests ----
+  const households = mockContainer('households');
+
+  let result = await updateQuietHours({
+    parentId: 'peter',
+    parentPin: '1234',
+    start: '21:30',
+    end: '07:00',
+  });
+  assert.strictEqual(result.ok, true, 'parent can save quiet hours');
+  assert.deepStrictEqual(result.quietHours, { start: '21:30', end: '07:00' }, 'quietHours returned in getState');
+  let savedHousehold = (await households.item(HOUSEHOLD_ID).read()).resource;
+  assert.deepStrictEqual(savedHousehold.quietHours, { start: '21:30', end: '07:00' }, 'quietHours persisted on household doc');
+  console.log('✓ quiet hours save persists and round-trips through getState');
+
+  result = await updateQuietHours({
+    parentId: 'peter',
+    parentPin: '1234',
+    start: null,
+    end: null,
+  });
+  assert.strictEqual(result.ok, true, 'parent can clear quiet hours');
+  assert.strictEqual(result.quietHours, null, 'quietHours cleared in getState');
+  savedHousehold = (await households.item(HOUSEHOLD_ID).read()).resource;
+  assert.strictEqual(savedHousehold.quietHours, null, 'quietHours cleared on household doc');
+  console.log('✓ quiet hours can be cleared back to off');
+
+  result = await updateQuietHours({
+    parentId: 'peter',
+    parentPin: '1234',
+    start: '21:30',
+    end: null,
+  });
+  assert.deepStrictEqual(result, { ok: false, error: 'start and end must both be HH:MM strings or both null' });
+  savedHousehold = (await households.item(HOUSEHOLD_ID).read()).resource;
+  assert.strictEqual(savedHousehold.quietHours, null, 'invalid quiet hours should not write');
+
+  result = await updateQuietHours({
+    parentId: 'peter',
+    parentPin: '1234',
+    start: '9pm',
+    end: '07:00',
+  });
+  assert.deepStrictEqual(result, { ok: false, error: 'start and end must both be HH:MM strings or both null' });
+  savedHousehold = (await households.item(HOUSEHOLD_ID).read()).resource;
+  assert.strictEqual(savedHousehold.quietHours, null, 'bad time format should not write');
+  console.log('✓ quiet hours validation rejects missing or badly formatted times without writing');
+
+  await assert.rejects(
+    () => updateQuietHours({ parentId: 'toby', parentPin: '1234', start: '21:30', end: '07:00' }),
+    (err) => err && err.status === 401 && err.message === 'Wrong parent PIN'
+  );
+  savedHousehold = (await households.item(HOUSEHOLD_ID).read()).resource;
+  assert.strictEqual(savedHousehold.quietHours, null, 'non-parent auth failure should not write');
+  console.log('✓ quiet hours updates require parent credentials');
 
   console.log('\nALL LOGIC TESTS PASSED');
 }

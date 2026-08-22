@@ -187,6 +187,17 @@
     </div>
     <div id="p-rewards"></div>
 
+    <h2>🔕 Quiet hours</h2>
+    <div class="card">
+      <div class="field"><label>Current setting</label><div id="p-quiet-hours-status" class="sub">Off</div></div>
+      <div class="field"><label>Start time</label><input id="p-quiet-hours-start" type="time"></div>
+      <div class="field"><label>End time</label><input id="p-quiet-hours-end" type="time"></div>
+      <div class="approve-row">
+        <button class="btn" onclick="parentSaveQuietHours()">Save quiet hours</button>
+        <button class="btn ghost small" onclick="parentClearQuietHours()">Turn off</button>
+      </div>
+    </div>
+
     <h2>👧 Add a kid</h2>
     <div class="card">
       <div class="field"><label>Name</label><input id="p-kid-name" type="text" autocomplete="off"></div>
@@ -553,6 +564,13 @@ function renderParent(person) {
         <button class="btn red-ghost small" onclick="parentDeleteReward('${r.id}')">Remove</button>
       </div>
     </div>`).join('');
+
+  const quietHours = state.quietHours || null;
+  document.getElementById('p-quiet-hours-status').textContent = quietHours
+    ? `${quietHours.start} to ${quietHours.end}`
+    : 'Off';
+  document.getElementById('p-quiet-hours-start').value = quietHours ? quietHours.start : '';
+  document.getElementById('p-quiet-hours-end').value = quietHours ? quietHours.end : '';
 }
 
 function esc(s) {
@@ -770,6 +788,36 @@ async function parentDeleteReward(rewardId) {
   const result = await api({ action: 'deleteReward', parentId: session.personId, parentPin: session.pin, rewardId });
   if (toastApiError(result)) return;
   toast('Reward removed.');
+}
+
+async function parentSaveQuietHours() {
+  const start = document.getElementById('p-quiet-hours-start').value;
+  const end = document.getElementById('p-quiet-hours-end').value;
+  if (!start || !end) {
+    toast('Choose both a start and end time, or turn quiet hours off.');
+    return;
+  }
+  const result = await api({
+    action: 'updateQuietHours',
+    parentId: session.personId,
+    parentPin: session.pin,
+    start,
+    end,
+  });
+  if (toastApiError(result)) return;
+  toast('Quiet hours saved. 🔕');
+}
+
+async function parentClearQuietHours() {
+  const result = await api({
+    action: 'updateQuietHours',
+    parentId: session.personId,
+    parentPin: session.pin,
+    start: null,
+    end: null,
+  });
+  if (toastApiError(result)) return;
+  toast('Quiet hours turned off.');
 }
 
 async function parentApproveRedemption(redemptionId) {
