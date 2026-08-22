@@ -23,10 +23,16 @@ const closes = (html.match(/<\/script>/g) || []).length;
 check(opens === closes, `script tags balanced (${opens} open, ${closes} close)`);
 check(opens > 0, 'at least one inline script block found');
 
-const parentTabButtons = html.match(/id="p-tabbtn-(approvals|tasks|rewards|settings)"/g) || [];
-check(parentTabButtons.length === 4, `parent HQ exposes 4 tab buttons (${parentTabButtons.length} found)`);
+const parentTabButtons = html.match(/id="p-tabbtn-(approvals|tasks|rewards|calendar|settings)"/g) || [];
+check(parentTabButtons.length === 5, `parent HQ exposes 5 tab buttons (${parentTabButtons.length} found)`);
 check(/let parentTab = 'approvals';/.test(html), 'parent tab state defaults to approvals');
 check(/function switchParentTab\(tab\)/.test(html), 'parent tab switcher exists');
+check(/id="p-tab-calendar"/.test(html), 'parent calendar tab panel exists');
+check(/\['approvals', 'tasks', 'rewards', 'calendar', 'settings'\]/.test(html), 'parent tab switcher includes calendar');
+check(/function switchParentCalendarView\(view\)/.test(html), 'parent calendar view switcher exists');
+check(/action:\s*'addPlanningItem'/.test(html), 'parent calendar form calls addPlanningItem');
+check(/action:\s*'updatePlanningItem'/.test(html), 'parent calendar edit calls updatePlanningItem');
+check(/action:\s*'deletePlanningItem'/.test(html), 'parent calendar delete calls deletePlanningItem');
 check(/id="p-approvals-badge"/.test(html), 'approvals badge exists');
 check(/parentEditTask\(\\'/.test(html), 'task rows wire an Edit button');
 const kidTabButtons = html.match(/id="tabbtn-(home|missions|rewards|leaderboard|calendar)"/g) || [];
