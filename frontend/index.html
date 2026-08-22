@@ -35,6 +35,7 @@
   .btn.ghost { background: var(--purple-soft); color: var(--purple); }
   .btn.small { width: auto; padding: 8px 14px; font-size: 0.85rem; }
   .btn.green { background: var(--green); } .btn.red-ghost { background: #fee2e2; color: var(--red); }
+  button:disabled { cursor: not-allowed; opacity: 0.65; }
   .kid-head { background: linear-gradient(135deg, #7c3aed, #a855f7); color: #fff; border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 14px; }
   .kid-head .avatar { font-size: 2.8rem; } .kid-head .name { font-size: 1.2rem; font-weight: 700; }
   .kid-head .level { font-size: 0.85rem; opacity: 0.95; margin-top: 2px; }
@@ -55,6 +56,8 @@
   .task .pts-badge { background: var(--amber-soft); color: #b45309; font-weight: 700; border-radius: 20px; padding: 4px 10px; font-size: 0.85rem; white-space: nowrap; }
   .task.overdue .tick { border-color: var(--red); }
   .task.overdue .sub { color: var(--red); font-weight: 700; }
+  .task.dimmed { opacity: 0.72; }
+  .task-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
   .empty { color: var(--muted); text-align: center; padding: 16px; font-size: 0.9rem; }
   .board { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; }
   .board-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; }
@@ -119,6 +122,12 @@
     </div>
 
     <button class="btn ghost" style="margin-top:8px" onclick="addExtraPrompt()">➕ I did something extra!</button>
+
+    <h2>🎁 Reward Shop</h2>
+    <div id="k-rewards"></div>
+
+    <h2>🧾 My rewards</h2>
+    <div id="k-redemptions"></div>
 
     <h2>🏆 Leaderboard</h2>
     <div class="board" id="k-board"></div>
@@ -299,12 +308,13 @@ function renderWho() {
 }
 
 function renderKid(kid) {
-  const st = state.stats[kid.id] || { points: 0, streak: 0 };
+  const st = state.stats[kid.id] || { points: 0, balance: 0, streak: 0 };
   const { lvl, next } = levelFor(st.points);
+  const balance = typeof st.balance === 'number' ? st.balance : st.points;
   document.getElementById('k-avatar').textContent = kid.emoji;
   document.getElementById('k-name').textContent = kid.name;
   document.getElementById('k-level').textContent = lvl.emoji + ' ' + lvl.title;
-  document.getElementById('k-points').textContent = st.points;
+  document.getElementById('k-points').textContent = balance;
   document.getElementById('k-streak').textContent = st.streak > 0 ? `🔥 ${st.streak} day streak` : '🔥 Start a streak today!';
 
   if (next) {
@@ -326,6 +336,8 @@ function renderKid(kid) {
   });
   document.getElementById('k-oneoff-section').classList.toggle('hidden', oneoffs.length === 0);
   renderTaskList('k-oneoff', oneoffs, '');
+  renderRewardShop(kid, balance);
+  renderRedemptions(kid);
 
   const ranked = kidsOnly()
     .map(k => ({ ...k, pts: (state.stats[k.id] || {}).points || 0 }))
@@ -346,6 +358,20 @@ function formatDue(iso) {
   const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   if (d.toDateString() === now.toDateString()) return `today ${time}`;
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + time;
+}
+
+function formatRewardDate(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Unknown date';
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function rewardStatusText(status) {
+  if (status === 'pending') return '⏳ waiting';
+  if (status === 'approved') return '✅ approved';
+  if (status === 'rejected') return '✗ declined';
+  if (status === 'cancelled') return '↩️ cancelled';
+  return esc(status || 'unknown');
 }
 
 function renderTaskList(elId, tasks, emptyMsg) {
@@ -375,6 +401,53 @@ function renderTaskList(elId, tasks, emptyMsg) {
       <span class="pts-badge">+${t.points}</span>
     </div>`;
   }).join('');
+}
+
+function renderRewardShop(kid, balance) {
+  const rewards = (state.rewards || []).filter(r => r.active !== false);
+  const el = document.getElementById('k-rewards');
+  if (rewards.length === 0) {
+    el.innerHTML = '<div class="empty">No rewards in the shop yet.</div>';
+    return;
+  }
+  el.innerHTML = rewards.map(r => {
+    const canAfford = r.cost <= balance;
+    const shortBy = Math.max(0, r.cost - balance);
+    return `<div class="task ${canAfford ? '' : 'dimmed'}">
+      <div class="info">
+        <div class="title">${esc(r.title)}</div>
+        <div class="sub">${canAfford ? 'Ready when you are! ✨' : `${shortBy} more points to go!`}</div>
+      </div>
+      <div class="task-side">
+        <span class="pts-badge">${r.cost} pts</span>
+        <button class="btn small" onclick="redeemKidReward('${r.id}', ${r.cost})" ${canAfford ? '' : 'disabled'}>Redeem</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderRedemptions(kid) {
+  const mine = (state.redemptions || [])
+    .filter(r => r.kidId === kid.id)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const el = document.getElementById('k-redemptions');
+  if (mine.length === 0) {
+    el.innerHTML = '<div class="empty">No rewards redeemed yet.</div>';
+    return;
+  }
+  el.innerHTML = mine.map(r => `
+    <div class="card">
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <div class="info" style="flex:1">
+          <div class="title">${esc(r.title)}</div>
+          <div class="sub">${rewardStatusText(r.status)} · ${formatRewardDate(r.createdAt)}</div>
+        </div>
+        <span class="pts-badge">${r.cost} pts</span>
+      </div>
+      ${r.status === 'pending'
+        ? `<button class="btn red-ghost small" style="margin-top:10px" onclick="cancelKidRedemption('${r.id}')">Changed my mind</button>`
+        : ''}
+    </div>`).join('');
 }
 
 function renderParent(person) {
@@ -490,6 +563,48 @@ async function addExtraPrompt() {
   if (!title || !title.trim()) return;
   toast('Sent to your grown-up! ⏳');
   await api({ action: 'addExtra', kidId: session.personId, title: title.trim() });
+}
+
+async function redeemKidReward(rewardId, cost) {
+  const reward = (state.rewards || []).find(r => r.id === rewardId);
+  const rewardTitle = reward ? reward.title : 'this reward';
+  if (!confirm(`Redeem ${rewardTitle} for ${cost} points?`)) return;
+  const previousIds = new Set(((state.redemptions || []).filter(r => r.kidId === session.personId)).map(r => r.id));
+  let res;
+  try {
+    res = await api({ action: 'redeemReward', kidId: session.personId, rewardId });
+  } catch (e) {
+    toast('Connection problem — try again.');
+    return;
+  }
+  if (res && res.ok === false) {
+    toast(res.error || 'Could not redeem that reward.');
+    await refresh();
+    return;
+  }
+  const created = (state.redemptions || []).find(r =>
+    r.kidId === session.personId && !previousIds.has(r.id) && r.rewardId === rewardId);
+  celebrate();
+  toast(created && created.status === 'approved' ? 'Enjoy it! 🎉' : 'Sent to your grown-up! ⏳');
+}
+
+async function cancelKidRedemption(redemptionId) {
+  const redemption = (state.redemptions || []).find(r => r.id === redemptionId);
+  const rewardTitle = redemption ? redemption.title : 'this reward';
+  if (!confirm(`Changed your mind about ${rewardTitle}?`)) return;
+  let res;
+  try {
+    res = await api({ action: 'cancelRedemption', kidId: session.personId, redemptionId });
+  } catch (e) {
+    toast('Connection problem — try again.');
+    return;
+  }
+  if (res && res.ok === false) {
+    toast(res.error || 'Could not cancel that reward.');
+    await refresh();
+    return;
+  }
+  toast('Points returned! 💜');
 }
 
 function updateDueVisibility() {
