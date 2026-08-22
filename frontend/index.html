@@ -178,6 +178,27 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   animation: skel-pulse 1.4s ease-in-out infinite;
 }
 @keyframes skel-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+.glance-skel {
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  height: 4.5rem;
+  margin-bottom: var(--space-2);
+  animation: skel-pulse 1.4s ease-in-out infinite;
+}
+.glance-day-label {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  font-weight: var(--weight-bold);
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-2);
+}
+.glance-prep {
+  margin: var(--space-1) 0 0 var(--space-3);
+  padding: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+.glance-prep li { margin-bottom: var(--space-1); }
 
 /* ─── Kid screen — header ─────────────────────────────────────────────── */
 .kid-header {
@@ -909,8 +930,10 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
         </div>
       </div>
       <div class="home-content-sheet">
-        <h2 class="section-title">📅 Today's Missions</h2>
-        <div id="k-daily"></div>
+        <h2 class="section-title">📅 Today</h2>
+        <div id="k-glance-today"></div>
+        <h2 class="section-title">📆 This Week</h2>
+        <div id="k-glance-week"></div>
         <button class="btn ghost" style="margin-top:var(--space-3)" onclick="addExtraPrompt()">➕ I did something extra!</button>
         <h2 class="section-title">🕘 Recent activity</h2>
         <div id="k-activity"></div>
@@ -1268,6 +1291,8 @@ let parentTab = 'approvals';
 let parentCalendarView = 'week';
 let parentCalendarItems = [];
 let parentCalendarLoading = false;
+let kidGlanceItems = [];
+let kidGlanceLoading = false;
 
 async function api(payload) {
   const res = await fetch(API_URL, {
@@ -1492,8 +1517,6 @@ function renderKid(kid) {
   }
 
   var mine = state.tasks.filter(function(t) { return t.kidId === kid.id; });
-  renderTaskList('k-daily', mine.filter(function(t) { return t.cycle === 'daily'; }),
-    '😎', 'No daily missions today!', 'Enjoy the freedom.');
   renderTaskList('k-weekly', mine.filter(function(t) { return t.cycle === 'weekly'; }),
     '🗓️', 'Nothing weekly right now.', 'Check back with your grown-up!');
   var oneoffs = mine.filter(function(t) { return t.cycle === 'oneoff'; }).filter(function(t) {
@@ -1507,6 +1530,7 @@ function renderKid(kid) {
   renderRedemptions(kid);
   renderRecentActivity(kid);
   renderKidCalendar(kid);
+  loadKidGlance(kid);
 
   var ranked = kidsOnly()
     .map(function(k) { return Object.assign({}, k, { pts: (state.stats[k.id] || {}).points || 0 }); })
@@ -2216,8 +2240,164 @@ function animatePoints(targetVal) {
   _kPointsAnim = requestAnimationFrame(step);
 }
 
+function glanceItemDayKey(item) {
+  if (item.occurrenceDate) return item.occurrenceDate;
+  var when = item.startAt || item.occurrenceAt || '';
+  return String(when).slice(0, 10);
+}
+
+function glanceItemTime(item) {
+  if (item.kind === 'chore') {
+    if (item.cycle === 'daily') return 'Daily chore';
+    if (item.cycle === 'weekly') return 'Weekly chore';
+    if (!item.occurrenceAt) return 'One-off chore';
+    return new Date(item.occurrenceAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  if (item.allDay) return 'All day';
+  if (!item.startAt) return '';
+  return new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function glancePrepList(item, kidId) {
+  if (item.kind !== 'event' || !Array.isArray(item.prepLists)) return '';
+  var myList = item.prepLists.find(function(l) { return l.personId === kidId; });
+  if (!myList || !myList.items || myList.items.length === 0) return '';
+  return '<ul class="glance-prep">'
+    + myList.items.map(function(entry) {
+        return '<li>' + esc(entry.text || '') + (entry.done ? ' ✅' : '') + '</li>';
+      }).join('')
+    + '</ul>';
+}
+
+function glanceChoreCard(item) {
+  var c = cycleCompletion(item);
+  if (c && c.status === 'approved') return '';
+  var cls = c ? (c.status === 'approved' ? 'done-approved' : 'done-pending') : '';
+  var tickIcon = c ? (c.status === 'approved' ? '✅' : '⏳') : '';
+  var isOverdue = !c && item.dueBy && new Date(item.dueBy) < new Date();
+  var sub = c
+    ? (c.status === 'approved' ? 'Done — points banked! 💰' : 'Waiting for a grown-up to check ⏳')
+    : (item.cycle === 'weekly' ? 'Any time this week' : '');
+  if (!c && item.dueBy) sub = isOverdue ? '⚠️ Overdue — was due ' + formatDue(item.dueBy) : 'Due ' + formatDue(item.dueBy);
+  var action = c
+    ? (c.status === 'pending' ? 'undoTask(\'' + c.id + '\')' : '')
+    : 'doTask(\'' + item.id + '\')';
+  return '<div class="task ' + cls + ' ' + (isOverdue ? 'overdue' : '') + '">'
+    + '<button class="tick" ' + (action ? 'onclick="' + action + '"' : 'disabled') + '>' + tickIcon + '</button>'
+    + '<div class="info">'
+    + '<div class="title">' + esc(item.title) + '</div>'
+    + (sub ? '<div class="sub">' + sub + '</div>' : '')
+    + '</div>'
+    + '<span class="pts-badge">+' + (item.points || 0) + '</span>'
+    + '</div>';
+}
+
+function glanceEventCard(item, kidId) {
+  var timeStr = glanceItemTime(item);
+  var prep = glancePrepList(item, kidId);
+  return '<div class="task">'
+    + '<div class="info">'
+    + '<div class="title">' + esc(item.title || '') + '</div>'
+    + (timeStr ? '<div class="sub">' + esc(timeStr) + '</div>' : '')
+    + (item.notes ? '<div class="sub">' + esc(item.notes) + '</div>' : '')
+    + prep
+    + '</div>'
+    + '</div>';
+}
+
+function glanceItemCard(item, kidId) {
+  if (item.kind === 'chore') return glanceChoreCard(item);
+  return glanceEventCard(item, kidId);
+}
+
+function renderKidGlanceShell() {
+  var todayEl = document.getElementById('k-glance-today');
+  var weekEl = document.getElementById('k-glance-week');
+  if (!todayEl || !weekEl) return;
+  todayEl.innerHTML = '<div class="glance-skel"></div><div class="glance-skel"></div>';
+  weekEl.innerHTML = '<div class="glance-skel"></div><div class="glance-skel"></div><div class="glance-skel"></div>';
+}
+
+function renderKidGlance(kid) {
+  var todayEl = document.getElementById('k-glance-today');
+  var weekEl = document.getElementById('k-glance-week');
+  if (!todayEl || !weekEl) return;
+
+  var today = todayStr();
+  var todayItems = [];
+  var weekItems = [];
+
+  (kidGlanceItems || []).forEach(function(item) {
+    var dayKey = glanceItemDayKey(item);
+    if (dayKey === today) {
+      todayItems.push(item);
+    } else {
+      weekItems.push(item);
+    }
+  });
+
+  // Filter out approved chores (completed) from today's view
+  var todayCards = todayItems.map(function(item) { return glanceItemCard(item, kid.id); }).join('');
+  // Remove blank strings (approved chores filtered out)
+  todayCards = todayCards.replace(/^\s*$/, '');
+  todayEl.innerHTML = todayCards || buildEmptyState('🎉', 'Nothing today!', 'Enjoy your free time!');
+
+  // Group week items by day
+  var byDay = {};
+  var dayOrder = [];
+  weekItems.forEach(function(item) {
+    var dayKey = glanceItemDayKey(item);
+    if (!byDay[dayKey]) { byDay[dayKey] = []; dayOrder.push(dayKey); }
+    byDay[dayKey].push(item);
+  });
+
+  var weekHtml = dayOrder.map(function(dayKey) {
+    var date = new Date(dayKey + 'T00:00:00');
+    var label = date.toLocaleDateString([], { weekday: 'short' });
+    var cards = byDay[dayKey].map(function(item) { return glanceItemCard(item, kid.id); }).join('');
+    if (!cards) return '';
+    return '<div class="glance-day-label">' + esc(label) + '</div>' + cards;
+  }).join('');
+
+  weekEl.innerHTML = weekHtml || '';
+}
+
+async function loadKidGlance(kid) {
+  if (!session || session.role !== 'kid') return;
+  kidGlanceLoading = true;
+  renderKidGlanceShell();
+  var now = new Date();
+  now.setHours(0, 0, 0, 0);
+  var end = addDays(now, 6);
+  end.setHours(23, 59, 59, 999);
+  var result;
+  try {
+    result = await api({
+      action: 'calendar',
+      personId: session.personId,
+      pin: session.pin,
+      start: now.toISOString(),
+      end: end.toISOString(),
+    });
+  } catch (e) {
+    kidGlanceLoading = false;
+    kidGlanceItems = [];
+    renderKidGlance(kid);
+    return;
+  }
+  if (result && result.ok === false) {
+    kidGlanceLoading = false;
+    kidGlanceItems = [];
+    renderKidGlance(kid);
+    return;
+  }
+  kidGlanceItems = Array.isArray(result && result.items) ? result.items : [];
+  kidGlanceLoading = false;
+  renderKidGlance(kid);
+}
+
 function findTaskCard(taskId) {
-  var lists = ['k-daily', 'k-weekly', 'k-oneoff'];
+  var lists = ['k-glance-today', 'k-glance-week', 'k-daily', 'k-weekly', 'k-oneoff'];
   for (var li = 0; li < lists.length; li++) {
     var el = document.getElementById(lists[li]);
     if (!el) continue;
