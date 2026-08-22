@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "5753917081134753069"
+      "templateHash": "16671028461837582362"
     }
   },
   "parameters": {
@@ -267,6 +267,9 @@
           },
           "vapidPublicKey": {
             "value": "[parameters('vapidPublicKey')]"
+          },
+          "staticWebAppOrigin": {
+            "value": "[format('https://{0}', reference('staticWebApp').outputs.staticWebAppDefaultHostname.value)]"
           }
         },
         "template": {
@@ -276,7 +279,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "14140101707973752752"
+              "templateHash": "7578667288250106429"
             }
           },
           "parameters": {
@@ -343,6 +346,12 @@
               "metadata": {
                 "description": "Base64URL-encoded VAPID public key exposed to browsers."
               }
+            },
+            "staticWebAppOrigin": {
+              "type": "string",
+              "metadata": {
+                "description": "Allowed CORS origin for browser calls to this Function App (the deployed Static Web App origin)."
+              }
             }
           },
           "variables": {
@@ -382,7 +391,7 @@
                   "ftpsState": "Disabled",
                   "cors": {
                     "allowedOrigins": [
-                      "*"
+                      "[parameters('staticWebAppOrigin')]"
                     ]
                   },
                   "appSettings": [
@@ -447,6 +456,7 @@
         }
       },
       "dependsOn": [
+        "staticWebApp",
         "storage"
       ]
     },

@@ -70,6 +70,7 @@ module functionApp './modules/functionapp.bicep' = {
     llmApiKeySecretUri: llmApiKeySecretUri
     vapidPrivateKeySecretUri: vapidPrivateKeySecretUri
     vapidPublicKey: vapidPublicKey
+    staticWebAppOrigin: 'https://${staticWebApp.outputs.staticWebAppDefaultHostname}'
   }
 }
 
