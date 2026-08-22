@@ -6,23 +6,35 @@ Four labels drive everything. You add a label; agents do the rest.
   backlog issue
        │  add label: elaborate
        ▼
-  ELABORATOR (Claude)  → audits the code, writes sub-issues with
-       │                  acceptance criteria, links them to the parent
+  ELABORATOR (Claude)   → audits the code, writes sub-issues with
+       │                   acceptance criteria, links them to the parent
        │  add label: architect   (only where the design isn't obvious)
        ▼
-  ARCHITECT (Claude)   → posts "Technical approach" as a comment
+  ARCHITECT (Claude)    → posts "Technical approach" as a comment
        │
        │  add label: build
        ▼
-  COPILOT CODING AGENT → branch + pull request
+  DEVELOPER (Copilot)   → branch + pull request
        │
-       ├─ CI runs the API tests and frontend checks
-       ├─ Copilot review requested automatically
-       └─ auto-merge once CI is green
+       ├── TESTER (Copilot review)  → comments on the diff
+       │       ADVISORY ONLY - does not block the merge
+       │
+       ├── CI (ci.yml)              → API tests + frontend checks
+       │       THE ACTUAL GATE - red CI stops the merge
+       │
+       └── auto-merge once CI is green
        │
        ▼
   DEPLOY → Azure (Function App and/or Static Web App, whichever changed)
 ```
+
+> **Which of those two actually stops a bad change?** Only CI. Copilot's review
+> posts comments and the merge proceeds regardless — so on a fast PR the review
+> may land *after* it has merged. Treat it as a record to read, not a gate.
+>
+> To make it a real gate, require an approving review on `main` (Settings →
+> Branches → branch protection). Expect that to stall most PRs waiting on you,
+> since the reviewer usually finds *something* — which is why it is off.
 
 ## The four labels
 
@@ -32,6 +44,9 @@ Four labels drive everything. You add a label; agents do the rest.
 | `architect` | Architect posts a technical approach | ~$0.50 |
 | `build` | Copilot writes the code and opens a PR | ~40–55 Copilot credits |
 | `elaborated` / `architected` | Applied *by* the agents — markers, not triggers | — |
+
+The tester needs no label: Copilot's review is requested automatically on every
+agent-authored PR (`request-review.yml`).
 
 **When to use `architect`:** only where a genuine technical choice exists —
 issues carrying `role:architect` (#12, #15, #16, #21, #5). CRUD-shaped work
@@ -61,7 +76,11 @@ disabled, so it hard-stops rather than billing you.
 - **Copilot's PRs auto-merge** once CI passes (`auto-merge.yml`). Your own PRs
   do not — you merge those.
 - **CI** (`ci.yml`) runs `node api/test-logic.js` plus a frontend parse check
-  on every PR. Red CI blocks the auto-merge; the PR just waits.
+  on every PR. Red CI blocks the auto-merge; the PR just waits. **This is the
+  only automatic check that can stop a change reaching the app.**
+- **Copilot's review** (`request-review.yml`) is advisory. It does not block
+  anything — read it after the fact, or turn on branch protection if you want
+  it to gate.
 - **Deployment** (`deploy.yml`) runs on push to `main` and deploys only what
   changed — API to `herotasks-func-dev`, frontend to `herotasks-swa-dev`.
 

@@ -12,7 +12,7 @@ Copilot. You are the gate between them.
 | **Elaborator** | Claude Managed Agents | `elaborate` label | Sub-issues with acceptance criteria + an audit comment |
 | **Architect** | Claude Managed Agents | `architect` label | A technical-approach comment on the issue |
 | **Developer** | GitHub Copilot | `build` label | A branch + pull request |
-| **Tester** | GitHub Copilot | Automatic on every agent PR | Review comments on the PR |
+| **Tester** | GitHub Copilot | Automatic on every agent PR | Review comments on the PR — **advisory, does not block the merge** |
 
 The project-manager role was dropped — with one person and a labelled backlog
 there is nothing for it to sequence.
