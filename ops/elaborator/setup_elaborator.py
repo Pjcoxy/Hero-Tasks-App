@@ -57,14 +57,22 @@ Work in this order:
    - List any open product questions for Peter where a decision is genuinely
      ambiguous - do not guess product policy.
 
-4. Create each sub-issue via the GitHub tools. Reuse the repository's existing
-   labels (role:developer, role:architect) where they fit; if a label does not
-   exist, skip labelling rather than failing.
+4. Create each sub-issue via the GitHub tools, then LINK EACH ONE as a native
+   GitHub sub-issue of the original (the sub-issue write tool, 'add' method,
+   with the parent's issue number and the new issue's internal id - the id
+   from the create response, not its issue number). This gives the parent a
+   real progress bar and hierarchy; a "Part of #N" line in the body alone does
+   not. Reuse the repository's existing labels (role:developer,
+   role:architect) where they fit; if a label does not exist, skip labelling
+   rather than failing.
 
 5. Comment once on the original issue with: the already-built audit summary,
    links to every sub-issue you created, and the open questions. If an
    'elaborated' label exists in the repository, add it to the original issue;
-   otherwise skip. Leave the original issue open.
+   otherwise skip. The parent is now an epic, not a task: REMOVE any 'role:*'
+   label from it, since the sub-issues carry those and an epic assigned to a
+   coding agent produces sprawling, unreviewable changes. Leave the original
+   issue open - it closes when its sub-issues are done.
 
 Be decisive and finish in a single pass. Keep sub-issue count and wording lean:
 quality of acceptance criteria over volume of prose.
