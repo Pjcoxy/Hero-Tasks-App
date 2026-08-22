@@ -250,6 +250,182 @@ async function requireSelf(personId, pin, expectedId) {
   }
 }
 
+async function readPerson(personId) {
+  const { resource: person } = await container('people')
+    .item(personId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  return person;
+}
+
+function parseIso(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const asDate = new Date(value);
+  if (Number.isNaN(asDate.getTime())) return null;
+  return value;
+}
+
+async function validatePlanningPersonId(personId) {
+  if (personId === null) return { ok: true, personId: null };
+  const normalized = String(personId || '').trim();
+  if (!normalized) return { ok: false, error: 'personId must be a kid id or null' };
+  const person = await readPerson(normalized);
+  if (!person || person.role !== 'kid') return { ok: false, error: 'personId must be a kid id or null' };
+  return { ok: true, personId: normalized };
+}
+
+async function validatePrepLists(prepLists) {
+  if (!Array.isArray(prepLists)) return { ok: false, error: 'prepLists must be an array' };
+  const normalized = [];
+  for (const list of prepLists) {
+    if (!list || typeof list !== 'object') return { ok: false, error: 'prepLists entries must be objects' };
+    const personCheck = await validatePlanningPersonId(list.personId);
+    if (!personCheck.ok || personCheck.personId === null) return { ok: false, error: 'prepLists personId must be a kid id' };
+    if (!Array.isArray(list.items)) return { ok: false, error: 'prepLists items must be an array' };
+    const items = [];
+    for (const item of list.items) {
+      const text = String(item && item.text || '').trim();
+      if (!text) return { ok: false, error: 'prepLists item text is required' };
+      items.push({ text, done: !!(item && item.done) });
+    }
+    normalized.push({ personId: personCheck.personId, items });
+  }
+  return { ok: true, prepLists: normalized };
+}
+
+function validateAdultActions(adultActions) {
+  if (!Array.isArray(adultActions)) return { ok: false, error: 'adultActions must be an array' };
+  const normalized = [];
+  for (const action of adultActions) {
+    const text = String(action && action.text || '').trim();
+    if (!text) return { ok: false, error: 'adultActions text is required' };
+    normalized.push({ text, done: !!(action && action.done) });
+  }
+  return { ok: true, adultActions: normalized };
+}
+
+async function findActivePlanningItemByExternalRef(externalRef, excludeId) {
+  if (!externalRef) return null;
+  const items = await queryHousehold('planningItems');
+  return items.find((item) => (
+    item.active !== false
+    && item.externalRef === externalRef
+    && item.id !== excludeId
+  )) || null;
+}
+
+async function validatePlanningPayload(req, currentItem = null) {
+  const next = currentItem ? { ...currentItem } : {
+    id: randomUUID(),
+    householdId: HOUSEHOLD_ID,
+    source: 'manual',
+    createdAt: new Date().toISOString(),
+    active: true,
+    prepLists: [],
+    adultActions: [],
+    notes: null,
+    externalRef: null,
+    allDay: false,
+  };
+
+  if (!currentItem || req.type !== undefined) {
+    const type = String(req.type || next.type || '').trim();
+    if (!['event', 'reminder'].includes(type)) return { ok: false, error: 'type must be event or reminder' };
+    next.type = type;
+  }
+
+  if (!currentItem || req.title !== undefined) {
+    const title = String(req.title || '').trim();
+    if (!title) return { ok: false, error: 'title is required' };
+    next.title = title;
+  }
+
+  if (!currentItem || req.startAt !== undefined) {
+    const startAt = parseIso(req.startAt);
+    if (!startAt) return { ok: false, error: 'startAt must be an ISO datetime' };
+    next.startAt = startAt;
+  }
+
+  if (!currentItem || req.personId !== undefined) {
+    const personCheck = await validatePlanningPersonId(req.personId);
+    if (!personCheck.ok) return personCheck;
+    next.personId = personCheck.personId;
+  }
+
+  if (req.notes !== undefined) {
+    if (req.notes === null || req.notes === '') {
+      next.notes = null;
+    } else if (typeof req.notes === 'string') {
+      next.notes = req.notes;
+    } else {
+      return { ok: false, error: 'notes must be a string' };
+    }
+  }
+
+  if (req.endAt !== undefined) {
+    if (req.endAt === null || req.endAt === '') {
+      next.endAt = null;
+    } else {
+      const endAt = parseIso(req.endAt);
+      if (!endAt) return { ok: false, error: 'endAt must be an ISO datetime' };
+      next.endAt = endAt;
+    }
+  }
+
+  if (req.allDay !== undefined) next.allDay = !!req.allDay;
+
+  if (req.source !== undefined) {
+    if (!['manual', 'voice', 'email'].includes(req.source)) return { ok: false, error: 'invalid source' };
+    next.source = req.source;
+  }
+
+  if (req.externalRef !== undefined) {
+    if (req.externalRef === null || req.externalRef === '') {
+      next.externalRef = null;
+    } else if (typeof req.externalRef === 'string') {
+      next.externalRef = req.externalRef;
+    } else {
+      return { ok: false, error: 'externalRef must be a string or null' };
+    }
+  }
+
+  if (req.prepLists !== undefined) {
+    const prepCheck = await validatePrepLists(req.prepLists);
+    if (!prepCheck.ok) return prepCheck;
+    next.prepLists = prepCheck.prepLists;
+  }
+
+  if (req.adultActions !== undefined) {
+    const actionCheck = validateAdultActions(req.adultActions);
+    if (!actionCheck.ok) return actionCheck;
+    next.adultActions = actionCheck.adultActions;
+  }
+
+  if (next.type === 'reminder') {
+    if (req.endAt !== undefined && req.endAt !== null && req.endAt !== '') {
+      return { ok: false, error: 'reminders cannot include endAt' };
+    }
+    if (req.prepLists !== undefined && req.prepLists.length) {
+      return { ok: false, error: 'reminders cannot include prepLists' };
+    }
+    if (req.adultActions !== undefined && req.adultActions.length) {
+      return { ok: false, error: 'reminders cannot include adultActions' };
+    }
+    next.endAt = null;
+    next.prepLists = [];
+    next.adultActions = [];
+  } else if (next.endAt === undefined) {
+    next.endAt = null;
+  }
+
+  if (next.externalRef) {
+    const duplicate = await findActivePlanningItemByExternalRef(next.externalRef, next.id);
+    if (duplicate) return { ok: true, duplicate };
+  }
+
+  return { ok: true, item: next };
+}
+
 async function login(req) {
   const { resource: person } = await container('people')
     .item(req.personId, HOUSEHOLD_ID)
@@ -378,6 +554,162 @@ async function deleteTask(req) {
     await chores.item(req.taskId, HOUSEHOLD_ID).replace(chore);
   }
   return getState();
+}
+
+async function addPlanningItem(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const validated = await validatePlanningPayload({
+    ...req,
+    source: 'manual',
+  });
+  if (!validated.ok) return validated;
+  if (validated.duplicate) return { ok: true, item: validated.duplicate };
+  validated.item.source = 'manual';
+  await container('planningItems').items.create(validated.item);
+  return { ok: true, item: validated.item };
+}
+
+async function updatePlanningItem(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const planningItems = container('planningItems');
+  const { resource: planningItem } = await planningItems
+    .item(req.planningItemId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!planningItem || planningItem.active === false) return { ok: false, error: 'Planning item not found' };
+  const validated = await validatePlanningPayload(req, planningItem);
+  if (!validated.ok) return validated;
+  if (validated.duplicate) return { ok: true, item: validated.duplicate };
+  await planningItems.item(req.planningItemId, HOUSEHOLD_ID).replace(validated.item);
+  return { ok: true, item: validated.item };
+}
+
+async function deletePlanningItem(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const planningItems = container('planningItems');
+  const { resource: planningItem } = await planningItems
+    .item(req.planningItemId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!planningItem || planningItem.active === false) return { ok: false, error: 'Planning item not found' };
+  planningItem.active = false;
+  await planningItems.item(req.planningItemId, HOUSEHOLD_ID).replace(planningItem);
+  return { ok: true };
+}
+
+function startOfUtcDay(date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function toDateOnlyIso(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function utcDateIso(date) {
+  return `${toDateOnlyIso(date)}T00:00:00.000Z`;
+}
+
+async function calendar(req) {
+  const startAt = parseIso(req.start);
+  const endAt = parseIso(req.end);
+  if (!startAt || !endAt) return { ok: false, error: 'start and end must be ISO datetimes' };
+  const start = new Date(startAt);
+  const end = new Date(endAt);
+  if (start.getTime() > end.getTime()) return { ok: false, error: 'start must be before end' };
+
+  let callerRole = 'parent';
+  let callerKidId = null;
+  let filterPersonId = null;
+
+  if (req.parentId || req.parentPin) {
+    await requireParent(req.parentId, req.parentPin);
+    if (req.personId !== undefined && req.personId !== null) {
+      const personCheck = await validatePlanningPersonId(req.personId);
+      if (!personCheck.ok) return personCheck;
+      filterPersonId = personCheck.personId;
+    }
+  } else {
+    const personId = String(req.personId || '').trim();
+    await requireSelf(personId, req.pin, personId);
+    const person = await readPerson(personId);
+    if (!person || person.role !== 'kid') return { ok: false, error: 'personId must be a kid id or null' };
+    callerRole = 'kid';
+    callerKidId = personId;
+    filterPersonId = personId;
+  }
+
+  const [planningItems, chores] = await Promise.all([
+    queryHousehold('planningItems'),
+    queryHousehold('chores'),
+  ]);
+
+  const schedule = [];
+
+  for (const item of planningItems) {
+    if (item.active === false) continue;
+    const when = new Date(item.startAt);
+    if (Number.isNaN(when.getTime())) continue;
+    if (when.getTime() < start.getTime() || when.getTime() > end.getTime()) continue;
+    if (filterPersonId && item.personId !== null && item.personId !== filterPersonId) continue;
+    const row = {
+      ...item,
+      kind: item.type,
+    };
+    if (callerRole === 'kid') delete row.adultActions;
+    schedule.push(row);
+  }
+
+  const rangeStartDay = startOfUtcDay(start);
+  const rangeEndDay = startOfUtcDay(end);
+
+  for (const chore of chores) {
+    if (chore.active === false) continue;
+    if (filterPersonId && chore.kidId !== filterPersonId) continue;
+
+    if (chore.cycle === 'oneoff') {
+      if (!chore.dueBy) continue;
+      const due = new Date(chore.dueBy);
+      if (Number.isNaN(due.getTime())) continue;
+      if (due.getTime() < start.getTime() || due.getTime() > end.getTime()) continue;
+      schedule.push({
+        kind: 'chore',
+        taskId: chore.id,
+        kidId: chore.kidId,
+        title: chore.title,
+        points: chore.points,
+        cycle: chore.cycle,
+        occurrenceAt: chore.dueBy,
+      });
+      continue;
+    }
+
+    const anchor = startOfUtcDay(new Date(chore.createdAt || startAt));
+    for (let day = new Date(rangeStartDay); day.getTime() <= rangeEndDay.getTime(); day.setUTCDate(day.getUTCDate() + 1)) {
+      if (day.getTime() < anchor.getTime()) continue;
+      if (chore.cycle === 'daily' || (chore.cycle === 'weekly' && day.getUTCDay() === anchor.getUTCDay())) {
+        schedule.push({
+          kind: 'chore',
+          taskId: chore.id,
+          kidId: chore.kidId,
+          title: chore.title,
+          points: chore.points,
+          cycle: chore.cycle,
+          occurrenceAt: utcDateIso(day),
+          occurrenceDate: toDateOnlyIso(day),
+        });
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    personId: filterPersonId || callerKidId,
+    items: schedule.sort((a, b) => {
+      const aWhen = a.startAt || a.occurrenceAt || '';
+      const bWhen = b.startAt || b.occurrenceAt || '';
+      return aWhen < bWhen ? -1 : aWhen > bWhen ? 1 : 0;
+    }),
+  };
 }
 
 async function completeTask(req) {
@@ -850,6 +1182,10 @@ const ROUTES = {
   addTask,
   updateTask,
   deleteTask,
+  addPlanningItem,
+  updatePlanningItem,
+  deletePlanningItem,
+  calendar,
   completeTask,
   uncomplete,
   addExtra,
