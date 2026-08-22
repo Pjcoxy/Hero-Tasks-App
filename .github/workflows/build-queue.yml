@@ -19,11 +19,20 @@ name: Build queue
 #   - a pull request closed/merged -> whatever depended on it may be unblocked
 #   - an issue closed              -> same
 #
-# There is no schedule. There used to be, because auto-merge.yml merged via the
-# built-in GITHUB_TOKEN and GitHub raises no workflow events for that token - an
-# auto-merged PR fired no 'pull_request: closed' here, so only a clock could
-# advance the queue. The merge job now uses a real token, the events fire, and
-# the queue moves the moment something unblocks.
+# The half-hourly schedule is a FAILURE BACKSTOP, not polling.
+#
+# Events cover the happy path: the merge job uses a real token now, so a merged
+# pull request raises its events and the queue moves the moment something
+# unblocks. The five-minute sweeps that used to paper over that are gone.
+#
+# But events only fire when something CHANGES. Nothing fires when a run FAILS.
+# That gap is not hypothetical: this workflow failed to assign #73 because the
+# account's API rate limit was exhausted, and with no schedule at all nothing
+# retried - the whole build stalled silently until a human noticed.
+#
+# So: half-hourly, purely so a transient failure heals itself. Rare enough not
+# to be the noise the old sweeps were, frequent enough that nobody has to spot
+# a stall.
 #
 # MAX_PER_RUN caps how many start at once, and it is 1 deliberately.
 #
@@ -40,6 +49,8 @@ on:
     types: [labeled, closed]
   pull_request:
     types: [closed]
+  schedule:
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -164,12 +175,17 @@ jobs:
               }' -f owner="$OWNER" -f repo="$REPO" -F num="$NUM" \
               --jq '.data.repository.issue.id')
 
-            gh api graphql -f query='
+            if ERR=$(gh api graphql -f query='
               mutation($assignable:ID!, $actor:ID!) {
                 replaceActorsForAssignable(input:{assignableId:$assignable, actorIds:[$actor]}) {
                   assignable { ... on Issue { number } }
                 }
-              }' -f assignable="$ISSUE_ID" -f actor="$BOT_ID"
-
-            echo "Copilot assigned to #${NUM}"
+              }' -f assignable="$ISSUE_ID" -f actor="$BOT_ID" 2>&1); then
+              echo "Copilot assigned to #${NUM}"
+            else
+              # Do not fail the run. The issue keeps its 'build' label and stays
+              # unassigned, so the next pass picks it up again - which is what
+              # makes a rate limit or a blip self-healing rather than a stall.
+              echo "::warning::could not assign Copilot to #${NUM}, will retry next pass: ${ERR}"
+            fi
           done
