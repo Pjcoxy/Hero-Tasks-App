@@ -59,14 +59,17 @@ jobs:
 
           FAILED=0
           for ID in $(echo "$PENDING" | jq -r '.[].id'); do
-            if gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/${ID}/approve" >/dev/null 2>&1; then
+            # Keep the error. Swallowing it cost real debugging time: every
+            # approve was failing and the log only said "could not approve",
+            # which read like a token-permission problem when it was not.
+            if ERR=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/${ID}/approve" 2>&1); then
               echo "  approved ${ID}"
             else
-              echo "  ::warning::could not approve ${ID}"
+              echo "  ::warning::could not approve ${ID}: ${ERR}"
               FAILED=$((FAILED + 1))
             fi
           done
 
           if [ "$FAILED" -gt 0 ]; then
-            echo "::warning::${FAILED} run(s) could not be approved - check the token has Actions: Read and write."
+            echo "::warning::${FAILED} run(s) could not be approved. The error above is the real reason - note that /actions/runs/{id}/approve is documented for fork pull requests, which Copilot's same-repo branches are not."
           fi
