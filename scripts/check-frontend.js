@@ -121,6 +121,12 @@ check(/\.tag\.waiting\s*\{\s*background:\s*var\(--warning-wash\);\s*color:\s*var
 check(/item\.kind === 'chore' && item\.kidId === kid\.id && parentCalendarDayKey\(item\) === todayKey/.test(html), 'today-by-kid renderer filters today chore occurrences per kid');
 check(/switchParentTab\('calendar'\)|switchParentTab\\\('calendar'\\\)/.test(html), 'approvals at-a-glance includes View calendar action');
 check(/parentEditTask\(\\'/.test(html), 'task rows wire an Edit button');
+check(/id="k-voice-reminder-btn"/.test(html), 'kid Home tab includes a voice reminder button');
+check(/id="voice-reminder-modal"/.test(html), 'voice reminder confirmation modal exists');
+check(/window\.SpeechRecognition \|\| window\.webkitSpeechRecognition/.test(html), 'voice reminder flow feature-detects SpeechRecognition support');
+check(/action:\s*'validateVoiceNote'/.test(html), 'voice reminder flow calls validateVoiceNote');
+check(/action:\s*'saveVoiceReminder'/.test(html), 'voice reminder flow calls saveVoiceReminder');
+check(/This weekend/.test(html) && /No specific time/.test(html), 'voice reminder flow includes low-confidence when choice pills');
 const kidTabButtons = html.match(/id="tabbtn-(home|missions|rewards|leaderboard|calendar)"/g) || [];
 check(kidTabButtons.length === 5, `kid nav exposes 5 tab buttons (${kidTabButtons.length} found)`);
 check(/id="tab-calendar"/.test(html), 'calendar tab panel exists');
