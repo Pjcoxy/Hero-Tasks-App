@@ -301,6 +301,37 @@ deleted. Work now moves the instant something unblocks it.
 | `auto-merge.yml` (nominally 5 min) | Copilot never signals "finished" — it opens a draft and later just renames the title from `[WIP] …`. There is no event meaning done |
 | ~~`approve-agent-workflows.yml`~~ | **Deleted.** It never worked — see below |
 
+### Cap what is IN FLIGHT, not what one run hands out
+
+#62 set `MAX_PER_RUN=1` on the build queue, because almost every sub-issue edits
+`frontend/index.html` and parallel Copilot branches conflict. It capped the
+wrong thing.
+
+An issue already assigned to Copilot is skipped, so each *subsequent* run simply
+handed out the next one. Six branches ended up open together, every one of them
+conflicted with `main`, and auto-merge — which cannot resolve a conflict — sat
+warning and retrying for three hours while reporting success.
+
+There is now a `MAX_IN_FLIGHT` cap counted across all runs, from the number of
+**open Copilot pull requests**, not from the assignment.
+
+### "Assigned to Copilot" is not the same as "being built"
+
+The queue treated any Copilot assignment as work in progress. When a pull
+request is closed without merging, the assignment stays — so the issue kept its
+`build` label, was skipped on every run, and never got built. The pipeline
+reported success throughout. #135 sat in exactly that state.
+
+In-flight is now derived from open Copilot pull requests that name the issue
+(`Fixes #N` / `Closes #N` / `Resolves #N`). An issue assigned to Copilot with no
+such pull request is a **stale assignment**: the queue clears the assignee,
+warns, and builds it.
+
+The rule underneath both: **a queue must measure the thing it actually cares
+about.** Counting assignments instead of open work, like counting workflow runs
+instead of issues elaborated, produces a queue that looks healthy while nothing
+moves.
+
 ### Elaboration is not a build order
 
 The Elaborator used to end with "apply the 'build' label to EVERY sub-issue you

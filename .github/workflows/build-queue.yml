@@ -85,6 +85,16 @@ jobs:
             --jq '[.[] | select(has("pull_request") | not) | {number, body: (.body // ""), assignees: [.assignees[].login]}]')
 
           MAX_PER_RUN=1
+          # How many builds may be OPEN AT ONCE, across all runs. MAX_PER_RUN
+          # only ever limited a single run: because an assigned issue is
+          # skipped, each subsequent run handed out another one, and six
+          # Copilot branches ended up in flight together. They all edit
+          # frontend/index.html, so every one conflicted with main, and
+          # auto-merge - which cannot resolve a conflict - jammed for hours.
+          # #62 set MAX_PER_RUN=1 intending exactly this, and capped the wrong
+          # thing.
+          MAX_IN_FLIGHT=1
+
           READY=""
           PICKED=0
 
@@ -96,14 +106,45 @@ jobs:
             exit 0
           fi
 
+          # Which issues genuinely have work in progress: an OPEN Copilot pull
+          # request that says it closes them. This is the difference between
+          # "being built" and "was assigned once, and the pull request has since
+          # been closed" - the second used to look identical, and an issue in
+          # that state was skipped forever while still labelled 'build'. That is
+          # how #135 sat queued but unbuildable after its pull request closed,
+          # with every run reporting success.
+          OPEN_PR_BODIES=$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" \
+            --jq '[.[] | select(.user.login == "Copilot" or (.user.login | endswith("[bot]"))) | (.body // "")] | join("\n")' 2>/dev/null || echo "")
+          IN_FLIGHT_ISSUES=$(echo "$OPEN_PR_BODIES" \
+            | grep -ioE '(fixes|closes|resolves)[[:space:]]+#[0-9]+' \
+            | grep -oE '[0-9]+' | sort -u || true)
+          IN_FLIGHT=$(echo "$IN_FLIGHT_ISSUES" | grep -c . || true)
+          IN_FLIGHT=${IN_FLIGHT:-0}
+
+          echo "Builds in flight (open Copilot pull requests): ${IN_FLIGHT}"
+          if [ "$IN_FLIGHT" -ge "$MAX_IN_FLIGHT" ]; then
+            echo "::notice::${IN_FLIGHT} build(s) already in flight (limit ${MAX_IN_FLIGHT}). Waiting - parallel builds conflict in frontend/index.html."
+            echo "numbers=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           for NUM in $(echo "$CANDIDATES" | jq -r '.[].number'); do
             echo "--- considering #${NUM}"
 
-            # Already handed to Copilot? Skip.
             ASSIGNED=$(echo "$CANDIDATES" | jq -r --argjson n "$NUM" '.[] | select(.number==$n) | .assignees | join(",")')
             if echo "$ASSIGNED" | grep -qi 'copilot'; then
-              echo "    already assigned to Copilot - skipping"
-              continue
+              if echo "$IN_FLIGHT_ISSUES" | grep -qx "$NUM"; then
+                echo "    being built now (open Copilot pull request) - skipping"
+                continue
+              fi
+              # Assigned, but nothing open is building it - the pull request was
+              # closed or abandoned. Left alone this is permanent: the issue
+              # keeps its 'build' label, is skipped every run, and the pipeline
+              # reports success while the work never happens.
+              echo "    ::warning::#${NUM} is assigned to Copilot but has no open pull request - stale assignment, re-queueing it"
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/issues/${NUM}/assignees" \
+                -f "assignees[]=Copilot" >/dev/null 2>&1 \
+                || echo "    ::warning::could not clear the stale assignee on #${NUM}; it will be retried next run"
             fi
 
             # An epic (has sub-issues) is never built directly.
@@ -137,7 +178,7 @@ jobs:
 
           READY=$(echo "$READY" | xargs || true)
           if [ -z "$READY" ]; then
-            echo "Nothing ready this round (all queued items are assigned, epics, or blocked)."
+            echo "Nothing ready this round (all queued items are being built, epics, or blocked)."
           else
             echo "Building:${READY}"
           fi
