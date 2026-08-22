@@ -1,0 +1,38 @@
+name: CI
+
+# Runs the API logic tests on every pull request and on pushes to main.
+# This is the check auto-merge waits for - if it is red, nothing merges.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install API dependencies
+        working-directory: api
+        run: npm install --no-audit --no-fund
+
+      - name: Run API logic tests
+        working-directory: api
+        run: node test-logic.js
+
+      - name: Check the frontend still parses
+        run: node scripts/check-frontend.js

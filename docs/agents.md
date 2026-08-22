@@ -9,11 +9,15 @@ Copilot. You are the gate between them.
 
 | Role | Engine | Trigger | Output |
 |---|---|---|---|
-| **Elaborator** | Claude Managed Agents | `elaborate` label on an issue | Sub-issues with acceptance criteria + an audit comment |
-| **Architect** | Claude Managed Agents | *(not built yet)* | A technical-approach comment on the issue |
-| **Project manager** | Claude Managed Agents | *(not built yet)* — scheduled, Perth time | A backlog status summary |
-| **Developer** | GitHub Copilot | Assign the issue to Copilot in the GitHub UI | A branch + pull request |
-| **Tester** | GitHub Copilot | Copilot code review on the PR | Review comments on the PR |
+| **Elaborator** | Claude Managed Agents | `elaborate` label | Sub-issues with acceptance criteria + an audit comment |
+| **Architect** | Claude Managed Agents | `architect` label | A technical-approach comment on the issue |
+| **Developer** | GitHub Copilot | `build` label | A branch + pull request |
+| **Tester** | GitHub Copilot | Automatic on every agent PR | Review comments on the PR |
+
+The project-manager role was dropped — with one person and a labelled backlog
+there is nothing for it to sequence.
+
+**Full pipeline, labels, guards and costs: [`pipeline.md`](pipeline.md).**
 
 Personas live in `.github/agents/*.agent.md`. Those files are **Copilot custom
 agent definitions** — they drive the Copilot roles directly. For the Claude
@@ -47,10 +51,9 @@ on the cheaper thinking roles.
    parent stays open as the umbrella and loses its `role:*` label.
 3. *(Future)* **Architect** reviews anything labelled `role:architect` and
    posts the technical approach.
-4. You assign a sub-issue to **Copilot** — it writes the code and opens a PR.
-5. **Copilot code review** checks the PR against the acceptance criteria.
-6. You review and merge. Deployment to Azure follows (see issue #29 — still
-   manual today).
+4. You add `build` to a sub-issue — **Copilot** writes the code and opens a PR.
+5. **CI** runs the tests and **Copilot review** checks the diff.
+6. The PR **auto-merges** once CI is green, and **deploys to Azure** on merge.
 
 Handoff between engines is by **label and assignment only** — there is no
 integration code between them, and neither engine calls the other.
@@ -76,6 +79,7 @@ integration code between them, and neither engine calls the other.
 
 | Topic | File |
 |---|---|
+| Pipeline: labels, guards, costs, deploy secrets | `docs/pipeline.md` |
 | Elaborator: setup, cost controls, troubleshooting | `docs/managed-agents.md` |
 | Persona definitions | `.github/agents/*.agent.md` |
 | Product scope and rules | `docs/mvp-scope-v1.md` |
@@ -83,9 +87,10 @@ integration code between them, and neither engine calls the other.
 
 ## Status
 
-- ✅ **Elaborator** — live (`docs/managed-agents.md`)
-- ⬜ **Architect**, **Project manager** — designed, not built. Deferred until
-  the Elaborator's output quality is tuned
-- ⬜ **Developer**, **Tester** — personas exist; not yet exercised under this
-  model
-- ⬜ **Automated Azure deployment** — issue #29, blocks the developer chain
+- ✅ **Elaborator** — live
+- ✅ **Architect** — live
+- ✅ **Developer** — live (Copilot, `build` label)
+- ✅ **Tester** — live (Copilot review, requested automatically)
+- ✅ **CI, auto-merge and Azure deployment** — live, pending the two Azure
+  secrets listed in [`pipeline.md`](pipeline.md)
+- ⬜ **Project manager** — dropped, not needed
