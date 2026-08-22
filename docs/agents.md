@@ -69,8 +69,19 @@ integration code between them, and neither engine calls the other.
   unattended. CI is the gate, and it is the only automatic check that can stop
   a change: Copilot's review is advisory. To put a human back in the loop,
   turn on branch protection requiring a review, or disable `auto-merge.yml`.
-- **Claude agents never get Azure credentials.** They read the repo and write
-  GitHub issues; deployment stays outside their reach.
+- **Agents write infrastructure code; they do not hold Azure credentials.**
+  These are different things and conflating them causes confusion. `infra/*.bicep`
+  is code in this repository like anything else — Copilot can write it, CI checks
+  it, it merges normally. What no agent has is a credential that can *apply* it to
+  the subscription, so `az deployment group create` is a human step (see
+  `infra/README.md`). The Claude agents are narrower still: they read the repo and
+  write GitHub issues, nothing more.
+
+  This is unwired, not forbidden. Adding a federated credential and three repo
+  secrets would let `deploy.yml` apply `infra/` too. The reason it has not been
+  done is blast radius, and it is a judgement call rather than a rule: today's
+  Azure secrets can only replace application code, whereas ARM credentials can
+  create, modify and delete resources and read the Key Vault.
 - **Epics are not implementation tasks.** Once elaborated, a parent issue
   should not carry a `role:*` label — the sub-issues do. Assigning an epic to
   Copilot produces sprawling, unreviewable PRs.
