@@ -1076,6 +1076,16 @@ async function main() {
   assert.deepStrictEqual(invalidPlanningType, { ok: false, error: 'invalid type' });
   console.log('✓ addPlanningItem rejects invalid types');
 
+  const blankPlanningTitle = await ROUTES.addPlanningItem({
+    personId: 'toby',
+    pin: '1234',
+    kidId: 'toby',
+    title: '   ',
+    type: 'note',
+  });
+  assert.deepStrictEqual(blankPlanningTitle, { ok: false, error: 'title is required' });
+  console.log('✓ addPlanningItem rejects blank titles');
+
   const stateAfterManualAdd = await ROUTES.addPlanningItem({
     personId: 'toby',
     pin: '1234',
