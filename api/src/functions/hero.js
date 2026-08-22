@@ -158,7 +158,9 @@ async function getState() {
   const rewardDocs = (await queryHousehold('rewards')).filter((r) => r.type === 'reward' && r.active !== false);
   const allRewardRows = await queryHousehold('rewards');
   const redemptionDocs = allRewardRows.filter((r) => r.type === 'redemption');
-  const planningItems = mapPlanningItemsForState(await queryHousehold('planningItems'));
+  const planningItems = mapPlanningItemsForState(
+    (await queryHousehold('planningItems')).filter((item) => item.active !== false && item.kidId)
+  );
 
   const stats = {};
   people
@@ -556,7 +558,7 @@ async function deleteTask(req) {
   return getState();
 }
 
-async function addPlanningItem(req) {
+async function addHouseholdPlanningItem(req) {
   await requireParent(req.parentId, req.parentPin);
   const validated = await validatePlanningPayload({
     ...req,
@@ -569,7 +571,7 @@ async function addPlanningItem(req) {
   return { ok: true, item: validated.item };
 }
 
-async function updatePlanningItem(req) {
+async function updateHouseholdPlanningItem(req) {
   await requireParent(req.parentId, req.parentPin);
   const planningItems = container('planningItems');
   const { resource: planningItem } = await planningItems
@@ -584,7 +586,7 @@ async function updatePlanningItem(req) {
   return { ok: true, item: validated.item };
 }
 
-async function deletePlanningItem(req) {
+async function deleteHouseholdPlanningItem(req) {
   await requireParent(req.parentId, req.parentPin);
   const planningItems = container('planningItems');
   const { resource: planningItem } = await planningItems
@@ -1084,7 +1086,7 @@ async function saveVoiceReminder(req) {
   return getState();
 }
 
-async function addPlanningItem(req) {
+async function addKidPlanningItem(req) {
   await requireSelf(req.personId, req.pin, req.kidId);
   const title = (req.title || '').trim();
   if (!title) return { ok: false, error: 'title is required' };
@@ -1109,7 +1111,7 @@ async function addPlanningItem(req) {
   return getState();
 }
 
-async function updatePlanningItem(req) {
+async function updateKidPlanningItem(req) {
   await requireSelf(req.personId, req.pin, req.kidId);
   const planningItems = container('planningItems');
   const { resource: planningItem } = await planningItems
@@ -1136,7 +1138,7 @@ async function updatePlanningItem(req) {
   return getState();
 }
 
-async function deletePlanningItem(req) {
+async function deleteKidPlanningItem(req) {
   await requireSelf(req.personId, req.pin, req.kidId);
   const planningItems = container('planningItems');
   const { resource: planningItem } = await planningItems
@@ -1149,6 +1151,27 @@ async function deletePlanningItem(req) {
   }
   await planningItems.item(req.planningItemId, HOUSEHOLD_ID).delete();
   return getState();
+}
+
+async function addPlanningItem(req) {
+  if (req.parentId !== undefined || req.parentPin !== undefined) {
+    return addHouseholdPlanningItem(req);
+  }
+  return addKidPlanningItem(req);
+}
+
+async function updatePlanningItem(req) {
+  if (req.parentId !== undefined || req.parentPin !== undefined) {
+    return updateHouseholdPlanningItem(req);
+  }
+  return updateKidPlanningItem(req);
+}
+
+async function deletePlanningItem(req) {
+  if (req.parentId !== undefined || req.parentPin !== undefined) {
+    return deleteHouseholdPlanningItem(req);
+  }
+  return deleteKidPlanningItem(req);
 }
 
 async function reorderPlanningItems(req) {
@@ -1182,9 +1205,6 @@ const ROUTES = {
   addTask,
   updateTask,
   deleteTask,
-  addPlanningItem,
-  updatePlanningItem,
-  deletePlanningItem,
   calendar,
   completeTask,
   uncomplete,
