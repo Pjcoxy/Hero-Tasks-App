@@ -229,9 +229,21 @@ disabled, so it hard-stops rather than billing you.
 - **Copilot opens its PRs as drafts** and works for several minutes, then just
   renames the title from `[WIP] …` and stops. It never fires a
   `ready_for_review` event, so there is no "finished" signal to react to.
-  `auto-merge.yml` therefore polls every 5 minutes for Copilot drafts whose
-  title has lost its `[WIP]` prefix, marks those ready and enables auto-merge.
   Acting on `opened` instead would mark half-written work ready and merge it.
+  `auto-merge.yml` looks for Copilot PRs whose title has lost its `[WIP]`
+  prefix, marks them ready and merges them once CI is green.
+
+  It is woken by **CI completing** (`workflow_run`), which is the moment the
+  merge gate could newly pass — and by then Copilot has finished and renamed
+  the title, because it renames when it stops working while CI is still running
+  on its last push. A cron still runs as a backstop, but nothing depends on it;
+  see the throttling note below.
+
+  Draft state is **not** part of the filter. It used to require `draft == true`,
+  which meant any PR already marked ready — by hand, or by an earlier pass that
+  found CI still running — fell out of the candidate set permanently and needed
+  a human. Whether it is a draft says nothing about whether Copilot has
+  finished; the title does.
 - **CI** (`ci.yml`) runs `node api/test-logic.js`, a frontend parse check and a
   workflow-YAML check on every PR. **This is the only automatic check that can
   stop a change reaching the app** — and making that actually true took two
@@ -282,12 +294,30 @@ write), so its merges raise events like anyone else's, and every sweep on
 `deploy.yml`, `build-queue.yml`, `elaborate.yml` and `architect.yml` was
 deleted. Work now moves the instant something unblocks it.
 
-**One timer remains, and it is irreducible:**
+**One timer remains, and it is now only a backstop:**
 
 | Workflow | Why it cannot be an event |
 |---|---|
-| `auto-merge.yml` (5 min) | Copilot never signals "finished" — it opens a draft and later just renames the title from `[WIP] …`. There is no event meaning done |
+| `auto-merge.yml` (nominally 5 min) | Copilot never signals "finished" — it opens a draft and later just renames the title from `[WIP] …`. There is no event meaning done |
 | ~~`approve-agent-workflows.yml`~~ | **Deleted.** It never worked — see below |
+
+### GitHub throttles high-frequency cron, so nothing urgent can hang off it
+
+`auto-merge.yml` is written `*/5 * * * *`. It does not run every five minutes.
+Measured gaps between consecutive scheduled runs on this repository, over one
+morning: **22, 23, 26, 31, 32, 36, 41, 44 and 48 minutes.** Not once did it fire
+on time.
+
+That was the whole reason auto-merge looked broken. It was not — it merged #82
+correctly — but on the cron path a finished PR could sit for the better part of
+an hour, which is long enough that a human watching the repo always merged it
+first. The pipeline looked manual because the automation was too slow to get a
+turn, not because it was failing.
+
+The lesson generalises: **GitHub's cron is a backstop, never a mechanism.**
+Anything that has to happen promptly must hang off an event. For auto-merge that
+event is `workflow_run` on CI completing. This is the same unreliability the
+fermenter project hit and worked around with an external scheduler.
 
 `deploy.yml` still keeps its own record of what is live — a git tag called
 **`deployed`** — and deploys everything changed *since that tag* rather than
