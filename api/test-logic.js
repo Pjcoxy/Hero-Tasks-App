@@ -1018,11 +1018,13 @@ async function main() {
                   what: 'Remind Ollie to feed the dog',
                   when: 'after school',
                   who: 'Ollie',
+                  type: 'reminder',
                 },
                 confidence: {
                   what: 0.93,
                   when: 0.88,
                   who: 0.94,
+                  type: 0.91,
                 },
               }),
             }],
@@ -1043,11 +1045,13 @@ async function main() {
       what: 'Remind Ollie to feed the dog',
       when: 'after school',
       who: 'ollie',
+      type: 'reminder',
     },
     confidence: {
       what: 0.93,
       when: 0.88,
       who: 0.94,
+      type: 0.91,
     },
     needsConfirmation: false,
   });
@@ -1082,11 +1086,13 @@ async function main() {
       what: 'feed the dog tomorrow',
       when: null,
       who: null,
+      type: 'reminder',
     },
     confidence: {
       what: 0,
       when: 0,
       who: 0,
+      type: 0,
     },
     needsConfirmation: true,
   });
@@ -1109,15 +1115,97 @@ async function main() {
       what: 'feed the dog tomorrow',
       when: null,
       who: null,
+      type: 'reminder',
     },
     confidence: {
       what: 0,
       when: 0,
       who: 0,
+      type: 0,
     },
   });
   resetAnthropicClientFactory();
   console.log('✓ extractVoiceIntent tolerates malformed model output without throwing');
+
+  // ---- Type classification scenarios ----
+  // task classification
+  setAnthropicClientFactory(() => ({
+    messages: {
+      create: async () => ({
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            intent: { what: 'Clean my room', when: null, who: 'toby', type: 'task' },
+            confidence: { what: 0.95, when: 0, who: 0.99, type: 0.9 },
+          }),
+        }],
+      }),
+    },
+  }));
+  process.env.LLM_API_KEY = 'test-llm-key';
+  result = await extractVoiceIntent('I want to clean my room', [{ id: 'toby', name: 'Toby', isRequester: true }]);
+  assert.strictEqual(result.intent.type, 'task', 'type should be task for chore-like transcript');
+  assert.strictEqual(result.confidence.type, 0.9, 'task confidence should be returned');
+  console.log('✓ extractVoiceIntent classifies task transcripts correctly');
+
+  // event classification
+  setAnthropicClientFactory(() => ({
+    messages: {
+      create: async () => ({
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            intent: { what: 'Soccer match', when: 'Saturday 10am', who: 'toby', type: 'event' },
+            confidence: { what: 0.97, when: 0.95, who: 0.99, type: 0.92 },
+          }),
+        }],
+      }),
+    },
+  }));
+  result = await extractVoiceIntent('I have a soccer match on Saturday at 10am', [{ id: 'toby', name: 'Toby', isRequester: true }]);
+  assert.strictEqual(result.intent.type, 'event', 'type should be event for time-boxed occurrence');
+  assert.strictEqual(result.confidence.type, 0.92, 'event confidence should be returned');
+  console.log('✓ extractVoiceIntent classifies event transcripts correctly');
+
+  // reminder classification
+  setAnthropicClientFactory(() => ({
+    messages: {
+      create: async () => ({
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            intent: { what: 'Take medicine', when: 'after dinner', who: 'toby', type: 'reminder' },
+            confidence: { what: 0.91, when: 0.85, who: 0.99, type: 0.88 },
+          }),
+        }],
+      }),
+    },
+  }));
+  result = await extractVoiceIntent('remind me to take my medicine after dinner', [{ id: 'toby', name: 'Toby', isRequester: true }]);
+  assert.strictEqual(result.intent.type, 'reminder', 'type should be reminder for nudge transcript');
+  assert.strictEqual(result.confidence.type, 0.88, 'reminder confidence should be returned');
+  console.log('✓ extractVoiceIntent classifies reminder transcripts correctly');
+
+  // invalid type falls back to reminder with 0 confidence
+  setAnthropicClientFactory(() => ({
+    messages: {
+      create: async () => ({
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            intent: { what: 'Something', when: null, who: null, type: 'unknown-type' },
+            confidence: { what: 0.7, when: 0, who: 0, type: 0.5 },
+          }),
+        }],
+      }),
+    },
+  }));
+  result = await extractVoiceIntent('something', [{ id: 'toby', name: 'Toby', isRequester: true }]);
+  assert.strictEqual(result.intent.type, 'reminder', 'invalid type should fall back to reminder');
+  assert.strictEqual(result.confidence.type, 0, 'invalid type should get 0 confidence');
+  console.log('✓ extractVoiceIntent falls back to reminder for unrecognised type value');
+
+  resetAnthropicClientFactory();
 
   // ---- Quiet hours settings tests ----
   const households = mockContainer('households');
