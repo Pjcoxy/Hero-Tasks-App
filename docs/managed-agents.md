@@ -41,14 +41,26 @@ Key ideas:
 
 | Layer | Control |
 |---|---|
-| Per session | Hard $5.00 budget cap — the session pauses (not fails) if reached |
-| Per day | Workflow refuses a 5th run in any rolling 24h window (~$20/day worst case) |
+| Per session | Hard $2.00 budget cap — the session pauses (not fails) if reached |
+| Per day | Workflow refuses a 5th run in any rolling 24h window (~$8/day worst case) |
 | Per month | Set a workspace spend limit yourself at platform.claude.com → Settings → Limits |
 
-A typical elaboration-only run should cost well under $1–2; $5 is headroom.
-There is no per-24h dollar cap in the Anthropic API itself — the runs/day
-guard × per-run cap is the equivalent, and the Console monthly limit is the
-backstop.
+A typical run costs ~$0.35. There is no per-24h dollar cap in the Anthropic
+API itself — the runs/day guard × per-run cap is the equivalent, and the
+Console monthly limit is the backstop.
+
+**Cost is dominated by input tokens** (~165k per run, from reading the
+codebase — the audit is the expensive part and also the valuable part). So the
+model's *input* price is the main lever:
+
+| Model | Input $/M | Est. per run |
+|---|---|---|
+| Claude Opus 5 | $5.00 | ~$1.00 |
+| **Claude Sonnet 5** (current, `effort: low`) | $3.00 | **~$0.35** |
+| Claude Haiku 4.5 | $1.00 | ~$0.20 (no `effort` support — it errors) |
+
+Change the model in `ops/elaborator/setup_elaborator.py` and re-run the setup
+workflow. Raise it again if the audits start missing things.
 
 Times/quotas use a **rolling 24h window** (timezone-proof); any future
 scheduled sweep should be created with `timezone: "Australia/Perth"`.
@@ -92,8 +104,8 @@ run on it.
 ## If something goes wrong
 
 - **Workflow fails fast with an auth error** — check the two repo secrets.
-- **Session pauses at $5** — the workflow log says so; open the Console
-  session link, review, and raise the budget there to let it finish.
+- **Session pauses at its budget** — the workflow log says so; open the
+  Console session link, review, and raise the budget there to let it finish.
 - **"Daily limit of 4 elaborator runs reached"** — wait, or raise the number
   in `.github/workflows/elaborate.yml`.
 - **Agent behaves oddly** — its persona is the `SYSTEM_PROMPT` in
@@ -114,8 +126,8 @@ run on it.
    box at the bottom (`Completed` vs `In flight`) tells you whether work is
    actually progressing.
 4. **Events** tab: the raw event stream, when the transcript is ambiguous.
-5. The cost figure beside the title (`US$0.17 / US$5.00`) is spend against the
-   session budget.
+5. The cost figure beside the title (e.g. `US$0.17 / US$2.00`) is spend
+   against the session budget.
 
 ## Phase 2+ (not built yet)
 
