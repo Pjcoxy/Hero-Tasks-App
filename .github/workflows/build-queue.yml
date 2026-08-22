@@ -20,7 +20,7 @@ name: Build queue
 #   - an issue closed              -> same
 # The hourly schedule is only a safety net for events that get missed.
 #
-# MAX_PER_RUN caps how many start at once. For the initial build-out it is 3;
+# MAX_PER_RUN caps how many start at once. For the initial build-out it is 6;
 # drop it to 1 for ongoing feature work.
 
 on:
@@ -63,7 +63,7 @@ jobs:
           CANDIDATES=$(gh api "repos/${GITHUB_REPOSITORY}/issues?labels=build&state=open&sort=created&direction=asc&per_page=100" \
             --jq '[.[] | select(has("pull_request") | not) | {number, body: (.body // ""), assignees: [.assignees[].login]}]')
 
-          MAX_PER_RUN=3
+          MAX_PER_RUN=6
           READY=""
           PICKED=0
 

@@ -110,9 +110,13 @@ So a chain like #33 → #34 → #35 flows straight through: #33's PR merges, #33
 closes, the queue wakes within seconds and starts #34 and #35 — no waiting for
 a timer.
 
-**Up to 3 start at once** (`MAX_PER_RUN` in the workflow). That is set for the
-initial build-out; drop it to 1 for ongoing feature work, along with the daily
-guards in `elaborate.yml` / `architect.yml` back to ~10.
+**Up to 6 start at once** (`MAX_PER_RUN` in the workflow), with no daily cap.
+Deliberate for the initial build-out: the Copilot credit budget is the real
+limit, it fails safe, and a second ceiling underneath it only stalls the run.
+
+**Afterwards, restore the guards:** `MAX_PER_RUN=1`, the daily guard in
+`build.yml` back to ~8, the guards in `elaborate.yml` / `architect.yml` back to
+~10, and disable the auto-approve workflow.
 
 **The dependency check is not a pacing device** and stays whatever the speed:
 it stops Copilot writing against code that does not exist yet.
@@ -143,7 +147,7 @@ rule is: build the sub-issues, not the parent.
 |---|---|---|
 | Elaborator runs | 20 / rolling 24h | Anthropic spend |
 | Architect runs | 20 / rolling 24h | Anthropic spend |
-| Copilot builds | 3 at a time via the queue, 30 / rolling 24h hard cap | Copilot credits are finite and monthly |
+| Copilot builds | 6 at a time via the queue; **no daily cap during the build-out** | The Copilot credit budget is the real limit and fails safe on its own |
 
 > Those numbers are raised for the initial build-out. See *The build queue*
 > below for what to set them back to afterwards.
