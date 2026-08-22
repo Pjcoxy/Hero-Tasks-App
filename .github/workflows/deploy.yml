@@ -1,8 +1,23 @@
 name: Deploy to Azure
 
-# Deploys whichever part of the app changed, on every push to main. Replaces
-# the manual Cloud Shell steps in docs/deploy-app.md (those still work as a
-# fallback).
+# Deploys whichever part of the app changed. Replaces the manual Cloud Shell
+# steps in docs/deploy-app.md (those still work as a fallback).
+#
+# Why this also runs on a schedule:
+#   When auto-merge.yml merges a Copilot pull request it acts as
+#   github-actions[bot], using the built-in GITHUB_TOKEN. GitHub deliberately
+#   does NOT raise workflow events for anything that token does - otherwise a
+#   workflow could trigger itself forever. So an auto-merged pull request lands
+#   on main and no 'push' run ever fires, and the change sits undeployed.
+#   (That is exactly what happened to the Rewards UI in #48/#49.)
+#
+#   Rather than hand a write-scoped personal token to the merge job, this
+#   workflow keeps its own record of what is live - the 'deployed' tag - and
+#   sweeps every 5 minutes for anything on main that is newer than it.
+#
+# The 'deployed' tag is the source of truth for what is on Azure, so a run
+# deploys everything changed since the last SUCCESSFUL deploy. A failed deploy
+# leaves the tag where it is and the next run retries it.
 #
 # Required repository secrets:
 #   AZURE_STATIC_WEB_APPS_API_TOKEN  - Static Web App deployment token
@@ -18,10 +33,12 @@ name: Deploy to Azure
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: deploy-main
@@ -36,18 +53,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
-      - name: Detect what changed
+          ref: main
+          fetch-depth: 0
+      - name: Detect what changed since the last successful deploy
         id: filter
         run: |
+          set -uo pipefail
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "api=true" >> "$GITHUB_OUTPUT"
             echo "frontend=true" >> "$GITHUB_OUTPUT"
             echo "Manual run - deploying both."
             exit 0
           fi
-          CHANGED=$(git diff --name-only HEAD^ HEAD || echo "")
-          echo "Changed files:"; echo "$CHANGED"
+
+          # Compare against the 'deployed' tag: what is actually live. Falls
+          # back to the previous commit only until the tag first exists.
+          if git rev-parse -q --verify refs/tags/deployed >/dev/null; then
+            BASE=$(git rev-parse refs/tags/deployed^{commit})
+            if ! git merge-base --is-ancestor "$BASE" HEAD; then
+              echo "::warning::'deployed' tag is not an ancestor of main - falling back to HEAD^."
+              BASE=$(git rev-parse HEAD^)
+            fi
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            # First sweep after this workflow lands: there is no tag yet, so
+            # there is no way to know what is live. Deploy both and create the
+            # tag - a full deploy is idempotent and takes ~80s, and skipping
+            # here would leave the tag uncreated indefinitely, which is exactly
+            # the hole this workflow exists to close.
+            echo "::notice::No 'deployed' tag yet - deploying both once to establish it."
+            echo "api=true" >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          else
+            BASE=$(git rev-parse HEAD^)
+          fi
+
+          echo "Deployed: $BASE"
+          echo "main:     $(git rev-parse HEAD)"
+
+          CHANGED=$(git diff --name-only "$BASE" HEAD || echo "")
+          if [ -z "$CHANGED" ]; then
+            echo "Nothing changed since the last deploy."
+          else
+            echo "Changed files:"; echo "$CHANGED"
+          fi
           echo "api=$(echo "$CHANGED" | grep -q '^api/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "frontend=$(echo "$CHANGED" | grep -q '^frontend/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
@@ -114,3 +164,23 @@ jobs:
           app_location: frontend
           skip_app_build: true
           skip_api_build: true
+
+  record:
+    # Moves the 'deployed' tag to what was just shipped, so the next run knows
+    # where to start. Only runs when nothing failed - a failed deploy leaves
+    # the tag behind and gets retried on the next sweep.
+    needs: [changes, deploy-api, deploy-frontend]
+    if: >-
+      always() && needs.changes.result == 'success'
+      && (needs.changes.outputs.api == 'true' || needs.changes.outputs.frontend == 'true')
+      && needs.deploy-api.result != 'failure' && needs.deploy-frontend.result != 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Mark this commit as deployed
+        run: |
+          git tag -f deployed
+          git push -f origin refs/tags/deployed
+          echo "deployed -> $(git rev-parse HEAD)"
