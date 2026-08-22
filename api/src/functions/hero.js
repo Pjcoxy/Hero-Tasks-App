@@ -251,6 +251,45 @@ async function addTask(req) {
   return getState();
 }
 
+async function updateTask(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const chores = container('chores');
+  const { resource: chore } = await chores
+    .item(req.taskId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!chore || chore.active === false) return { ok: false, error: 'Task not found' };
+  if (req.title !== undefined) {
+    const title = (req.title || '').trim();
+    if (!title) return { ok: false, error: 'title is required' };
+    chore.title = title;
+  }
+  if (req.points !== undefined) {
+    const points = Number(req.points);
+    if (!Number.isInteger(points) || points <= 0) return { ok: false, error: 'points must be a positive integer' };
+    chore.points = points;
+  }
+  if (req.cycle !== undefined) {
+    if (!['daily', 'weekly', 'oneoff'].includes(req.cycle)) return { ok: false, error: 'invalid cycle' };
+    chore.cycle = req.cycle;
+  }
+  if (req.kidId !== undefined) {
+    const { resource: kid } = await container('people')
+      .item(req.kidId, HOUSEHOLD_ID)
+      .read()
+      .catch(() => ({ resource: null }));
+    if (!kid || kid.role !== 'kid') return { ok: false, error: 'Kid not found' };
+    chore.kidId = req.kidId;
+  }
+  if (chore.cycle !== 'oneoff') {
+    chore.dueBy = null;
+  } else if (req.dueBy !== undefined) {
+    chore.dueBy = req.dueBy || null;
+  }
+  await chores.item(req.taskId, HOUSEHOLD_ID).replace(chore);
+  return getState();
+}
+
 async function deleteTask(req) {
   await requireParent(req.parentId, req.parentPin);
   const chores = container('chores');
@@ -593,6 +632,7 @@ const ROUTES = {
   savePushSubscription,
   removePushSubscription,
   addTask,
+  updateTask,
   deleteTask,
   completeTask,
   uncomplete,
