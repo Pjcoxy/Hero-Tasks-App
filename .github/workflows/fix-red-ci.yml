@@ -9,7 +9,7 @@ name: Send red CI back to Copilot
 # comment from github-actions[bot] would not reach Copilot.
 #
 # ATTEMPT CAP: three. If Copilot cannot fix it in three goes it is not going to,
-# and each attempt costs Copilot credits and can make the diff worse. After
+# and each attempt costs a whole Copilot session and can make the diff worse. After
 # that the pull request is left alone and labelled 'needs-human' if that label
 # exists, so it is easy to find.
 
@@ -57,8 +57,11 @@ jobs:
             --jq "[.[] | select(.body | contains(\"${MARKER}\"))] | length" 2>/dev/null || echo 0)
           echo "Previous hand-backs on this pull request: ${ATTEMPTS}"
 
-          if [ "${ATTEMPTS:-0}" -ge 3 ]; then
-            echo "::warning::#${NUM} has already been handed back 3 times and CI is still red. Leaving it for a human."
+          # One attempt, not three. A retry is a whole Copilot session, and in
+          # practice if the agent cannot fix its own build first time it does not
+          # fix it on the third either - you pay triple to reach the same human.
+          if [ "${ATTEMPTS:-0}" -ge 1 ]; then
+            echo "::warning::#${NUM} was handed back once and CI is still red. Leaving it for a human."
             if gh api "repos/${GITHUB_REPOSITORY}/labels/needs-human" >/dev/null 2>&1; then
               gh issue edit "$NUM" --repo "$GITHUB_REPOSITORY" --add-label needs-human >/dev/null 2>&1 \
                 && echo "Labelled #${NUM} needs-human."
@@ -77,7 +80,7 @@ jobs:
           ${MARKER}
           @copilot CI is failing on this pull request. Please fix it and push to this branch.
 
-          Attempt $((ATTEMPTS + 1)) of 3. Full run: ${RUN_URL}
+          Attempt $((ATTEMPTS + 1)) of 1. Full run: ${RUN_URL}
 
           The tests are \`node api/test-logic.js\`, a frontend parse check (\`node scripts/check-frontend.js\`) and a workflow YAML check. Run them locally before pushing.
 
