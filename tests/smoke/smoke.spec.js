@@ -153,3 +153,23 @@ test('cancelling the in-app dialog does nothing', async ({ page }) => {
   await expect(page.locator('#ask-modal')).toBeHidden();
   await expect(page.locator('#screen-kid')).toBeVisible();
 });
+
+// The rewards shop shipped with no rewards in it, so the "N more points to go"
+// text that was already written had never once been seen. That is the shape
+// this whole suite exists for: coded correctly, invisible in the running app.
+test('the kid Home screen names a real reward and how far away it is', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+
+  const goal = page.locator('#k-next-goal');
+  await expect(goal).toBeVisible();
+  // Cheapest unaffordable reward first - a nearby goal, not a hopeless one.
+  await expect(goal).toContainText('A player for your soccer game');
+  await expect(goal).toContainText(/\d+ more points?/);
+});
+
+test('the rewards shop is not empty', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+  await page.getByRole('button', { name: /rewards/i }).first().click();
+  await expect(page.locator('#k-rewards')).not.toContainText('No rewards in the shop yet');
+  await expect(page.locator('#k-rewards')).toContainText("Ice cream from McDonald's");
+});
