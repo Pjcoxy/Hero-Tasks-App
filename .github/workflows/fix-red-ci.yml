@@ -1,0 +1,96 @@
+name: Send red CI back to Copilot
+
+# When CI fails on a Copilot pull request, hand the failure back to Copilot to
+# fix rather than leaving the pull request sitting for a human.
+#
+# Copilot's coding agent starts a new session when someone with write access
+# mentions it on a pull request it authored, so this posts the failing log as a
+# comment addressed to @copilot. It uses the personal token deliberately: a
+# comment from github-actions[bot] would not reach Copilot.
+#
+# ATTEMPT CAP: three. If Copilot cannot fix it in three goes it is not going to,
+# and each attempt costs Copilot credits and can make the diff worse. After
+# that the pull request is left alone and labelled 'needs-human' if that label
+# exists, so it is easy to find.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: fix-red-ci-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  hand-back:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure'
+      && startsWith(github.event.workflow_run.head_branch, 'copilot/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ask Copilot to fix its own failing build
+        env:
+          GH_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -uo pipefail
+
+          NUM=$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&head=${GITHUB_REPOSITORY%%/*}:${BRANCH}" \
+            --jq '.[0].number // empty' 2>/dev/null || echo "")
+          if [ -z "$NUM" ]; then
+            echo "No open pull request for ${BRANCH} - nothing to hand back."
+            exit 0
+          fi
+          echo "Pull request #${NUM} on ${BRANCH}"
+
+          MARKER="<!-- ci-handback -->"
+          ATTEMPTS=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${NUM}/comments?per_page=100" \
+            --jq "[.[] | select(.body | contains(\"${MARKER}\"))] | length" 2>/dev/null || echo 0)
+          echo "Previous hand-backs on this pull request: ${ATTEMPTS}"
+
+          if [ "${ATTEMPTS:-0}" -ge 3 ]; then
+            echo "::warning::#${NUM} has already been handed back 3 times and CI is still red. Leaving it for a human."
+            if gh api "repos/${GITHUB_REPOSITORY}/labels/needs-human" >/dev/null 2>&1; then
+              gh issue edit "$NUM" --repo "$GITHUB_REPOSITORY" --add-label needs-human >/dev/null 2>&1 \
+                && echo "Labelled #${NUM} needs-human."
+            fi
+            exit 0
+          fi
+
+          # Last 60 lines of whatever actually failed - enough for a stack trace
+          # or a failed assertion without pasting the whole build.
+          LOG=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed 2>/dev/null | tail -60 || echo "")
+          if [ -z "$LOG" ]; then
+            LOG="(could not read the failing log - see the run link below)"
+          fi
+
+          BODY=$(cat <<EOF
+          ${MARKER}
+          @copilot CI is failing on this pull request. Please fix it and push to this branch.
+
+          Attempt $((ATTEMPTS + 1)) of 3. Full run: ${RUN_URL}
+
+          The tests are \`node api/test-logic.js\`, a frontend parse check (\`node scripts/check-frontend.js\`) and a workflow YAML check. Run them locally before pushing.
+
+          Tail of the failing job:
+
+          \`\`\`
+          ${LOG}
+          \`\`\`
+          EOF
+          )
+
+          # Strip the leading indentation the heredoc carries inside the YAML block.
+          echo "$BODY" | sed 's/^          //' > /tmp/body.md
+          gh pr comment "$NUM" --repo "$GITHUB_REPOSITORY" --body-file /tmp/body.md \
+            && echo "Handed #${NUM} back to Copilot (attempt $((ATTEMPTS + 1)))." \
+            || echo "::warning::could not comment on #${NUM}"

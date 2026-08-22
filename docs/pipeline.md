@@ -128,6 +128,18 @@ way:
 The queue skips anything that is an epic, already assigned to Copilot, or has
 an open issue named in a `Depends on #N` line in its body.
 
+**Red CI goes back to Copilot, not to you.** `fix-red-ci.yml` watches for a
+failed CI run on a `copilot/` branch and comments on the pull request tagging
+`@copilot` with the tail of the failing log. Copilot's agent starts a new
+session when someone with write access mentions it on a pull request it wrote,
+so it fixes and pushes by itself. The comment comes from the personal token
+deliberately — one from `github-actions[bot]` would not reach it.
+
+**Capped at three attempts.** If Copilot cannot fix it in three goes it is not
+going to, and each attempt spends credits and can make the diff worse. After
+that the pull request is left alone and labelled `needs-human`, which is the
+one thing genuinely worth looking at when you come back.
+
 **Staying merge-able.** Before merging, `auto-merge.yml` checks whether the
 branch is behind `main` and, if so, updates it and waits for CI to re-run
 against the merged result. Between that and building one at a time, a conflict
