@@ -142,11 +142,20 @@ merges made by a real token the events fire, so a chain like #33 → #34 → #35
 flows straight through: #33's PR auto-merges, #33 closes, and the queue wakes
 within seconds to start #34 and #35.
 
-**Up to 6 start at once** (`MAX_PER_RUN` in the workflow), with no daily cap.
-Deliberate for the initial build-out: the Copilot credit budget is the real
-limit, it fails safe, and a second ceiling underneath it only stalls the run.
+**One build at a time** (`MAX_PER_RUN=1`), with no daily cap.
 
-**Afterwards, restore the guards:** `MAX_PER_RUN=1`, the daily guard in
+Parallel builds look faster and are not. Almost every sub-issue edits
+`api/src/functions/hero.js` or `frontend/index.html`, so concurrent Copilot
+branches conflict: the first merges, the rest need a human to resolve, and
+**auto-merge cannot resolve a conflict** — those pull requests just sit there.
+#57 and #58 hit this within minutes of each other and needed a hand-resolved
+merge.
+
+Serialising means each build branches off code that already contains the one
+before it, so the conflict mostly cannot arise. That is what actually keeps the
+pipeline unattended; six at once does not.
+
+**Afterwards, restore the guards:** the daily guard in
 `build.yml` back to ~8, and delete `approve-agent-workflows.yml` (which also
 removes one of the two remaining timers). Leave the
 `elaborate.yml` / `architect.yml` ceilings alone — they are runaway protection,

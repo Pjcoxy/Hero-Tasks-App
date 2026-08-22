@@ -25,8 +25,15 @@ name: Build queue
 # advance the queue. The merge job now uses a real token, the events fire, and
 # the queue moves the moment something unblocks.
 #
-# MAX_PER_RUN caps how many start at once. For the initial build-out it is 6;
-# drop it to 1 for ongoing feature work.
+# MAX_PER_RUN caps how many start at once, and it is 1 deliberately.
+#
+# Running builds in parallel looks faster and is not. Almost every sub-issue
+# edits api/src/functions/hero.js or frontend/index.html, so concurrent Copilot
+# branches conflict with each other: the first merges, the rest need a human to
+# resolve, and auto-merge cannot. #57 and #58 hit this within minutes of each
+# other. One at a time means each build branches off code that already contains
+# the one before it, so conflicts mostly cannot arise - which is what actually
+# keeps the pipeline unattended.
 
 on:
   issues:
@@ -66,7 +73,7 @@ jobs:
           CANDIDATES=$(gh api "repos/${GITHUB_REPOSITORY}/issues?labels=build&state=open&sort=created&direction=asc&per_page=100" \
             --jq '[.[] | select(has("pull_request") | not) | {number, body: (.body // ""), assignees: [.assignees[].login]}]')
 
-          MAX_PER_RUN=6
+          MAX_PER_RUN=1
           READY=""
           PICKED=0
 
