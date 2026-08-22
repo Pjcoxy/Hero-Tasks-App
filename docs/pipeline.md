@@ -4,15 +4,17 @@ Four labels drive everything. You add a label; agents do the rest.
 
 ```
   backlog issue
-       │  add label: elaborate
+       │  YOU add label: elaborate     <- the only click
        ▼
   ELABORATOR (Claude)   → audits the code, writes sub-issues with
        │                   acceptance criteria, links them to the parent
-       │  add label: architect   (only where the design isn't obvious)
+       │  Elaborator adds 'architect' where design is genuinely needed,
+       │  and 'build' on every sub-issue (which queues, does not start)
        ▼
   ARCHITECT (Claude)    → posts "Technical approach" as a comment
        │
-       │  add label: build
+       │  BUILD QUEUE drains 4/day, oldest first,
+       │  skipping epics and anything with an open dependency
        ▼
   DEVELOPER (Copilot)   → branch + pull request
        │
@@ -48,14 +50,81 @@ Four labels drive everything. You add a label; agents do the rest.
 The tester needs no label: Copilot's review is requested automatically on every
 agent-authored PR (`request-review.yml`).
 
-**When to use `architect`:** only where a genuine technical choice exists —
-issues carrying `role:architect` (#12, #15, #16, #21, #5, #43). CRUD-shaped
-work goes straight from `elaborate` to `build`.
+**`architect` is applied for you** by the Elaborator where a genuine technical
+choice exists. CRUD-shaped work goes straight from `elaborate` to `build`. You
+can still add it by hand to any issue — the older backlog items that predate
+this (#12, #15, #16, #21, #5, #43) need it applied manually.
 
-**`role:developer` is not applied any more.** Every sub-issue is developer work
-by default, so the label carried no information. `role:architect` still does:
-it means design this before building it. Older issues still carry
-`role:developer` — harmless, ignore it.
+### Label kinds
+
+Every label in this repo is one of three things. Keeping the distinction sharp
+matters, because two of them cost money and one does not.
+
+| Kind | Labels | Effect |
+|---|---|---|
+| **Trigger** | `elaborate`, `architect`, `build` | Live wire — adding it starts an agent and spends |
+| **Marker** | `elaborated`, `architected` | Applied *by* an agent; records what has been done |
+
+Every label is live. `role:developer` and `role:tester` were deleted (every
+sub-issue is developer work by default, and the tester runs automatically on
+every PR), and `role:architect` was replaced by the Elaborator applying
+`architect` itself.
+
+### Who applies which trigger
+
+| Trigger | Applied by | Spends |
+|---|---|---|
+| `elaborate` | **You** — deciding an item is worth working on | ~$0.35 |
+| `architect` | **The Elaborator**, on sub-issues it judges need design | ~$0.50 each |
+| `build` | **The Elaborator**, on every sub-issue — but it *queues* rather than builds | ~40–55 credits, when the queue reaches it |
+
+### The build queue
+
+`build` means **queued**, not "build now". A scheduled worker
+(`build-queue.yml`, every 6 hours) picks the next queued issue and hands it to
+Copilot — one at a time, oldest first.
+
+Two reasons it is a queue rather than a direct trigger, both learned the hard
+way:
+
+- **Credits are finite and monthly** (~20–28 builds). Labelling four
+  sub-issues at once would blow through a daily cap, and a skipped workflow run
+  never retries — that work would silently never get built.
+- **Sub-issues have dependencies.** Building #34 before #33 lands means Copilot
+  writes against an API that does not exist yet, and invents one.
+
+The queue skips anything that is an epic, already assigned to Copilot, or has
+an open issue named in a `Depends on #N` line in its body.
+
+**Pace: every 30 minutes, up to 3 at a time.** This is deliberately fast — the
+initial build-out of the backlog is a watched, one-off exercise, not steady
+state. Expect it to consume the Copilot allowance quickly; it hard-stops rather
+than billing.
+
+**The dependency check is not a pacing device** and stays whatever the speed:
+it stops Copilot writing against code that does not exist yet.
+
+**When the backlog is built, slow it down.** In `build-queue.yml` set the cron
+to `0 */6 * * *` and `MAX_PER_RUN=1`, and drop the daily guards in
+`elaborate.yml` / `architect.yml` back to ~10. Ongoing feature work does not
+want a firehose.
+
+To jump the queue for one issue: Actions → *Build an issue with Copilot* → Run
+workflow → issue number.
+
+The Elaborator decides the architect question because it has just read the
+codebase and the issue, so it is better placed than you are to know whether a
+design decision remains. Its criteria are in the `SYSTEM_PROMPT` in
+`ops/elaborator/setup_elaborator.py`: new data shapes others build on,
+external services, security/privacy/auth, ongoing per-use cost, or a real
+choice between approaches the existing code does not already settle. CRUD
+following an existing pattern does not qualify. It must say in its comment
+which sub-issues it flagged and why, so the call is reviewable.
+
+Nothing needs a click from you after `elaborate`: the Elaborator queues the
+work and decides what needs design, and the queue paces the spend. Your control
+is the pace (the cron), the daily caps, and removing `build` from anything you
+do not want built.
 
 **Never label an epic `build`.** The workflow refuses and says so, but the
 rule is: build the sub-issues, not the parent.
@@ -64,9 +133,12 @@ rule is: build the sub-issues, not the parent.
 
 | Guard | Limit | Why |
 |---|---|---|
-| Elaborator runs | 10 / rolling 24h | Anthropic spend |
-| Architect runs | 10 / rolling 24h | Anthropic spend |
-| Copilot builds | 8 / rolling 24h | Copilot credits are finite and monthly |
+| Elaborator runs | 20 / rolling 24h | Anthropic spend |
+| Architect runs | 20 / rolling 24h | Anthropic spend |
+| Copilot builds | 3 per 30 min via the queue, 30 / rolling 24h hard cap | Copilot credits are finite and monthly |
+
+> Those numbers are raised for the initial build-out. See *The build queue*
+> below for what to set them back to afterwards.
 | Per session | $2.00 hard cap | A runaway session pauses rather than spends |
 | Epic guard | build refuses issues with sub-issues | Prevents unreviewable PRs |
 

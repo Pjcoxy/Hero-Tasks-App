@@ -10,7 +10,7 @@ Copilot. You are the gate between them.
 | Role | Engine | Trigger | Output |
 |---|---|---|---|
 | **Elaborator** | Claude Managed Agents | `elaborate` label | Sub-issues with acceptance criteria + an audit comment |
-| **Architect** | Claude Managed Agents | `architect` label | A technical-approach comment on the issue |
+| **Architect** | Claude Managed Agents | `architect` label — applied by the Elaborator where design is genuinely needed | A technical-approach comment on the issue |
 | **Developer** | GitHub Copilot | `build` label | A branch + pull request |
 | **Tester** | GitHub Copilot | Automatic on every agent PR | Review comments — **advisory, does not block the merge** |
 | *(CI)* | GitHub Actions | Automatic on every PR | Pass/fail — **the actual gate** |

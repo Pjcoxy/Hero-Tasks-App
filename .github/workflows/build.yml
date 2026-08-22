@@ -1,8 +1,10 @@
 name: Build an issue with Copilot
 
-# Trigger: add the "build" label to an issue, or dispatch manually with an
-# issue number. Assigns the GitHub Copilot coding agent, which branches,
-# writes the code and opens a pull request.
+# Builds ONE issue immediately, on manual dispatch. Use this to jump the queue.
+#
+# The 'build' label does NOT trigger this - it queues the issue for
+# build-queue.yml, which drains the queue a few at a time in dependency order.
+# See docs/pipeline.md for why.
 #
 # Guards:
 #   - refuses epics (an issue with sub-issues, or carrying 'elaborated')
@@ -12,10 +14,8 @@ on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: "Issue number to build"
+        description: "Issue number to build now (jumps the queue)"
         required: true
-  issues:
-    types: [labeled]
 
 permissions:
   actions: read
@@ -28,20 +28,14 @@ concurrency:
 
 jobs:
   build:
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'build'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Resolve issue number
         id: issue
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "number=${{ github.event.inputs.issue_number }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "number=${{ github.event.inputs.issue_number }}" >> "$GITHUB_OUTPUT"
 
-      - name: Daily build guard (max 8 per rolling 24h)
+      - name: Daily build guard (max 30 per rolling 24h)
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
@@ -49,8 +43,8 @@ jobs:
           SINCE=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
           COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build.yml/runs?created=%3E%3D${SINCE}" --jq '.total_count')
           echo "Build runs in last 24h (including this one): ${COUNT}"
-          if [ "${COUNT}" -gt 8 ]; then
-            echo "Daily limit of 8 builds reached - skipping to protect Copilot credits."
+          if [ "${COUNT}" -gt 30 ]; then
+            echo "Daily limit of 30 builds reached - skipping to protect Copilot credits."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
