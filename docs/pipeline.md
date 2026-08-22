@@ -309,6 +309,21 @@ Until both exist the deploy jobs **skip with a notice** rather than failing —
 merges are never blocked by missing credentials, the live app just doesn't
 change.
 
+## Design
+
+[`design-system.md`](design-system.md) holds the visual language — the actual
+colour, type, spacing, radius, elevation and motion values, plus component specs
+for the shell, cards, buttons, the points number, celebrations, empty states and
+Parent HQ.
+
+It exists because "make it feel premium" is an adjective, not a specification.
+An agent implements a defined thing well and invents a design poorly, so the
+values are written down and the work becomes implementation. The Elaborator
+reads it on every run and must ground frontend acceptance criteria in it.
+
+`scripts/check-design.js` enforces the mechanical half in CI. It cannot judge
+taste — that is what the written component specs are for.
+
 ## Setting up the agents (one-time)
 
 1. *Elaborator — one-time setup* (Actions tab) — creates the environment,
