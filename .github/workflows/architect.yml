@@ -8,11 +8,23 @@ name: Architect an issue
 # Drains one issue at a time, oldest first, posting a technical approach as a
 # comment. Writes no code. On success it swaps 'architect' for 'architected'.
 #
-# Wakes on: a label being added, every 5 minutes, and manual dispatch. Dispatch
+# Wakes on: a label being added, and manual dispatch. Dispatch
 # with an issue number to jump the queue; leave it blank to just drain.
 #
-# Guard: at most 20 runs per rolling 24h. Raised for the initial build-out; drop
-# back to ~10 for ongoing feature work.
+# What bounds the spend:
+#   1. The queue itself. Only labelled issues run, each runs once, and the
+#      label comes off afterwards - so the ceiling is (issues labelled) x
+#      ~$0.50.
+#   2. A $2 hard cap per session, set in the runner.
+#   3. Skipping anything already marked 'architected' - the one way this could
+#      loop is a failed label removal, and that closes it.
+#   4. A runaway ceiling of 80 runs per rolling 24h, below.
+#
+# The ceiling counts RUNS, so keep it well clear of however often this fires.
+# A ceiling of 20 against a 5-minute sweep was crossed within two hours and then
+# held forever, after which nothing would ever run again - a guard that becomes
+# the outage. There is no sweep now: the label event starts this, and each
+# finished run dispatches the next itself.
 
 on:
   workflow_dispatch:
@@ -22,8 +34,6 @@ on:
         required: false
   issues:
     types: [labeled]
-  schedule:
-    - cron: "*/5 * * * *"
 
 permissions:
   actions: read
@@ -38,12 +48,11 @@ jobs:
   architect:
     if: >-
       github.event_name == 'workflow_dispatch'
-      || github.event_name == 'schedule'
       || github.event.label.name == 'architect'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Daily run guard (max 20 per rolling 24h)
+      - name: Runaway guard (max 80 runs per rolling 24h)
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,8 +60,8 @@ jobs:
           SINCE=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
           COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/architect.yml/runs?created=%3E%3D${SINCE}" --jq '.total_count')
           echo "Architect runs in last 24h (including this one): ${COUNT}"
-          if [ "${COUNT}" -gt 20 ]; then
-            echo "::notice::Daily limit of 20 architect runs reached. Labelled issues stay queued and resume once the window clears."
+          if [ "${COUNT}" -gt 80 ]; then
+            echo "::notice::Runaway ceiling of 80 architect runs reached. Labelled issues stay queued and resume once the window clears."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
@@ -87,6 +96,17 @@ jobs:
           echo "$QUEUE" | jq -r '.[] | "  #\(.number)  \(.title)"'
 
           NEXT=$(echo "$QUEUE" | jq -r '.[0].number')
+
+          # Already done? Then 'architect' was left behind by a failed label
+          # removal. Clear it rather than paying to redo the work - this is the
+          # only way the queue could loop.
+          if gh api "repos/${GITHUB_REPOSITORY}/issues/${NEXT}/labels" --jq '.[].name' 2>/dev/null | grep -qx 'architected'; then
+            echo "#${NEXT} is already architected - clearing the stale label instead of rerunning."
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/issues/${NEXT}/labels/architect" >/dev/null 2>&1 || true
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           echo "Taking #${NEXT}."
           echo "number=${NEXT}" >> "$GITHUB_OUTPUT"
           echo "remaining=$((DEPTH - 1))" >> "$GITHUB_OUTPUT"
