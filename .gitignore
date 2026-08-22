@@ -112,3 +112,7 @@ The critical one for you is local.settings.json — that's where Azure Functions
 
 
 Claude is AI and can make mistakes. Please double-check responses.
+
+# Python
+__pycache__/
+*.pyc

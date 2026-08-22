@@ -1,0 +1,75 @@
+name: Elaborate backlog issue
+
+# Two ways to trigger, both deliberate (one issue per run, per Peter's
+# confirmation-per-item rule):
+#   1. Add the "elaborate" label to an issue.
+#   2. Actions tab -> "Elaborate backlog issue" -> Run workflow -> enter issue number.
+#
+# Guard: refuses to start more than 4 elaborator runs in any rolling 24h window,
+# so with the $5/session budget cap the worst case is ~$20/day.
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to elaborate"
+        required: true
+  issues:
+    types: [labeled]
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency: elaborator-run
+
+jobs:
+  elaborate:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'elaborate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Daily run guard (max 4 per rolling 24h)
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SINCE=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/elaborate.yml/runs?created=%3E%3D${SINCE}" --jq '.total_count')
+          echo "Elaborator runs in last 24h (including this one): ${COUNT}"
+          if [ "${COUNT}" -gt 4 ]; then
+            echo "Daily limit of 4 elaborator runs reached - skipping. Try again later or raise the limit in elaborate.yml."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve issue number
+        if: steps.guard.outputs.ok == 'true'
+        id: issue
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "number=${{ github.event.inputs.issue_number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.ok == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.guard.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install Anthropic SDK
+        if: steps.guard.outputs.ok == 'true'
+        run: pip install anthropic
+
+      - name: Run the Elaborator
+        if: steps.guard.outputs.ok == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.HEROTASK_ANTHROPIC_KEY }}
+          HEROTASK_GITHUB_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
+        run: python ops/elaborator/run_elaborator.py "${{ steps.issue.outputs.number }}"

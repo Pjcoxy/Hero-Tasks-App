@@ -1,5 +1,10 @@
 # Agent Team
 
+> **Update:** the team is moving to Claude Managed Agents, starting with the
+> Elaborator — see [`managed-agents.md`](managed-agents.md). The role
+> definitions below still describe each agent's job; the "working model"
+> section reflects the earlier Copilot-based approach.
+
 This repository is designed to be worked on with GitHub-based agents,
 defined in `.github/agents/*.agent.md`:
 
