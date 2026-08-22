@@ -35,26 +35,17 @@ Raw speech-to-text is not sufficient. Any voice-capture feature must:
    rather than silently saving a guess
 
 ## Kid-friendly UX
-**Read `docs/design-system.md` before writing any frontend code.** It holds the
-actual colour, type, spacing, radius, elevation and motion values, plus
-component specs. They are the values to use, not suggestions — do not introduce
-your own.
+**`docs/design-system.md` is the specification for anything visual. Read it
+before writing frontend code, and take its values as given rather than
+inventing your own.** Deliberately not restated here — one source of truth, so
+this file cannot drift out of step with it.
 
-The rules that matter most, in short:
+Two things that must hold even if nothing else is read:
 
-- **Everything is an object.** No text-only actions, no thin borders defining a
-  control. Filled pills, cards and round icon buttons. If it does something, it
-  looks like it does something.
 - **Extend the app shell; never append a section to the page.** New work belongs
   in a view reached by navigation, not stacked at the bottom of `index.html`.
-- **Use the tokens.** Every colour, size, radius, shadow and duration comes from
-  the `:root` block. `scripts/check-design.js` fails the build on raw values.
-- **Respond before the network does.** Every tap gets an immediate pressed state,
-  and actions update the UI optimistically rather than waiting on the API.
-- **Kid views are playful, Parent HQ is calm.** Same tokens, different register.
-  No celebration animations on parent screens.
-- **No external requests** for fonts, icons or images. Inline SVG or emoji.
-- **Skip decorative motion** under `prefers-reduced-motion`.
+- **Use the tokens.** `scripts/check-design.js` fails the build on raw colours
+  and sizes, so inventing values does not merge anyway.
 
 Minimal taps to do anything. Both platforms (Android and iOS) via installable
 PWA, not native apps.

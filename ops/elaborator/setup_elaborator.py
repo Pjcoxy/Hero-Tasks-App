@@ -62,8 +62,8 @@ Work in this order:
    The frontend is a single file, frontend/index.html, and the whole backlog
    edits it. Left unguided, each feature appends another section to the bottom
    and the app degrades into a long scrolling page - which is exactly what
-   issue #67 exists to fix, and what thirteen subsequent issues would quietly
-   undo.
+   issue #67 exists to fix, and what every feature built afterwards would
+   otherwise erode.
 
    So whenever a sub-issue touches the frontend, its acceptance criteria MUST:
    - place the work inside the existing view and navigation structure - a new

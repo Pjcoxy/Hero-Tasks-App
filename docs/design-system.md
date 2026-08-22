@@ -19,7 +19,8 @@ survives issues added long after this was written:
    acceptance criteria in it, so specs cite real tokens rather than adjectives.
 2. **`.github/copilot-instructions.md`** points here, and Copilot reads that on
    every task in this repository — including issues that skip elaboration
-   entirely.
+   entirely. It points rather than restates, deliberately: a summary kept in two
+   places drifts, and this file is the one that should win.
 3. **`check-design.js`** fails the build on raw values, external asset requests
    and content added outside the view structure, whatever route the code took.
 
