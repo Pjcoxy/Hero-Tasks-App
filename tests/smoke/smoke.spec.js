@@ -121,3 +121,35 @@ test('the app renders without a JavaScript error', async ({ page }) => {
   await expect(page.locator('#screen-who')).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+// A native prompt() or confirm() is prefixed by the browser with the page's
+// origin - the app announced itself as "salmon-river-0e879dc00.7.azurestatic
+// apps.net says". Unstyleable, and the most web-page-ish thing it did.
+//
+// If a native dialog reappears, Playwright auto-dismisses it and the flow
+// silently does nothing - so assert on the in-app modal being there, and fail
+// loudly if a native one fires.
+test('adding an extra task uses the in-app dialog, not a browser prompt', async ({ page }) => {
+  const native = [];
+  page.on('dialog', async (d) => { native.push(d.message()); await d.dismiss(); });
+
+  await pickPerson(page, 'Ollie');
+  await page.getByRole('button', { name: /something extra/i }).click();
+
+  await expect(page.locator('#ask-modal')).toBeVisible();
+  await expect(page.locator('#ask-title')).toContainText('What did you do?');
+  await page.locator('#ask-input').fill('Tidied the shed');
+  await page.getByRole('button', { name: /send it/i }).click();
+  await expect(page.locator('#ask-modal')).toBeHidden();
+
+  expect(native, 'a native browser dialog fired').toEqual([]);
+});
+
+test('cancelling the in-app dialog does nothing', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+  await page.getByRole('button', { name: /something extra/i }).click();
+  await expect(page.locator('#ask-modal')).toBeVisible();
+  await page.getByRole('button', { name: /^cancel$/i }).click();
+  await expect(page.locator('#ask-modal')).toBeHidden();
+  await expect(page.locator('#screen-kid')).toBeVisible();
+});
