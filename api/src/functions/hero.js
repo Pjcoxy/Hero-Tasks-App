@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto');
 const { container } = require('../lib/cosmos');
 const { ensureSeeded, HOUSEHOLD_ID } = require('../lib/seed');
 const { sendPush } = require('../lib/push');
+const { extractVoiceIntent } = require('../lib/llm');
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
@@ -10,6 +11,7 @@ function todayStr() {
 
 const HHMM_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const DUE_REMINDER_SCHEDULE = '0 */15 * * * *';
+const VOICE_INTENT_CONFIRMATION_THRESHOLD = 0.6;
 
 function hhmmToMinutes(value) {
   const [h, m] = String(value).split(':');
@@ -387,6 +389,26 @@ async function addExtra(req) {
   return getState();
 }
 
+async function validateVoiceNote(req) {
+  await requireSelf(req.personId, req.pin, req.personId);
+  const transcript = String(req.transcript || '').trim();
+  if (!transcript) return { ok: false, error: 'Transcript is required' };
+
+  const kids = (await queryHousehold('people'))
+    .filter((person) => person.role === 'kid')
+    .map((person) => ({
+      id: person.id,
+      name: person.name,
+      isRequester: person.id === req.personId,
+    }));
+
+  const { available, intent, confidence } = await extractVoiceIntent(transcript, kids);
+  const needsConfirmation = !available || Object.values(confidence)
+    .some((value) => Number(value) < VOICE_INTENT_CONFIRMATION_THRESHOLD);
+
+  return { ok: true, available, intent, confidence, needsConfirmation };
+}
+
 async function approve(req) {
   await requireParent(req.parentId, req.parentPin);
   const completions = container('completions');
@@ -685,6 +707,7 @@ const ROUTES = {
   completeTask,
   uncomplete,
   addExtra,
+  validateVoiceNote,
   approve,
   reject,
   addKid,

@@ -8,6 +8,7 @@
     "start": "func start"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
     "@azure/cosmos": "^4.2.0",
     "@azure/functions": "^4.5.1",
     "@azure/identity": "^4.5.0",
