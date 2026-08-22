@@ -7,8 +7,8 @@ const HOUSEHOLD_ID = 'default';
 const SEED_PEOPLE = [
   { id: 'peter', name: 'Peter', emoji: '🧔', pin: '1234', role: 'parent' },
   { id: 'tymanda', name: 'Tymanda', emoji: '👩', pin: '1234', role: 'parent' },
-  { id: 'toby', name: 'Toby', emoji: '🦖', pin: '1234', role: 'kid' },
-  { id: 'ollie', name: 'Ollie', emoji: '🦊', pin: '1234', role: 'kid' },
+  { id: 'toby', name: 'Toby', emoji: 'svg:3d-printer', pin: '1234', role: 'kid' },
+  { id: 'ollie', name: 'Ollie', emoji: 'svg:quokka', pin: '1234', role: 'kid' },
 ];
 
 let seeded = false;

@@ -889,9 +889,15 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
           <div class="field"><label>Name</label><input id="p-kid-name" type="text" autocomplete="off"></div>
           <div class="field"><label>Avatar</label>
             <select id="p-kid-emoji">
-              <option>🦄</option><option>🐯</option><option>🦖</option><option>🐼</option>
-              <option>🦊</option><option>🐸</option><option>🦁</option><option>🐨</option>
-              <option>🐧</option><option>🦋</option><option>⚽</option><option>🎮</option>
+              <optgroup label="Built-in">
+                <option value="svg:quokka">🐾 Quokka</option>
+                <option value="svg:3d-printer">🖨️ 3D Printer</option>
+              </optgroup>
+              <optgroup label="Emoji">
+                <option>🦄</option><option>🐯</option><option>🦖</option><option>🐼</option>
+                <option>🦊</option><option>🐸</option><option>🦁</option><option>🐨</option>
+                <option>🐧</option><option>🦋</option><option>⚽</option><option>🎮</option>
+              </optgroup>
             </select>
           </div>
           <div class="field"><label>PIN (optional, 4 digits)</label><input id="p-kid-pin" type="text" inputmode="numeric" maxlength="4" autocomplete="off"></div>
@@ -925,6 +931,70 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 // e.g. 'https://herotasks-func-dev.azurewebsites.net/api/hero'
 // ============================================================
 const API_URL = 'https://herotasks-func-dev.azurewebsites.net/api/hero';
+
+// ============================================================
+// BUILT-IN SVG AVATARS
+// Keys match the "svg:<key>" convention stored in person.emoji.
+// Each value is a function(color) → SVG string so kid colour tokens
+// can be woven in as fill/stroke accents.
+// ============================================================
+const SVG_AVATARS = {
+  'quokka': function(color) {
+    var c = color || 'var(--brand)';
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="100%" height="100%" aria-hidden="true">'
+      + '<ellipse cx="20" cy="23" rx="13" ry="11" fill="#c8906a"/>'
+      + '<ellipse cx="20" cy="21" rx="11" ry="10" fill="#e0b48a"/>'
+      + '<ellipse cx="13" cy="10" rx="4" ry="7" fill="#c8906a" transform="rotate(-10,13,10)"/>'
+      + '<ellipse cx="27" cy="10" rx="4" ry="7" fill="#c8906a" transform="rotate(10,27,10)"/>'
+      + '<ellipse cx="13" cy="10" rx="2.5" ry="5" fill="' + c + '" transform="rotate(-10,13,10)"/>'
+      + '<ellipse cx="27" cy="10" rx="2.5" ry="5" fill="' + c + '" transform="rotate(10,27,10)"/>'
+      + '<ellipse cx="20" cy="22" rx="6" ry="5" fill="#f5d0b0"/>'
+      + '<circle cx="16" cy="20" r="2.2" fill="#3d2000"/>'
+      + '<circle cx="24" cy="20" r="2.2" fill="#3d2000"/>'
+      + '<circle cx="16.8" cy="19.3" r="0.7" fill="#fff"/>'
+      + '<circle cx="24.8" cy="19.3" r="0.7" fill="#fff"/>'
+      + '<ellipse cx="20" cy="24" rx="2.5" ry="1.5" fill="' + c + '"/>'
+      + '<path d="M17.5 26 Q20 28 22.5 26" stroke="#3d2000" stroke-width="1" fill="none" stroke-linecap="round"/>'
+      + '</svg>';
+  },
+  '3d-printer': function(color) {
+    var c = color || 'var(--brand)';
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="100%" height="100%" aria-hidden="true">'
+      + '<rect x="6" y="14" width="28" height="18" rx="2" fill="#cfd8dc"/>'
+      + '<rect x="10" y="18" width="20" height="10" rx="1" fill="#fff"/>'
+      + '<rect x="11" y="6" width="18" height="9" rx="1" fill="#b0bec5"/>'
+      + '<rect x="14" y="8" width="12" height="5" rx="1" fill="' + c + '" opacity="0.25"/>'
+      + '<rect x="8" y="26" width="24" height="4" rx="1" fill="#90a4ae"/>'
+      + '<rect x="18" y="19" width="4" height="8" rx="0.5" fill="' + c + '"/>'
+      + '<circle cx="32" cy="17" r="2" fill="' + c + '"/>'
+      + '<circle cx="32" cy="17" r="0.8" fill="#fff"/>'
+      + '<rect x="14" y="32" width="12" height="3" rx="1" fill="#eceff1"/>'
+      + '<line x1="20" y1="27" x2="20" y2="32" stroke="' + c + '" stroke-width="1.5" stroke-dasharray="1,1"/>'
+      + '</svg>';
+  }
+};
+
+// Returns an HTML string for an avatar value.
+// If value starts with "svg:", renders the matching built-in SVG;
+// otherwise wraps the emoji in a <span>.
+function renderAvatarHtml(value, color) {
+  if (value && value.indexOf('svg:') === 0) {
+    var key = value.slice(4);
+    var fn = SVG_AVATARS[key];
+    if (fn) return fn(color || 'var(--brand)');
+  }
+  return '<span>' + (value || '❓') + '</span>';
+}
+
+// Sets element innerHTML to the avatar, or textContent for plain emoji.
+function setAvatar(el, value, color) {
+  if (value && value.indexOf('svg:') === 0) {
+    var key = value.slice(4);
+    var fn = SVG_AVATARS[key];
+    if (fn) { el.innerHTML = fn(color || 'var(--brand)'); return; }
+  }
+  el.textContent = value || '❓';
+}
 
 const LEVELS = [
   { pts: 0,   title: 'Egg',               emoji: '🥚' },
@@ -1126,10 +1196,11 @@ function renderWho() {
       var idx = Math.min(kids.findIndex(function(k) { return k.id === p.id; }), 3);
       kidColorAttr = ' style="--kid-color:var(--kid-' + (idx + 1) + ')"';
     }
+    var kidColorVal = isParent ? 'var(--brand)' : 'var(--kid-' + (Math.min(kids.findIndex(function(k) { return k.id === p.id; }), 3) + 1) + ')';
     return '<button class="who-tile ' + (isParent ? 'parent' : 'kid-tile') + '"'
       + kidColorAttr
       + ' onclick="pickPerson(\'' + p.id + '\')" touch-action="manipulation">'
-      + '<span class="tile-emoji">' + p.emoji + '</span>'
+      + '<span class="tile-emoji">' + renderAvatarHtml(p.emoji, kidColorVal) + '</span>'
       + '<span class="tile-name">' + esc(p.name) + '</span>'
       + '<span class="tile-sub">' + (isParent ? 'Parent 👑' : 'Kid') + '</span>'
       + '</button>';
@@ -1147,7 +1218,7 @@ function renderKid(kid) {
   var lvl = lf.lvl, next = lf.next;
   var balance = typeof st.balance === 'number' ? st.balance : st.points;
 
-  document.getElementById('k-avatar').textContent = kid.emoji;
+  setAvatar(document.getElementById('k-avatar'), kid.emoji, kidColorVal);
   document.getElementById('k-name').textContent = kid.name;
   document.getElementById('k-level').textContent = lvl.emoji + ' ' + lvl.title;
   animatePoints(balance);
@@ -1185,7 +1256,7 @@ function renderKid(kid) {
   document.getElementById('k-board').innerHTML = ranked.map(function(k, i) {
     return '<div class="board-row">'
       + '<span class="place">' + (medals[i] || (i + 1)) + '</span>'
-      + '<span>' + k.emoji + '</span>'
+      + '<span>' + renderAvatarHtml(k.emoji, 'var(--kid-' + (Math.min(ranked.findIndex(function(r) { return r.id === k.id; }), 3) + 1) + ')') + '</span>'
       + '<span class="b-name">' + esc(k.name) + (k.id === kid.id ? ' (you!)' : '') + '</span>'
       + '<span class="b-pts">' + k.pts + ' pts</span>'
       + '</div>';
