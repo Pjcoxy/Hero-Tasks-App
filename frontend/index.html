@@ -872,6 +872,8 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .modal { background: var(--surface); border-radius: var(--radius-lg); padding: var(--space-6); width: 100%; max-width: 320px; text-align: center; box-shadow: var(--shadow-3); display: flex; flex-direction: column; gap: var(--space-3); }
 .modal h3 { margin-bottom: var(--space-3); font-size: var(--text-lg); font-weight: var(--weight-bold); }
 .pin-input { font-size: var(--text-2xl); text-align: center; letter-spacing: 0.4em; width: 100%; padding: var(--space-3); border: 2px solid var(--border); border-radius: var(--radius-md); font-family: inherit; color: var(--ink); background: var(--surface-sunken); }
+.ask-input { font-size: var(--text-base); width: 100%; padding: var(--space-3); border: 2px solid var(--border); border-radius: var(--radius-md); font-family: inherit; color: var(--ink); background: var(--surface-sunken); }
+.ask-input:focus { outline: none; border-color: var(--brand); }
 .pin-err { color: var(--danger); font-size: var(--text-sm); min-height: 1.2em; }
 .voice-modal {
   max-width: 28rem;
@@ -1309,6 +1311,17 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 <!-- ════════════════════════════════════════════════════════════════════ -->
 <!-- PIN MODAL                                                            -->
 <!-- ════════════════════════════════════════════════════════════════════ -->
+<div id="ask-modal" class="modal-bg hidden">
+  <div class="modal">
+    <h3 id="ask-title"></h3>
+    <input class="ask-input hidden" id="ask-input" type="text" autocomplete="off">
+    <div class="modal-actions">
+      <button class="btn" id="ask-ok"></button>
+      <button class="btn ghost" id="ask-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div id="pin-modal" class="modal-bg hidden">
   <div class="modal">
     <h3 id="pin-title">Enter PIN</h3>
@@ -2839,8 +2852,78 @@ async function undoTask(completionId) {
   }
 }
 
+// Replaces window.prompt / window.confirm.
+//
+// A native dialog is prefixed by the browser with the page's origin - the app
+// literally announced itself as "salmon-river-0e879dc00.7.azurestaticapps.net
+// says". Nothing in CSS can change that, and it is the single most web-page-ish
+// thing the app did: unstyleable, un-themeable, and it blocks the whole tab.
+// docs/design-system.md exists to stop exactly this.
+//
+// Returns a Promise: the entered string, or null if cancelled - so call sites
+// keep the same shape they had with prompt(), just awaited.
+function askText(question, defaultValue, okLabel) {
+  return new Promise(function(resolve) {
+    var bg = document.getElementById('ask-modal');
+    var input = document.getElementById('ask-input');
+    var ok = document.getElementById('ask-ok');
+    var cancel = document.getElementById('ask-cancel');
+
+    document.getElementById('ask-title').textContent = question;
+    input.classList.remove('hidden');
+    input.value = defaultValue == null ? '' : String(defaultValue);
+    ok.textContent = okLabel || 'OK';
+    bg.classList.remove('hidden');
+    input.focus();
+    input.select();
+
+    function close(value) {
+      bg.classList.add('hidden');
+      ok.onclick = null;
+      cancel.onclick = null;
+      input.onkeydown = null;
+      bg.onclick = null;
+      resolve(value);
+    }
+    ok.onclick = function() { close(input.value); };
+    cancel.onclick = function() { close(null); };
+    input.onkeydown = function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); close(input.value); }
+      if (e.key === 'Escape') { e.preventDefault(); close(null); }
+    };
+    // Tapping the backdrop cancels, matching every other sheet in the app.
+    bg.onclick = function(e) { if (e.target === bg) close(null); };
+  });
+}
+
+function askConfirm(question, okLabel) {
+  return new Promise(function(resolve) {
+    var bg = document.getElementById('ask-modal');
+    var input = document.getElementById('ask-input');
+    var ok = document.getElementById('ask-ok');
+    var cancel = document.getElementById('ask-cancel');
+
+    document.getElementById('ask-title').textContent = question;
+    input.classList.add('hidden');
+    ok.textContent = okLabel || 'Yes';
+    bg.classList.remove('hidden');
+    ok.focus();
+
+    function close(value) {
+      bg.classList.add('hidden');
+      ok.onclick = null;
+      cancel.onclick = null;
+      bg.onclick = null;
+      resolve(value);
+    }
+    ok.onclick = function() { close(true); };
+    cancel.onclick = function() { close(false); };
+    bg.onclick = function(e) { if (e.target === bg) close(false); };
+  });
+}
+
 async function addExtraPrompt() {
-  var title = prompt('What did you do? 🌟');
+  var title = await askText('What did you do? 🌟', '', 'Send it!');
   if (!title || !title.trim()) return;
   toast('Sent to your grown-up! ⏳');
   await api({ action: 'addExtra', kidId: session.personId, personId: session.personId, pin: session.pin, title: title.trim() });
@@ -3215,7 +3298,7 @@ function handleVoiceReminderSecondary() {
 async function redeemKidReward(rewardId, cost) {
   var reward = (state.rewards || []).find(function(r) { return r.id === rewardId; });
   var rewardTitle = reward ? reward.title : 'this reward';
-  if (!confirm('Redeem ' + rewardTitle + ' for ' + cost + ' points?')) return;
+  if (!await askConfirm('Redeem ' + rewardTitle + ' for ' + cost + ' points?', 'Redeem')) return;
 
   var syntheticId = '_opt_' + rewardId + '_' + Date.now();
   var prevRedemptions = (state.redemptions || []).slice();
@@ -3253,7 +3336,7 @@ async function redeemKidReward(rewardId, cost) {
 async function cancelKidRedemption(redemptionId) {
   var redemption = (state.redemptions || []).find(function(r) { return r.id === redemptionId; });
   var rewardTitle = redemption ? redemption.title : 'this reward';
-  if (!confirm('Changed your mind about ' + rewardTitle + '?')) return;
+  if (!await askConfirm('Changed your mind about ' + rewardTitle + '?', 'Cancel it')) return;
 
   var prevRedemptions = (state.redemptions || []).slice();
   var prevStats = JSON.parse(JSON.stringify(state.stats || {}));
@@ -3477,7 +3560,7 @@ async function parentEditPlanningItem(itemId) {
 }
 
 async function parentDeletePlanningItem(itemId) {
-  if (!confirm('Delete this calendar item?')) return;
+  if (!await askConfirm('Delete this calendar item?', 'Delete')) return;
   var result = await api({
     action: 'deletePlanningItem',
     parentId: session.personId,
@@ -3573,7 +3656,7 @@ async function parentReject(completionId) {
 }
 
 async function parentDeleteTask(taskId) {
-  if (!confirm('Remove this task?')) return;
+  if (!await askConfirm('Remove this task?', 'Remove')) return;
   await api({ action: 'deleteTask', parentId: session.personId, parentPin: session.pin, taskId });
 }
 
@@ -3690,7 +3773,7 @@ async function parentEditReward(rewardId) {
 }
 
 async function parentDeleteReward(rewardId) {
-  if (!confirm('Remove this reward?')) return;
+  if (!await askConfirm('Remove this reward?', 'Remove')) return;
   var result = await api({ action: 'deleteReward', parentId: session.personId, parentPin: session.pin, rewardId });
   if (toastApiError(result)) return;
   toast('Reward removed.');
