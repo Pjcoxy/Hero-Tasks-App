@@ -16,14 +16,15 @@ step is yours to run (or wire into GitHub Actions once you're ready).
 | Module | File | Description |
 |--------|------|-------------|
 | **Storage Account** | `modules/storage.bicep` | Backs only the Function App's own runtime state (`AzureWebJobsStorage`) — no app data lives here |
-| **Cosmos DB** | `modules/cosmosdb.bicep` | Free-tier account, one database, containers: `households`, `people`, `chores`, `completions`, `rewards`, `planningItems` (reminders/voice notes/calendar items), `auditEvents` |
-| **Key Vault** | `modules/keyvault.bicep` | Secrets store (currently just `llm-api-key`), RBAC-only, Function App reads via managed identity |
+| **Cosmos DB** | `modules/cosmosdb.bicep` | Free-tier account, one database, containers: `households`, `people`, `chores`, `completions`, `rewards`, `pushSubscriptions`, `planningItems` (reminders/voice notes/calendar items), `auditEvents` |
+| **Key Vault** | `modules/keyvault.bicep` | Secrets store (currently `llm-api-key` plus the web-push `vapid-private-key`), RBAC-only, Function App reads via managed identity |
 | **Function App** | `modules/functionapp.bicep` | Consumption-plan API, HTTP-triggered (not timer — this is an interactive app), system-assigned managed identity for all Azure access |
 | **Static Web App** | `modules/staticwebapp.bicep` | Free tier, with the Function App linked as its backend (`linkedBackends`) so auth/CORS is handled by the platform instead of hand-rolled |
 
 `main.bicep` wires these together and grants the Function App's managed
 identity exactly three roles: Storage Blob Data Contributor (its own
-runtime storage), Key Vault Secrets User (read `llm-api-key`), and Cosmos
+runtime storage), Key Vault Secrets User (read app secrets like
+`llm-api-key` and `vapid-private-key`), and Cosmos
 DB Built-in Data Contributor (read/write household data). No connection
 strings or access keys anywhere — Cosmos DB and the storage account both
 have local/key-based auth disabled (`disableLocalAuth` / `allowSharedKeyAccess: false`).
@@ -80,6 +81,8 @@ ready for it.
 | `functionLinuxFxVersion` | string | `Node\|20` | Linux runtime stack |
 | `staticWebAppSku` | string | `Free` | Static Web App SKU |
 | `llmApiKey` | string (secure) | `''` | Voice-intent LLM API key; leave empty to skip seeding |
+| `vapidPrivateKey` | string (secure) | `''` | Web-push VAPID private key; leave empty to seed it later in Key Vault |
+| `vapidPublicKey` | string | `''` | Web-push VAPID public key exposed to the frontend via the API |
 | `enableKeyVaultPublicAccess` | bool | `false` | Leave `false` unless you specifically need it |
 | `cosmosSharedThroughput` | int | `400` | RU/s shared across all Cosmos containers (well within the 1000 RU/s free-tier allowance) |
 
@@ -97,6 +100,7 @@ there's no higher grouping above it.
 | `chores` | `/householdId` | Chore definitions, assignment, schedule |
 | `completions` | `/householdId` | Chore completion + approval history |
 | `rewards` | `/householdId` | Reward catalog + redemption history |
+| `pushSubscriptions` | `/householdId` | Browser push endpoints keyed by household + person |
 | `planningItems` | `/householdId` | Reminders, voice notes, calendar events |
 | `auditEvents` | `/householdId` | Who changed what, when |
 

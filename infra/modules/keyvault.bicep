@@ -11,6 +11,10 @@ param functionPrincipalId string
 @secure()
 param llmApiKey string = ''
 
+@description('Secure VAPID private key for browser push subscriptions. Leave empty to skip seeding this secret.')
+@secure()
+param vapidPrivateKey string = ''
+
 @description('Built-in Key Vault role definition ID for the Secrets User role.')
 param keyVaultRoleDefinitionId string = '4633458b-17de-408a-b874-0445c86b69e6'
 
@@ -52,6 +56,14 @@ resource llmApiKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!e
   parent: keyVault
   properties: {
     value: llmApiKey
+  }
+}
+
+resource vapidPrivateKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(vapidPrivateKey)) {
+  name: 'vapid-private-key'
+  parent: keyVault
+  properties: {
+    value: vapidPrivateKey
   }
 }
 

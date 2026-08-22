@@ -58,10 +58,31 @@ fakeCosmosModule.exports = { container: mockContainer };
 fakeCosmosModule.loaded = true;
 require.cache[cosmosPath] = fakeCosmosModule;
 
+const webPushPath = require.resolve('web-push');
+const pushCalls = [];
+const fakeWebPushModule = new Module(webPushPath);
+fakeWebPushModule.exports = {
+  setVapidDetails: (...args) => {
+    pushCalls.push({ type: 'config', args });
+  },
+  sendNotification: async (subscription, payload) => {
+    pushCalls.push({ type: 'send', subscription, payload });
+    if (subscription.endpoint.includes('/gone')) {
+      const err = new Error('Expired subscription');
+      err.statusCode = 410;
+      throw err;
+    }
+  },
+};
+fakeWebPushModule.loaded = true;
+require.cache[webPushPath] = fakeWebPushModule;
+
 const assert = require('assert');
 const { ensureSeeded, HOUSEHOLD_ID } = require('./src/lib/seed.js');
 
 async function main() {
+  process.env.VAPID_PUBLIC_KEY = 'test-vapid-public-key';
+  process.env.VAPID_PRIVATE_KEY = 'test-vapid-private-key';
   await ensureSeeded();
 
   const peopleMap = getMap('people');
@@ -76,7 +97,8 @@ async function main() {
   // "test mode" warning only) but its internal functions aren't exported individually,
   // so drive it the same way the real HTTP layer would: through getState + direct Cosmos
   // writes mirroring what each action does, then assert getState()'s derived fields.
-  const { getState, calcStreak, updateQuietHours } = require('./src/functions/hero.js');
+  const { getState, calcStreak, ROUTES, updateQuietHours } = require('./src/functions/hero.js');
+  const { sendPush } = require('./src/lib/push.js');
 
   const chores = mockContainer('chores');
   await chores.items.create({
@@ -105,11 +127,84 @@ async function main() {
 
   let state = await getState();
   assert.strictEqual(state.ok, true);
+  assert.strictEqual(state.vapidPublicKey, 'test-vapid-public-key', 'getState should expose the VAPID public key');
   assert.strictEqual(state.quietHours, null, 'quietHours should default to off');
   assert.strictEqual(state.tasks.length, 1);
   assert.strictEqual(state.stats.toby.points, 0, 'pending completion should not award points yet');
   console.log('✓ pending completion correctly awards 0 points');
+  console.log('✓ getState exposes the VAPID public key');
 
+  await ROUTES.savePushSubscription({
+    personId: 'toby',
+    subscription: {
+      endpoint: 'https://push.example/subscription-1',
+      keys: { p256dh: 'p256dh-a', auth: 'auth-a' },
+    },
+  });
+  await ROUTES.savePushSubscription({
+    personId: 'toby',
+    subscription: {
+      endpoint: 'https://push.example/subscription-1',
+      keys: { p256dh: 'p256dh-b', auth: 'auth-b' },
+    },
+  });
+  let pushSubscriptions = (await mockContainer('pushSubscriptions').items.query({}).fetchAll()).resources
+    .filter((doc) => doc.personId === 'toby');
+  assert.strictEqual(pushSubscriptions.length, 1, 'same personId+endpoint should upsert instead of duplicating');
+  assert.deepStrictEqual(pushSubscriptions[0].keys, { p256dh: 'p256dh-b', auth: 'auth-b' });
+  console.log('✓ savePushSubscription upserts by personId + endpoint');
+
+  await ROUTES.removePushSubscription({
+    personId: 'toby',
+    endpoint: 'https://push.example/subscription-1',
+  });
+  pushSubscriptions = (await mockContainer('pushSubscriptions').items.query({}).fetchAll()).resources
+    .filter((doc) => doc.personId === 'toby');
+  assert.strictEqual(pushSubscriptions.length, 0, 'removePushSubscription should delete matching documents');
+  console.log('✓ removePushSubscription deletes matching subscriptions');
+
+  await mockContainer('pushSubscriptions').items.create({
+    id: 'push-live',
+    householdId: HOUSEHOLD_ID,
+    personId: 'toby',
+    endpoint: 'https://push.example/live',
+    keys: { p256dh: 'live-key', auth: 'live-auth' },
+    createdAt: new Date().toISOString(),
+  });
+  await mockContainer('pushSubscriptions').items.create({
+    id: 'push-gone',
+    householdId: HOUSEHOLD_ID,
+    personId: 'toby',
+    endpoint: 'https://push.example/gone',
+    keys: { p256dh: 'gone-key', auth: 'gone-auth' },
+    createdAt: new Date().toISOString(),
+  });
+  await mockContainer('pushSubscriptions').items.create({
+    id: 'push-other',
+    householdId: HOUSEHOLD_ID,
+    personId: 'ollie',
+    endpoint: 'https://push.example/other',
+    keys: { p256dh: 'other-key', auth: 'other-auth' },
+    createdAt: new Date().toISOString(),
+  });
+  pushCalls.length = 0;
+  const pushResult = await sendPush('toby', { title: 'Hi', body: 'Hero time', url: '/kid' });
+  assert.deepStrictEqual(pushResult, { sent: 1, removed: 1 });
+  const sentEndpoints = pushCalls
+    .filter((call) => call.type === 'send')
+    .map((call) => call.subscription.endpoint)
+    .sort();
+  assert.deepStrictEqual(
+    sentEndpoints,
+    ['https://push.example/gone', 'https://push.example/live'],
+    'sendPush should only send to the requested person'
+  );
+  pushSubscriptions = (await mockContainer('pushSubscriptions').items.query({}).fetchAll()).resources;
+  assert.ok(pushSubscriptions.some((doc) => doc.id === 'push-live'), 'live subscription should remain');
+  assert.ok(!pushSubscriptions.some((doc) => doc.id === 'push-gone'), '410 subscriptions should be deleted');
+  assert.ok(pushSubscriptions.some((doc) => doc.id === 'push-other'), 'other people subscriptions should remain');
+  console.log('✓ sendPush delivers to each subscription and cleans up expired endpoints');
+ 
   // Approve it directly via the mock (mirrors what the "approve" action does)
   const pending = (await completions.items.query({}).fetchAll()).resources[0];
   pending.status = 'approved';
