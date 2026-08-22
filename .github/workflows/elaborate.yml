@@ -1,22 +1,36 @@
 name: Elaborate backlog issue
 
-# Two ways to trigger, both deliberate (one issue per run, per Peter's
-# confirmation-per-item rule):
-#   1. Add the "elaborate" label to an issue.
-#   2. Actions tab -> "Elaborate backlog issue" -> Run workflow -> enter issue number.
+# The "elaborate" label IS the queue. Label as many issues as you like, whenever
+# you like; this drains them one at a time, oldest first, and removes the label
+# from each one it finishes.
 #
-# Guard: refuses to start more than 20 elaborator runs in any rolling 24h window,
-# so with the $2/session budget cap the worst case is ~$40/day. Raised for the
-# initial build-out of the backlog; drop back to ~10 for ongoing feature work.
+# Why a queue rather than "run the issue that was just labelled":
+#   GitHub's concurrency queue holds exactly ONE pending run. Label three issues
+#   in quick succession and the middle run is CANCELLED, silently - runs #4, #5
+#   and #6 of this workflow were lost exactly that way. A guarded run is lost the
+#   same way: #11 was labelled, hit the old 4-per-day cap, and nothing ever
+#   picked it up again.
+#   Reading the queue from the labels instead means a cancelled or guarded run
+#   costs nothing - the work is still sitting there labelled, and the next wake
+#   finds it.
+#
+# Wakes on: a label being added, every 5 minutes, and manual dispatch. Dispatch
+# with an issue number to jump the queue; leave it blank to just drain.
+#
+# Guard: at most 20 runs per rolling 24h, so with the $2/session cap the worst
+# case is ~$40/day. Raised for the initial build-out; drop back to ~10 for
+# ongoing feature work.
 
 on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: "Issue number to elaborate"
-        required: true
+        description: "Issue number to jump the queue with (blank = drain the queue)"
+        required: false
   issues:
     types: [labeled]
+  schedule:
+    - cron: "*/5 * * * *"
 
 permissions:
   actions: read
@@ -29,7 +43,10 @@ concurrency:
 
 jobs:
   elaborate:
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'elaborate'
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event_name == 'schedule'
+      || github.event.label.name == 'elaborate'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -42,37 +59,84 @@ jobs:
           COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/elaborate.yml/runs?created=%3E%3D${SINCE}" --jq '.total_count')
           echo "Elaborator runs in last 24h (including this one): ${COUNT}"
           if [ "${COUNT}" -gt 20 ]; then
-            echo "Daily limit of 20 elaborator runs reached - skipping. Try again later or raise the limit in elaborate.yml."
+            echo "::notice::Daily limit of 20 elaborator runs reached. Labelled issues stay queued and resume once the window clears."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Resolve issue number
+      - name: Take the next issue off the queue
         if: steps.guard.outputs.ok == 'true'
         id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "number=${{ github.event.inputs.issue_number }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          set -uo pipefail
+
+          MANUAL="${{ github.event.inputs.issue_number }}"
+          if [ -n "$MANUAL" ]; then
+            echo "Jumping the queue with #${MANUAL}."
+            echo "number=${MANUAL}" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
+          QUEUE=$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=elaborate&sort=created&direction=asc&per_page=100" \
+            --jq '[.[] | select(.pull_request == null) | {number, title}]' 2>/dev/null || echo '[]')
+
+          DEPTH=$(echo "$QUEUE" | jq 'length')
+          if [ "$DEPTH" -eq 0 ]; then
+            echo "Queue empty - nothing labelled 'elaborate'."
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Queue depth ${DEPTH}:"
+          echo "$QUEUE" | jq -r '.[] | "  #\(.number)  \(.title)"'
+
+          NEXT=$(echo "$QUEUE" | jq -r '.[0].number')
+          echo "Taking #${NEXT}."
+          echo "number=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "remaining=$((DEPTH - 1))" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
-        if: steps.guard.outputs.ok == 'true'
+        if: steps.issue.outputs.number != ''
 
       - uses: actions/setup-python@v5
-        if: steps.guard.outputs.ok == 'true'
+        if: steps.issue.outputs.number != ''
         with:
           python-version: "3.12"
 
       - name: Install Anthropic SDK
-        if: steps.guard.outputs.ok == 'true'
+        if: steps.issue.outputs.number != ''
         run: pip install anthropic
 
       - name: Run the Elaborator
-        if: steps.guard.outputs.ok == 'true'
+        if: steps.issue.outputs.number != ''
         env:
           ANTHROPIC_API_KEY: ${{ secrets.HEROTASK_ANTHROPIC_KEY }}
           HEROTASK_GITHUB_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
         run: python ops/elaborator/run_elaborator.py "${{ steps.issue.outputs.number }}"
+
+      - name: Take it off the queue
+        if: success() && steps.issue.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X DELETE \
+            "repos/${GITHUB_REPOSITORY}/issues/${{ steps.issue.outputs.number }}/labels/elaborate" \
+            >/dev/null 2>&1 \
+            && echo "Removed 'elaborate' from #${{ steps.issue.outputs.number }}." \
+            || echo "::warning::Could not remove 'elaborate' from #${{ steps.issue.outputs.number }} - it will be picked up again."
+
+      - name: Wake the next one straight away
+        # Optional speed-up: without it the next item waits for the 5-minute
+        # sweep. Needs HEROTASK_GITHUB_TOKEN to carry Actions: Read and write -
+        # the built-in token cannot dispatch a workflow. Failure here is fine.
+        if: success() && steps.issue.outputs.remaining != '' && steps.issue.outputs.remaining != '0'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
+        run: |
+          gh workflow run elaborate.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            && echo "Dispatched the next drain (${{ steps.issue.outputs.remaining }} left)." \
+            || echo "::notice::Could not self-dispatch; the 5-minute sweep will take the next one."

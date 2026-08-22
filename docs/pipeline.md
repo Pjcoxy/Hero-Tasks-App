@@ -78,11 +78,32 @@ every PR), and `role:architect` was replaced by the Elaborator applying
 | `architect` | **The Elaborator**, on sub-issues it judges need design | ~$0.50 each |
 | `build` | **The Elaborator**, on every sub-issue — but it *queues* rather than builds | ~40–55 credits, when the queue reaches it |
 
+**All three are queues.** Adding any of them means *queued*, not *now*. Label
+the whole backlog `elaborate` in one go and walk away — they drain one at a
+time, oldest first, and the label is removed as each is finished. So the labels
+on the board are always the work still outstanding.
+
+### Why every trigger has to be a queue
+
+Two GitHub behaviours quietly destroy work, and both bit this repo:
+
+- **The concurrency queue holds exactly one pending run.** Label three issues in
+  quick succession and the middle run is **cancelled**, with no error anywhere.
+  Runs #4, #5 and #6 of `elaborate.yml` were lost exactly that way.
+- **A skipped or guarded run never retries.** #11 was labelled `elaborate`, hit
+  the old 4-per-day cap, and simply never ran again — the label sat there
+  looking queued while nothing was going to happen.
+
+Reading the queue from the labels rather than from the event fixes both: a
+cancelled or guarded run costs nothing, because the work is still sitting there
+labelled and the next wake finds it. The event is just a hint to look; the
+labels are the truth.
+
 ### The build queue
 
-`build` means **queued**, not "build now". A scheduled worker
-(`build-queue.yml`, every 6 hours) picks the next queued issue and hands it to
-Copilot — one at a time, oldest first.
+`build` means **queued**, not "build now". `build-queue.yml` picks the next
+queued issues and hands them to Copilot, oldest first, sweeping every 10
+minutes and on any event that could change what is buildable.
 
 Two reasons it is a queue rather than a direct trigger, both learned the hard
 way:
@@ -104,11 +125,17 @@ have changed what is buildable:
 | A `build` label is added | That issue may be ready to start immediately |
 | A pull request is merged or closed | Whatever depended on it may now be unblocked |
 | An issue is closed | Same |
-| Hourly schedule | Safety net only, for events that get missed |
+| 10-minute sweep | **Load-bearing, not a safety net** — see below |
 
-So a chain like #33 → #34 → #35 flows straight through: #33's PR merges, #33
-closes, the queue wakes within seconds and starts #34 and #35 — no waiting for
-a timer.
+The sweep is not optional. When `auto-merge.yml` merges a PR it acts as
+`github-actions[bot]` via `GITHUB_TOKEN`, and GitHub raises **no workflow
+events** for that token — so an auto-merged PR fires no `pull_request: closed`
+here at all. On an unattended pipeline the sweep is what actually advances the
+queue.
+
+So a chain like #33 → #34 → #35 flows straight through, but on the sweep's
+cadence: #33's PR auto-merges, #33 closes, and #34 and #35 start within about
+10 minutes.
 
 **Up to 6 start at once** (`MAX_PER_RUN` in the workflow), with no daily cap.
 Deliberate for the initial build-out: the Copilot credit budget is the real

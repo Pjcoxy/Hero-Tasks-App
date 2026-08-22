@@ -1,19 +1,29 @@
 name: Architect an issue
 
-# Trigger: add the "architect" label to an issue, or dispatch manually with an
-# issue number. Posts a technical approach as a comment; writes no code.
+# The "architect" label IS the queue - same design as elaborate.yml, and for the
+# same reason: the Elaborator can label several sub-issues in one pass, and
+# GitHub's concurrency queue only holds one pending run, so reacting to the
+# label event directly would silently drop all but the last.
 #
-# Guard: at most 20 architect runs per rolling 24h. Raised for the initial
-# build-out; drop back to ~10 for ongoing feature work.
+# Drains one issue at a time, oldest first, posting a technical approach as a
+# comment. Writes no code. On success it swaps 'architect' for 'architected'.
+#
+# Wakes on: a label being added, every 5 minutes, and manual dispatch. Dispatch
+# with an issue number to jump the queue; leave it blank to just drain.
+#
+# Guard: at most 20 runs per rolling 24h. Raised for the initial build-out; drop
+# back to ~10 for ongoing feature work.
 
 on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: "Issue number to design"
-        required: true
+        description: "Issue number to jump the queue with (blank = drain the queue)"
+        required: false
   issues:
     types: [labeled]
+  schedule:
+    - cron: "*/5 * * * *"
 
 permissions:
   actions: read
@@ -26,7 +36,10 @@ concurrency:
 
 jobs:
   architect:
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'architect'
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event_name == 'schedule'
+      || github.event.label.name == 'architect'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -39,37 +52,88 @@ jobs:
           COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/architect.yml/runs?created=%3E%3D${SINCE}" --jq '.total_count')
           echo "Architect runs in last 24h (including this one): ${COUNT}"
           if [ "${COUNT}" -gt 20 ]; then
-            echo "Daily limit of 20 architect runs reached - skipping."
+            echo "::notice::Daily limit of 20 architect runs reached. Labelled issues stay queued and resume once the window clears."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Resolve issue number
+      - name: Take the next issue off the queue
         if: steps.guard.outputs.ok == 'true'
         id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "number=${{ github.event.inputs.issue_number }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          set -uo pipefail
+
+          MANUAL="${{ github.event.inputs.issue_number }}"
+          if [ -n "$MANUAL" ]; then
+            echo "Jumping the queue with #${MANUAL}."
+            echo "number=${MANUAL}" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
+          QUEUE=$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=architect&sort=created&direction=asc&per_page=100" \
+            --jq '[.[] | select(.pull_request == null) | {number, title}]' 2>/dev/null || echo '[]')
+
+          DEPTH=$(echo "$QUEUE" | jq 'length')
+          if [ "$DEPTH" -eq 0 ]; then
+            echo "Queue empty - nothing labelled 'architect'."
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Queue depth ${DEPTH}:"
+          echo "$QUEUE" | jq -r '.[] | "  #\(.number)  \(.title)"'
+
+          NEXT=$(echo "$QUEUE" | jq -r '.[0].number')
+          echo "Taking #${NEXT}."
+          echo "number=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "remaining=$((DEPTH - 1))" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
-        if: steps.guard.outputs.ok == 'true'
+        if: steps.issue.outputs.number != ''
 
       - uses: actions/setup-python@v5
-        if: steps.guard.outputs.ok == 'true'
+        if: steps.issue.outputs.number != ''
         with:
           python-version: "3.12"
 
       - name: Install Anthropic SDK
-        if: steps.guard.outputs.ok == 'true'
+        if: steps.issue.outputs.number != ''
         run: pip install anthropic
 
       - name: Run the Architect
-        if: steps.guard.outputs.ok == 'true'
+        if: steps.issue.outputs.number != ''
         env:
           ANTHROPIC_API_KEY: ${{ secrets.HEROTASK_ANTHROPIC_KEY }}
           HEROTASK_GITHUB_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
         run: python ops/architect/run_architect.py "${{ steps.issue.outputs.number }}"
+
+      - name: Take it off the queue
+        if: success() && steps.issue.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUM: ${{ steps.issue.outputs.number }}
+        run: |
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/issues/${NUM}/labels/architect" >/dev/null 2>&1 \
+            && echo "Removed 'architect' from #${NUM}." \
+            || echo "::warning::Could not remove 'architect' from #${NUM} - it will be picked up again."
+
+          # 'architected' is optional - if the label does not exist, skip it.
+          if gh api "repos/${GITHUB_REPOSITORY}/labels/architected" >/dev/null 2>&1; then
+            gh issue edit "$NUM" --repo "$GITHUB_REPOSITORY" --add-label architected >/dev/null 2>&1 \
+              && echo "Marked #${NUM} architected."
+          fi
+
+      - name: Wake the next one straight away
+        # Optional speed-up; needs HEROTASK_GITHUB_TOKEN to carry Actions: Read
+        # and write. Failure here is fine - the 5-minute sweep is the backstop.
+        if: success() && steps.issue.outputs.remaining != '' && steps.issue.outputs.remaining != '0'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
+        run: |
+          gh workflow run architect.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            && echo "Dispatched the next drain (${{ steps.issue.outputs.remaining }} left)." \
+            || echo "::notice::Could not self-dispatch; the 5-minute sweep will take the next one."
