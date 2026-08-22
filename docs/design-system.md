@@ -1,0 +1,257 @@
+# Design system
+
+The visual language of the app. **These are the actual values to use** — not
+suggestions, not a starting point. Every screen is built from this set.
+
+Why it is written down rather than left to judgement: the frontend is one file
+that the whole backlog edits, and "make it feel premium" is an adjective, not a
+specification. An agent implements a defined thing well and invents a design
+poorly. This turns the work into implementation.
+
+`scripts/check-design.js` enforces the mechanical half of this in CI (see
+[`pipeline.md`](pipeline.md)). It cannot judge taste — that is what the
+component specs below are for.
+
+---
+
+## Principles
+
+1. **Consistency reads as quality.** A confident, repeated set of choices looks
+   more expensive than a novel choice on every screen. When in doubt, reuse.
+2. **Playful for kids, calm for parents.** Same tokens, different register. The
+   kid views are generous and rewarding; Parent HQ is quiet and efficient. A
+   parent screen covered in confetti reads as unserious.
+3. **Reward the moment.** Completing a chore and earning points are the emotional
+   core of the app. They get motion, colour and celebration. Nothing else does.
+4. **Motion is fast or it is annoying.** Nothing decorative runs longer than
+   380ms. All of it is skipped under `prefers-reduced-motion`.
+
+---
+
+## Tokens
+
+All defined once, in a single `:root` block. Nothing below appears as a literal
+value anywhere else in the stylesheet.
+
+### Colour
+
+```css
+/* Surfaces — warm off-white, never pure white. Pure white on a phone at night
+   is harsh, and the warmth is most of what reads as "designed". */
+--bg:             #f7f5ff;
+--surface:        #ffffff;
+--surface-sunken: #efebfa;
+--border:         #e4dff5;
+
+/* Ink — near-black, never #000. Pure black on white is a harsh, cheap contrast. */
+--ink:        #1c1830;
+--ink-muted:  #6b6580;
+--ink-subtle: #9a94ad;
+
+/* Brand */
+--brand:       #6d3bf5;
+--brand-hover: #5c2fe0;
+--brand-wash:  #ede7ff;
+--on-brand:    #ffffff;
+
+/* Status */
+--success:      #12a06a;
+--success-wash: #dff5eb;
+--warning:      #e8890c;
+--warning-wash: #fdf0dc;
+--danger:       #d93a4a;
+--danger-wash:  #fce4e6;
+
+/* Per-kid identity. Each kid keeps their colour on every screen — avatar ring,
+   card accent, progress fill — so the app feels like it knows them. Assign by
+   stable order of the people list, not at random. */
+--kid-1: #0ea5a5;  /* teal */
+--kid-2: #f0873a;  /* amber */
+--kid-3: #d356a8;  /* pink */
+--kid-4: #3b82f6;  /* blue */
+```
+
+### Type
+
+```css
+--font: ui-rounded, "SF Pro Rounded", "Nunito", "Segoe UI Variable Display",
+        system-ui, -apple-system, sans-serif;
+
+--text-xs:   0.75rem;   /* 12px — timestamps, meta only */
+--text-sm:   0.875rem;  /* 14px — secondary text */
+--text-base: 1rem;      /* 16px — body. Never smaller for anything a kid reads */
+--text-lg:   1.125rem;  /* 18px — card titles */
+--text-xl:   1.5rem;    /* 24px — screen titles */
+--text-2xl:  2rem;      /* 32px — section heroes */
+--text-3xl:  2.75rem;   /* 44px — points, the big number */
+
+--weight-normal: 450;
+--weight-medium: 600;
+--weight-bold:   750;
+
+--leading-tight: 1.15;  /* headings and big numbers */
+--leading-base:  1.45;  /* body */
+```
+
+A rounded face is the single biggest lever on "kids app" versus "web form".
+`ui-rounded` gets SF Pro Rounded free on iOS, which is where the kids will use
+it. **No web font downloads** — no build step, and it must work offline.
+
+### Spacing
+
+4px base. Only these values.
+
+```css
+--space-1: 0.25rem;  /*  4px */
+--space-2: 0.5rem;   /*  8px */
+--space-3: 0.75rem;  /* 12px */
+--space-4: 1rem;     /* 16px */
+--space-5: 1.5rem;   /* 24px */
+--space-6: 2rem;     /* 32px */
+--space-7: 3rem;     /* 48px */
+```
+
+Generosity is most of what separates premium from cramped. When unsure, go one
+step larger.
+
+### Radius
+
+```css
+--radius-sm:   0.5rem;   /*  8px — chips, small controls */
+--radius-md:   0.875rem; /* 14px — inputs, small cards */
+--radius-lg:   1.375rem; /* 22px — cards, sheets */
+--radius-full: 999px;    /* buttons, avatars, pills */
+```
+
+Generous radii read friendly. Fully-rounded primary buttons are a deliberate
+choice — it is what separates a kids app from an admin panel.
+
+### Elevation
+
+Layering, not outlines. A card should feel like an object sitting on the
+background, not a rectangle drawn on it.
+
+```css
+--shadow-1: 0 1px 2px rgba(28,24,48,.05), 0 2px 6px rgba(28,24,48,.07);
+--shadow-2: 0 4px 12px rgba(28,24,48,.10);
+--shadow-3: 0 12px 28px rgba(28,24,48,.16);
+```
+
+`--shadow-1` for resting cards, `--shadow-2` for the tab bar and anything
+floating, `--shadow-3` for modals. Never a shadow on a long scrolling list —
+it costs paint time on cheap Android.
+
+### Motion
+
+```css
+--dur-fast: 120ms;  /* press states, tap feedback */
+--dur-base: 220ms;  /* view transitions, card entry */
+--dur-slow: 380ms;  /* celebrations */
+
+--ease-out:    cubic-bezier(0.22, 1, 0.36, 1);      /* almost everything */
+--ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);   /* celebration only — overshoots */
+```
+
+Animate `transform` and `opacity` only. Anything else causes layout work on
+every frame and stutters on a cheap phone.
+
+Every decorative animation sits behind:
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+```
+
+---
+
+## Components
+
+### App shell
+
+- `body { overflow: hidden }`. The page never scrolls — a `<main>` region does,
+  with `overscroll-behavior: contain`.
+- Header: fixed, `--surface`, `--shadow-1` only once content scrolls beneath it.
+  Respects `env(safe-area-inset-top)`.
+- Tab bar: fixed bottom, `--surface`, `--shadow-2`, height `4rem` plus
+  `env(safe-area-inset-bottom)`. Icon above a `--text-xs` label. Active tab in
+  `--brand`, inactive in `--ink-subtle`.
+- View transition: the outgoing view fades to 0 and the incoming fades in with
+  `translateY(8px) → 0`, `--dur-base`, `--ease-out`.
+
+### Cards
+
+`--surface`, `--radius-lg`, `--shadow-1`, padding `--space-4`, gap `--space-3`
+between cards. A kid's card carries a 4px left accent bar or an avatar ring in
+their `--kid-*` colour.
+
+### Buttons
+
+- Primary: `--brand` fill, `--on-brand` text, `--radius-full`, min-height
+  `3.25rem`, `--weight-medium`, `--text-base`.
+- Secondary: `--brand-wash` fill, `--brand` text, same geometry.
+- Destructive: `--danger-wash` fill, `--danger` text.
+- Every button: `touch-action: manipulation` (kills the 300ms tap delay) and a
+  pressed state of `transform: scale(0.97)` over `--dur-fast`. **Every tap gets
+  a response before the network does.**
+- Minimum target 44px in every direction, including icon-only buttons.
+
+### The points number
+
+`--text-3xl`, `--weight-bold`, `font-variant-numeric: tabular-nums` so it does
+not jitter while counting. When points change it **counts up** over `--dur-slow`
+rather than snapping. This is the single most rewarding moment in the app for a
+kid — it is worth the code.
+
+### Progress
+
+Rings or bars filled in the kid's colour, with the number inside or beside it.
+Never a bare number where progress toward something is the point. Kids respond
+to a visibly filling shape far more than to a figure.
+
+### Completing a chore
+
+The moment that has to feel good:
+
+1. Instant press feedback (`scale(0.97)`).
+2. **Optimistic update** — the card moves to its done state immediately, before
+   the API responds, and reverts with a message if the call fails. Waiting on a
+   round trip is the single biggest "this is a website" tell.
+3. The card animates out: `translateX(12px)` and fade, `--dur-base`.
+4. Points count up.
+5. `navigator.vibrate(12)` where supported, unless the household is in quiet
+   hours or has muted feedback.
+
+### Empty states
+
+Never a blank area or a bare sentence. A large emoji or inline SVG, a
+`--text-lg` line in `--ink`, a `--text-sm` line in `--ink-muted` saying what to
+do next. "No chores today 🎉" should read as good news, because it is.
+
+### Loading
+
+Skeleton blocks in `--surface-sunken` at the final layout's dimensions. Never a
+spinner on a full screen, and never a blank flash followed by content jumping in.
+
+---
+
+## Parent HQ
+
+Same tokens, different register:
+
+- `--text-base` and `--text-lg` rather than `--text-2xl` and above
+- `--radius-md` rather than `--radius-lg`
+- `--shadow-1` only
+- Density over generosity — a parent scanning approvals wants to see more at once
+- **No celebration animations.** Approving is administration, not achievement.
+
+---
+
+## What this does not cover
+
+Dark mode, theming, and any per-household customisation. Deliberately out of
+scope until someone asks for it; adding a second palette before the first is
+proven doubles the work of every screen.

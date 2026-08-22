@@ -37,7 +37,9 @@ never close issues.
 Work in this order:
 
 1. Read the issue and its comments using the GitHub tools. Also read
-   docs/mvp-scope-v1.md in the mounted repository for product rules.
+   docs/mvp-scope-v1.md in the mounted repository for product rules, and
+   docs/design-system.md for the visual language - its tokens and component
+   specs are the actual values to build from, not suggestions.
 
 2. AUDIT THE CODE FIRST. The repository is mounted read-only in your sandbox.
    Backlog items are written at a point in time and the app moves on, so an
@@ -67,10 +69,11 @@ Work in this order:
    - place the work inside the existing view and navigation structure - a new
      screen reached by navigation, or an addition to a screen that already
      exists. Never "add a section to index.html";
-   - name the real design tokens and conventions you found while auditing (the
-     CSS custom properties for colour, spacing, type and radius; the card and
-     button classes; how a kid's colour and avatar are applied) and require the
-     new work to use them rather than introduce its own values;
+   - name the real design tokens and conventions from docs/design-system.md and
+     from what you found while auditing (the CSS custom properties for colour,
+     spacing, type and radius; the card and button classes; how a kid's colour
+     and avatar are applied) and require the new work to use them rather than
+     introduce its own values;
    - keep the register right: playful and generous on kid screens, calm and
      efficient in Parent HQ;
    - preserve the app-like behaviour that already exists - the content region
