@@ -39,6 +39,7 @@ async function getState() {
   const people = await queryHousehold('people');
   const chores = (await queryHousehold('chores')).filter((t) => t.active !== false);
   const completions = await queryHousehold('completions');
+  const rewardDocs = (await queryHousehold('rewards')).filter((r) => r.type === 'reward' && r.active !== false);
 
   const stats = {};
   people
@@ -46,12 +47,14 @@ async function getState() {
     .forEach((p) => {
       const mine = completions.filter((c) => c.kidId === p.id);
       const points = mine.filter((c) => c.status === 'approved').reduce((s, c) => s + (c.points || 0), 0);
-      stats[p.id] = { points, streak: calcStreak(mine) };
+      const spent = 0;
+      stats[p.id] = { points, streak: calcStreak(mine), spent, balance: points - spent };
     });
 
   return {
     ok: true,
     people: people.map((p) => ({ id: p.id, name: p.name, emoji: p.emoji, role: p.role, hasPin: !!p.pin })),
+    rewards: rewardDocs.map((r) => ({ id: r.id, title: r.title, cost: r.cost, needsApproval: r.needsApproval })),
     tasks: chores.map((t) => ({
       id: t.id,
       kidId: t.kidId,
@@ -223,6 +226,62 @@ async function addKid(req) {
   return getState();
 }
 
+async function addReward(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const title = (req.title || '').trim();
+  if (!title) return { ok: false, error: 'title is required' };
+  const cost = Number(req.cost);
+  if (!Number.isInteger(cost) || cost <= 0) return { ok: false, error: 'cost must be a positive integer' };
+  await container('rewards').items.create({
+    id: randomUUID(),
+    householdId: HOUSEHOLD_ID,
+    type: 'reward',
+    title,
+    cost,
+    needsApproval: !!req.needsApproval,
+    active: true,
+    createdAt: new Date().toISOString(),
+  });
+  return getState();
+}
+
+async function deleteReward(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const rewards = container('rewards');
+  const { resource: reward } = await rewards
+    .item(req.rewardId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (reward) {
+    reward.active = false;
+    await rewards.item(req.rewardId, HOUSEHOLD_ID).replace(reward);
+  }
+  return getState();
+}
+
+async function updateReward(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const rewards = container('rewards');
+  const { resource: reward } = await rewards
+    .item(req.rewardId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!reward) return { ok: false, error: 'Reward not found' };
+  if (req.title !== undefined) {
+    const title = (req.title || '').trim();
+    if (!title) return { ok: false, error: 'title is required' };
+    reward.title = title;
+  }
+  if (req.cost !== undefined) {
+    const cost = Number(req.cost);
+    if (!Number.isInteger(cost) || cost <= 0) return { ok: false, error: 'cost must be a positive integer' };
+    reward.cost = cost;
+  }
+  if (req.needsApproval !== undefined) reward.needsApproval = !!req.needsApproval;
+  await rewards.item(req.rewardId, HOUSEHOLD_ID).replace(reward);
+  return getState();
+}
+
 const ROUTES = {
   state: () => getState(),
   login,
@@ -234,6 +293,9 @@ const ROUTES = {
   approve,
   reject,
   addKid,
+  addReward,
+  deleteReward,
+  updateReward,
 };
 
 app.http('hero', {
