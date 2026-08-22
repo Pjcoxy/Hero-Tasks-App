@@ -83,3 +83,84 @@ jobs:
                   print(f"BROKEN {f}\n{e}")
           sys.exit(1 if bad else 0)
           EOF
+
+  smoke:
+    # Deliberately a SEPARATE job, not more steps on 'test'.
+    #
+    # auto-merge.yml gates on a check run named exactly 'test', so this one does
+    # not block a merge yet. That is on purpose: the pipeline is unattended, and
+    # a flaky browser test would bounce Copilot pull requests back for no reason.
+    # It proves itself here first. Once it has a run of green weeks, add 'smoke'
+    # to the gate in auto-merge.yml - until then it reports rather than gates,
+    # which is the same weak position ci.yml itself was in before #63, and worth
+    # not leaving indefinitely.
+    if: >-
+      github.event_name != 'pull_request_target'
+      || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install API dependencies
+        working-directory: api
+        run: npm install --no-audit --no-fund
+
+      - name: Install Playwright
+        working-directory: tests/smoke
+        # Installs the test runner only; the browser is handled by the next
+        # step, which knows whether one is already present.
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: npm install --no-audit --no-fund
+
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tests/smoke/package-lock.json') }}
+
+      - name: Resolve a Chromium
+        id: chromium
+        # Some images ship a browser already (PLAYWRIGHT_BROWSERS_PATH); GitHub's
+        # hosted runners do not. Use one if it is there, install one if it is
+        # not. Playwright pins an exact browser build per release, so the path
+        # moves whenever either the image or the package updates - hence finding
+        # it rather than hardcoding it.
+        #
+        # This started life assuming a preinstalled browser, which was true of
+        # the sandbox it was written in and false of the runner it had to run
+        # on. It failed loudly rather than quietly downloading, which is how the
+        # wrong assumption was caught in one run instead of becoming a slow
+        # mystery later.
+        run: |
+          BIN=""
+          if [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ] && [ -d "${PLAYWRIGHT_BROWSERS_PATH}" ]; then
+            BIN=$(find "${PLAYWRIGHT_BROWSERS_PATH}" -maxdepth 3 -type f -name chrome 2>/dev/null | head -1)
+          fi
+          if [ -n "$BIN" ]; then
+            echo "Using the preinstalled browser at $BIN"
+            echo "path=$BIN" >> "$GITHUB_OUTPUT"
+          else
+            echo "No preinstalled browser - installing Playwright's own Chromium."
+            npx --prefix tests/smoke playwright install --with-deps chromium
+            echo "path=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Smoke test the running app
+        env:
+          SMOKE_CHROMIUM: ${{ steps.chromium.outputs.path }}
+        run: npx --prefix tests/smoke playwright test -c tests/smoke/playwright.config.js
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-traces
+          path: tests/smoke/test-results/
+          retention-days: 7

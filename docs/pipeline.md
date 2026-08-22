@@ -301,6 +301,61 @@ deleted. Work now moves the instant something unblocks it.
 | `auto-merge.yml` (nominally 5 min) | Copilot never signals "finished" — it opens a draft and later just renames the title from `[WIP] …`. There is no event meaning done |
 | ~~`approve-agent-workflows.yml`~~ | **Deleted.** It never worked — see below |
 
+### The smoke test: what it covers, and what it still does not
+
+`tests/smoke/` drives the real frontend in a real browser against the real API
+logic, and asserts on **rendered output**. It exists because three bugs shipped
+green in one day, and every existing check reads source code rather than looking
+at the page:
+
+| Check | What it reads |
+|---|---|
+| `check-frontend.js` | parses the inline script, counts buttons |
+| `check-design.js` | greps the CSS |
+| `test-logic.js` | calls API functions with an in-memory store |
+
+None of them ever load `index.html` in a browser. All three passed while the kid
+screen had no way out of it, and while every avatar printed as
+`svg:3d-printer Toby`.
+
+**How it runs without Azure.** `tests/smoke/server.js` serves the frontend and
+handles `/api/hero` by calling the real `ROUTES` table from `hero.js`, with
+Cosmos DB swapped for the same in-memory store `test-logic.js` already uses. No
+emulator, no credentials, safe on a `pull_request` trigger.
+
+That choice matters. #88 was a **data** bug — the seed was right, and the live
+household kept its old avatars. A test that stubs the API at the network layer
+invents its own responses and cannot see that class of bug at all.
+
+**Covered:** the picker lists the household; no avatar renders as its raw stored
+value; a kid can get back to the picker and switch to someone else; every kid
+tab opens; the session survives a reload; a parent reaches Parent HQ and every
+tab renders; the page loads with no JavaScript error.
+
+**Not covered, and worth being honest about it:**
+- Completing and approving a chore end to end. Worth adding.
+- Anything about how it *looks* — spacing, colour, whether a layout is broken.
+  A screenshot comparison would catch that, and would also be the most likely
+  source of flakes.
+- Real Cosmos DB behaviour: partition keys, conflicts, throttling.
+- The deployed app. This tests the code in the pull request, not what is live.
+
+**On the browser.** The job uses a preinstalled Chromium when the image has one
+and installs Playwright's own when it does not, cached between runs. The first
+version assumed a browser was already present — true of the sandbox it was
+written in, false of GitHub's hosted runners. It failed loudly rather than
+quietly downloading one, which is why the wrong assumption surfaced on the first
+CI run instead of becoming a slow mystery later. Worth keeping that shape: a
+step that cannot find what it needs should say so, not improvise.
+
+**It does not gate merges yet.** `auto-merge.yml` waits on a check run named
+exactly `test`; this job is called `smoke`, so a red one will not stop a merge.
+That is deliberate — an unattended pipeline plus a flaky browser test means
+false reds bouncing work back to Copilot. Ten consecutive green runs were the
+bar before merging it, and it cleared that. Adding `smoke` to the gate is the
+next step, and should not be left forever: a test nothing is obliged to pass is
+decoration, which is exactly the position `ci.yml` was in before #63.
+
 ### Cap what is IN FLIGHT, not what one run hands out
 
 #62 set `MAX_PER_RUN=1` on the build queue, because almost every sub-issue edits
