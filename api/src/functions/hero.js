@@ -4,6 +4,7 @@ const { container } = require('../lib/cosmos');
 const { ensureSeeded, HOUSEHOLD_ID } = require('../lib/seed');
 const { sendPush } = require('../lib/push');
 const { extractVoiceIntent } = require('../lib/llm');
+const { findConflicts, suggestAlternateSlots } = require('../lib/calendar');
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
@@ -503,6 +504,57 @@ async function deleteTask(req) {
   return getState();
 }
 
+// Compute conflicts and alternate suggestions for a planning item against the active
+// schedule on the same UTC day. Excludes the item itself so it never conflicts with itself.
+async function getConflictsForItem(item) {
+  const startDate = new Date(item.startAt);
+  if (Number.isNaN(startDate.getTime())) return { conflicts: [], suggestedTimes: [] };
+
+  const dayStart = new Date(Date.UTC(
+    startDate.getUTCFullYear(),
+    startDate.getUTCMonth(),
+    startDate.getUTCDate()
+  ));
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+
+  const [allPlanningItems, allChores] = await Promise.all([
+    queryHousehold('planningItems'),
+    queryHousehold('chores'),
+  ]);
+
+  const schedule = [];
+
+  for (const pi of allPlanningItems) {
+    if (pi.active === false) continue;
+    if (pi.id === item.id) continue; // exclude self
+    const when = new Date(pi.startAt);
+    if (Number.isNaN(when.getTime())) continue;
+    if (when.getTime() < dayStart.getTime() || when.getTime() > dayEnd.getTime()) continue;
+    schedule.push({ ...pi, kind: pi.type });
+  }
+
+  for (const chore of allChores) {
+    if (chore.active === false) continue;
+    if (chore.cycle !== 'oneoff' || !chore.dueBy) continue;
+    const due = new Date(chore.dueBy);
+    if (Number.isNaN(due.getTime())) continue;
+    if (due.getTime() < dayStart.getTime() || due.getTime() >= dayEnd.getTime()) continue;
+    schedule.push({
+      kind: 'chore',
+      taskId: chore.id,
+      kidId: chore.kidId,
+      title: chore.title,
+      cycle: chore.cycle,
+      occurrenceAt: chore.dueBy,
+    });
+  }
+
+  const candidate = { ...item, kind: item.type };
+  const conflicts = findConflicts(candidate, schedule);
+  const suggestedTimes = conflicts.length > 0 ? suggestAlternateSlots(candidate, schedule) : [];
+  return { conflicts, suggestedTimes };
+}
+
 async function addPlanningItem(req) {
   await requireParent(req.parentId, req.parentPin);
   const validated = await validatePlanningPayload({
@@ -513,7 +565,8 @@ async function addPlanningItem(req) {
   if (validated.duplicate) return { ok: true, item: validated.duplicate };
   validated.item.source = 'manual';
   await container('planningItems').items.create(validated.item);
-  return { ok: true, item: validated.item };
+  const { conflicts, suggestedTimes } = await getConflictsForItem(validated.item);
+  return { ok: true, item: validated.item, conflicts, suggestedTimes };
 }
 
 async function updatePlanningItem(req) {
@@ -528,7 +581,8 @@ async function updatePlanningItem(req) {
   if (!validated.ok) return validated;
   if (validated.duplicate) return { ok: true, item: validated.duplicate };
   await planningItems.item(req.planningItemId, HOUSEHOLD_ID).replace(validated.item);
-  return { ok: true, item: validated.item };
+  const { conflicts, suggestedTimes } = await getConflictsForItem(validated.item);
+  return { ok: true, item: validated.item, conflicts, suggestedTimes };
 }
 
 async function deletePlanningItem(req) {
@@ -648,14 +702,22 @@ async function calendar(req) {
     }
   }
 
+  schedule.sort((a, b) => {
+    const aWhen = a.startAt || a.occurrenceAt || '';
+    const bWhen = b.startAt || b.occurrenceAt || '';
+    return aWhen < bWhen ? -1 : aWhen > bWhen ? 1 : 0;
+  });
+
+  for (const item of schedule) {
+    const others = schedule.filter((x) => x !== item);
+    item.conflictsWith = findConflicts(item, others).map((c) => c.id).filter(Boolean);
+    item.suggestedTimes = item.conflictsWith.length > 0 ? suggestAlternateSlots(item, others) : [];
+  }
+
   return {
     ok: true,
     personId: filterPersonId || callerKidId,
-    items: schedule.sort((a, b) => {
-      const aWhen = a.startAt || a.occurrenceAt || '';
-      const bWhen = b.startAt || b.occurrenceAt || '';
-      return aWhen < bWhen ? -1 : aWhen > bWhen ? 1 : 0;
-    }),
+    items: schedule,
   };
 }
 
