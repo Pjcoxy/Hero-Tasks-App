@@ -842,12 +842,28 @@ async function main() {
 
   state = await getState();
   assert.ok(Array.isArray(state.rewards), 'getState should include rewards array');
-  assert.strictEqual(state.rewards.length, 1, 'one active reward should appear');
-  assert.strictEqual(state.rewards[0].id, 'reward1');
-  assert.strictEqual(state.rewards[0].title, 'Screen time');
-  assert.strictEqual(state.rewards[0].cost, 20);
-  assert.strictEqual(state.rewards[0].needsApproval, false);
+  // The shop is seeded now, so assert on THIS reward rather than a total. A
+  // count would have to be edited every time the seed list changes, which makes
+  // it a maintenance tax that tests nothing.
+  const added = state.rewards.find((r) => r.id === 'reward1');
+  assert.ok(added, 'the added reward should appear in getState().rewards');
+  assert.strictEqual(added.title, 'Screen time');
+  assert.strictEqual(added.cost, 20);
+  assert.strictEqual(added.needsApproval, false);
   console.log('✓ addReward appears in getState().rewards');
+
+  // The seeded shop itself, and that seeding is idempotent.
+  const seededTitles = state.rewards.map((r) => r.title);
+  assert.ok(seededTitles.includes('A player for your soccer game'), 'seeded rewards should be present');
+  assert.strictEqual(
+    seededTitles.filter((t) => t === 'A player for your soccer game').length,
+    1,
+    'a seeded reward should not be duplicated'
+  );
+  const soccer = state.rewards.find((r) => r.title === 'A player for your soccer game');
+  assert.strictEqual(soccer.cost, 15, 'the cheapest reward is the first-win one');
+  assert.strictEqual(soccer.needsApproval, true, 'seeded rewards need parent approval');
+  console.log('✓ rewards are seeded into an existing household, without duplicates');
 
   // Soft-delete reward — set active: false
   const rewardDoc = (await rewardsContainer.items.query({}).fetchAll()).resources.find((r) => r.id === 'reward1');
@@ -855,7 +871,12 @@ async function main() {
   await rewardsContainer.item('reward1').replace(rewardDoc);
 
   state = await getState();
-  assert.strictEqual(state.rewards.length, 0, 'soft-deleted reward should not appear in getState().rewards');
+  // Same reasoning as above: assert this reward is gone, not that the shop is
+  // empty. The seeded rewards are legitimately still there.
+  assert.ok(
+    !state.rewards.some((r) => r.id === 'reward1'),
+    'soft-deleted reward should not appear in getState().rewards'
+  );
   console.log('✓ soft-deleted reward disappears from getState().rewards');
 
   // stats now include spent and balance

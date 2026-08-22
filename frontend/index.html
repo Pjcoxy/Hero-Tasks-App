@@ -872,6 +872,15 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .modal { background: var(--surface); border-radius: var(--radius-lg); padding: var(--space-6); width: 100%; max-width: 320px; text-align: center; box-shadow: var(--shadow-3); display: flex; flex-direction: column; gap: var(--space-3); }
 .modal h3 { margin-bottom: var(--space-3); font-size: var(--text-lg); font-weight: var(--weight-bold); }
 .pin-input { font-size: var(--text-2xl); text-align: center; letter-spacing: 0.4em; width: 100%; padding: var(--space-3); border: 2px solid var(--border); border-radius: var(--radius-md); font-family: inherit; color: var(--ink); background: var(--surface-sunken); }
+.next-goal {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--on-brand-faint);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+.next-goal-title { font-weight: var(--weight-bold); }
+.next-goal-gap { color: var(--on-brand-strong); }
 .ask-input { font-size: var(--text-base); width: 100%; padding: var(--space-3); border: 2px solid var(--border); border-radius: var(--radius-md); font-family: inherit; color: var(--ink); background: var(--surface-sunken); }
 .ask-input:focus { outline: none; border-color: var(--brand); }
 .pin-err { color: var(--danger); font-size: var(--text-sm); min-height: 1.2em; }
@@ -1049,6 +1058,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
           <div class="progress-bar"><div class="progress-fill" id="k-progress-fill"></div></div>
           <div class="progress-lbl" id="k-progress-lbl"></div>
         </div>
+        <div class="next-goal hidden" id="k-next-goal"></div>
       </div>
       <div class="home-content-sheet">
         <h2 class="section-title">📅 Today's Missions</h2>
@@ -1797,6 +1807,7 @@ function renderKid(kid) {
   renderTaskList('k-oneoff', oneoffs, '⭐', 'No one-off missions.', '');
 
   renderRewardShop(kid, balance);
+  renderNextGoal(balance);
   renderRedemptions(kid);
   renderRecentActivity(kid);
   renderKidCalendar(kid);
@@ -2444,6 +2455,45 @@ function renderTaskList(elId, tasks, emptyEmoji, emptyLine1, emptyLine2) {
       + '<span class="pts-badge">+' + t.points + '</span>'
       + '</div>';
   }).join('');
+}
+
+// The nearest goal, shown where kids actually land.
+//
+// "N more points to go" already existed - but only inside the Rewards tab,
+// which they have to go looking for. On Home it is the thing that makes a chore
+// feel worth doing.
+//
+// Deliberately the CHEAPEST reward they cannot yet afford, not the dearest:
+// "80 more points" reads as hopeless to a seven-year-old, "5 more points" reads
+// as nearly there. Takes the same balance renderRewardShop() is given, so the
+// two screens can never disagree.
+function renderNextGoal(balance) {
+  var el = document.getElementById('k-next-goal');
+  if (!el) return;
+
+  var rewards = (state.rewards || []).filter(function(r) { return r.active !== false; });
+  if (rewards.length === 0) {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    return;
+  }
+
+  var affordable = rewards.filter(function(r) { return r.cost <= balance; });
+  if (affordable.length > 0) {
+    el.classList.remove('hidden');
+    el.innerHTML = '<span class="next-goal-title">🎉 You can claim a reward!</span>'
+      + ' <span class="next-goal-gap">Have a look in Rewards.</span>';
+    return;
+  }
+
+  var next = rewards.filter(function(r) { return r.cost > balance; })
+    .sort(function(a, b) { return a.cost - b.cost; })[0];
+  if (!next) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+
+  var shortBy = next.cost - balance;
+  el.classList.remove('hidden');
+  el.innerHTML = '<span class="next-goal-title">🎁 ' + esc(next.title) + '</span>'
+    + ' <span class="next-goal-gap">— ' + shortBy + ' more point' + (shortBy === 1 ? '' : 's') + '!</span>';
 }
 
 function renderRewardShop(kid, balance) {
