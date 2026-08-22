@@ -261,6 +261,29 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   margin-top: calc(-1 * var(--space-5));
   padding: var(--space-5) var(--space-4) 0;
 }
+.badge-tile {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  min-height: 7rem;
+  padding: var(--space-4) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  text-align: center;
+  color: var(--ink);
+}
+.badge-tile.earned {
+  box-shadow: inset 0 0 0 2px var(--kid-color, var(--brand)), var(--shadow-1);
+}
+.badge-tile.locked {
+  background: var(--surface-sunken);
+  color: var(--ink-subtle);
+}
+.badge-emoji { font-size: var(--text-2xl); line-height: 1; }
+.badge-name  { font-size: var(--text-lg); font-weight: var(--weight-bold); line-height: var(--leading-tight); }
 
 /* ─── Tab bar ─────────────────────────────────────────────────────────── */
 .tab-bar {
@@ -725,6 +748,8 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
         <h2 class="section-title">📅 Today's Missions</h2>
         <div id="k-daily"></div>
         <button class="btn ghost" style="margin-top:var(--space-3)" onclick="addExtraPrompt()">➕ I did something extra!</button>
+        <h2 class="section-title">🏅 Badges</h2>
+        <div class="tile-grid" id="k-badges"></div>
       </div>
     </div>
 
@@ -1019,6 +1044,8 @@ let pinTarget = null;
 let pushSetupPersonId = null;
 let kidTab = 'home';
 let parentTab = 'approvals';
+let seenEarnedBadgeIds = null;
+let seenEarnedBadgesKidId = null;
 
 async function api(payload) {
   const res = await fetch(API_URL, {
@@ -1246,6 +1273,7 @@ function renderKid(kid) {
   });
   document.getElementById('k-oneoff-section').classList.toggle('hidden', oneoffs.length === 0);
   renderTaskList('k-oneoff', oneoffs, '⭐', 'No one-off missions.', '');
+  renderBadges(kid, st.badges || []);
 
   renderRewardShop(kid, balance);
   renderRedemptions(kid);
@@ -1311,6 +1339,31 @@ function renderTaskList(elId, tasks, emptyEmoji, emptyLine1, emptyLine2) {
       + (sub ? '<div class="sub">' + sub + '</div>' : '')
       + '</div>'
       + '<span class="pts-badge">+' + t.points + '</span>'
+      + '</div>';
+  }).join('');
+}
+
+function renderBadges(kid, badges) {
+  var el = document.getElementById('k-badges');
+  var earnedNow = new Set((badges || []).filter(function(b) { return b && b.earned; }).map(function(b) { return b.id; }));
+
+  if (seenEarnedBadgesKidId !== kid.id || !seenEarnedBadgeIds) {
+    seenEarnedBadgesKidId = kid.id;
+    seenEarnedBadgeIds = earnedNow;
+  } else {
+    (badges || []).forEach(function(badge) {
+      if (!badge || !badge.earned || seenEarnedBadgeIds.has(badge.id)) return;
+      toast('New badge! 🏅 ' + badge.label);
+      vibrateIfAllowed();
+      if (!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) celebrate();
+    });
+    seenEarnedBadgeIds = earnedNow;
+  }
+
+  el.innerHTML = (badges || []).map(function(badge) {
+    return '<div class="badge-tile ' + (badge.earned ? 'earned' : 'locked') + '">'
+      + '<span class="badge-emoji">' + esc(badge.emoji || '🏅') + '</span>'
+      + '<span class="badge-name">' + esc(badge.label || 'Badge') + '</span>'
       + '</div>';
   }).join('');
 }
@@ -1489,6 +1542,7 @@ function esc(s) {
 function pickPerson(personId) {
   var p = state.people.find(function(x) { return x.id === personId; });
   if (!p.hasPin) {
+    resetBadgeCelebrationState();
     session = { personId: p.id, role: p.role, pin: '' };
     saveSession(); render();
     return;
@@ -1513,6 +1567,7 @@ async function submitPin() {
   try {
     var res = await api({ action: 'login', personId: pinTarget.id, pin });
     if (res.ok) {
+      resetBadgeCelebrationState();
       session = { personId: pinTarget.id, role: res.role, pin };
       saveSession(); closePin(); render();
     } else {
@@ -1524,7 +1579,12 @@ async function submitPin() {
 }
 
 function saveSession() { localStorage.setItem('hero-session', JSON.stringify(session)); }
+function resetBadgeCelebrationState() {
+  seenEarnedBadgeIds = null;
+  seenEarnedBadgesKidId = null;
+}
 function logout() {
+  resetBadgeCelebrationState();
   session = null;
   pushSetupPersonId = null;
   localStorage.removeItem('hero-session');
