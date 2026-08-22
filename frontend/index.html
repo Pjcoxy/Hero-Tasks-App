@@ -392,23 +392,250 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .tag.extra { background: var(--brand-wash); color: var(--brand); }
 
 /* ─── Parent screen ───────────────────────────────────────────────────── */
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: calc(env(safe-area-inset-top, 0px) + var(--space-3)) var(--space-4) var(--space-3); background: var(--surface); box-shadow: var(--shadow-1); flex-shrink: 0; }
-.back-btn { background: none; font-size: var(--text-sm); color: var(--ink-muted); font-weight: var(--weight-medium); padding: var(--space-2); touch-action: manipulation; border-radius: var(--radius-sm); transition: transform var(--dur-fast) var(--ease-out); }
+.parent-header {
+  padding: calc(env(safe-area-inset-top, 0px) + var(--space-3)) var(--space-4) var(--space-3);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  z-index: 10;
+}
+.parent-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.back-btn {
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  padding: var(--space-2) var(--space-3);
+  min-height: 44px;
+  touch-action: manipulation;
+  border-radius: var(--radius-full);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
 .back-btn:active { transform: scale(0.97); }
-.parent-main { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-6)); }
-.parent-main h2 { font-size: var(--text-base); font-weight: var(--weight-bold); margin: var(--space-5) 0 var(--space-3); }
-.parent-main h2:first-child { margin-top: 0; }
+.parent-title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+  text-align: right;
+  flex: 1;
+  min-width: 0;
+}
+.parent-tabbar {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 0 var(--space-4) var(--space-3);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  flex-shrink: 0;
+  scrollbar-width: none;
+  z-index: 9;
+}
+.parent-tabbar::-webkit-scrollbar { display: none; }
+.choice-pill {
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+  touch-action: manipulation;
+  transition: transform var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.choice-pill:active { transform: scale(0.97); }
+.choice-pill.active {
+  background: var(--brand);
+  color: var(--on-brand);
+}
+.choice-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--warning-wash);
+  color: var(--warning);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+.choice-pill.active .choice-pill-badge {
+  background: var(--warning-wash);
+  color: var(--warning);
+}
+.parent-main {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.parent-panel {
+  min-height: 100%;
+  padding: var(--space-4) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-6));
+}
+.parent-panel.entering {
+  animation: screen-in var(--dur-base) var(--ease-out) both;
+}
+.parent-section + .parent-section { margin-top: var(--space-5); }
+.parent-section-title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
+  margin-bottom: var(--space-3);
+}
+.parent-card,
+.parent-list-card {
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-4);
+}
+.parent-list-card + .parent-list-card,
+.parent-card + .parent-card { margin-top: var(--space-3); }
+.parent-main .card { border-radius: var(--radius-md); box-shadow: var(--shadow-1); }
+.parent-main .empty {
+  align-items: flex-start;
+  text-align: left;
+  padding: var(--space-4);
+  gap: var(--space-1);
+}
+.parent-main .empty-emoji { font-size: var(--text-lg); }
+.parent-main .empty-line1 { font-size: var(--text-base); }
+.parent-main .empty-line2 { font-size: var(--text-sm); }
+.parent-summary-row,
+.parent-item-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.parent-item-head { justify-content: space-between; }
+.parent-kid-mark {
+  width: 2rem;
+  min-width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-lg);
+}
+.parent-copy {
+  flex: 1;
+  min-width: 0;
+}
+.parent-copy strong,
+.parent-list-title {
+  display: block;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+}
 .sub { font-size: var(--text-sm); color: var(--ink-muted); margin-top: var(--space-1); }
+.parent-actions,
+.approve-row {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+}
+.parent-actions .btn,
+.approve-row .btn { flex: 1; }
+.parent-main .btn {
+  transition: transform var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.parent-main .btn.small { min-height: 2.75rem; }
+.parent-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.parent-list-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.parent-list-row + .parent-list-row { margin-top: 0; }
+.parent-list-row .btn.small { flex: none; }
+.parent-statline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.parent-badge,
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  border-radius: var(--radius-full);
+  padding: var(--space-1) var(--space-2);
+}
+.parent-badge {
+  background: var(--brand-wash);
+  color: var(--brand);
+}
+.tag.extra { background: var(--brand-wash); color: var(--brand); }
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+.check-row input {
+  width: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  accent-color: var(--brand);
+}
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+.modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
 
 /* ─── Toast ───────────────────────────────────────────────────────────── */
 #toast { position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 5.5rem); left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--on-brand); border-radius: var(--radius-full); padding: var(--space-3) var(--space-5); font-weight: var(--weight-medium); z-index: 100; box-shadow: var(--shadow-3); white-space: nowrap; }
 
 /* ─── Modal ───────────────────────────────────────────────────────────── */
 .modal-bg { position: fixed; inset: 0; background: rgba(28,24,48,0.5); display: flex; align-items: center; justify-content: center; z-index: 50; padding: var(--space-5); }
-.modal { background: var(--surface); border-radius: var(--radius-lg); padding: var(--space-6); width: 100%; max-width: 320px; text-align: center; box-shadow: var(--shadow-3); }
+.modal { background: var(--surface); border-radius: var(--radius-lg); padding: var(--space-6); width: 100%; max-width: 320px; text-align: center; box-shadow: var(--shadow-3); display: flex; flex-direction: column; gap: var(--space-3); }
 .modal h3 { margin-bottom: var(--space-3); font-size: var(--text-lg); font-weight: var(--weight-bold); }
-.pin-input { font-size: var(--text-2xl); text-align: center; letter-spacing: 0.4em; width: 100%; padding: var(--space-3); border: 2px solid var(--brand-wash); border-radius: var(--radius-md); margin-bottom: var(--space-3); font-family: inherit; color: var(--ink); background: var(--surface); }
-.pin-err { color: var(--danger); font-size: var(--text-sm); margin-bottom: var(--space-3); min-height: 1.2em; }
+.pin-input { font-size: var(--text-2xl); text-align: center; letter-spacing: 0.4em; width: 100%; padding: var(--space-3); border: 2px solid var(--border); border-radius: var(--radius-md); font-family: inherit; color: var(--ink); background: var(--surface-sunken); }
+.pin-err { color: var(--danger); font-size: var(--text-sm); min-height: 1.2em; }
 
 /* ─── Confetti canvas ─────────────────────────────────────────────────── */
 #confetti-canvas { position: fixed; inset: 0; pointer-events: none; z-index: 99; }
@@ -542,86 +769,125 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 <!-- PARENT SCREEN                                                        -->
 <!-- ════════════════════════════════════════════════════════════════════ -->
 <div id="screen-parent" class="screen hidden">
-  <div class="topbar">
-    <button class="back-btn" onclick="logout()">← Switch user</button>
-    <strong id="p-hq-title">👑 Parent HQ</strong>
-  </div>
-  <div class="parent-main">
+  <header class="parent-header">
+    <div class="parent-header-row">
+      <button class="back-btn" onclick="logout()">← Switch user</button>
+      <strong id="p-hq-title" class="parent-title">👑 Parent HQ</strong>
+    </div>
+  </header>
 
-    <h2>⏳ Awaiting your approval</h2>
-    <div id="p-pending"></div>
+  <nav class="parent-tabbar" aria-label="Parent HQ sections">
+    <button class="choice-pill active" id="p-tabbtn-approvals" onclick="switchParentTab('approvals')">
+      <span>Approvals</span>
+      <span id="p-approvals-badge" class="choice-pill-badge hidden">0</span>
+    </button>
+    <button class="choice-pill" id="p-tabbtn-tasks" onclick="switchParentTab('tasks')">Tasks</button>
+    <button class="choice-pill" id="p-tabbtn-rewards" onclick="switchParentTab('rewards')">Rewards</button>
+    <button class="choice-pill" id="p-tabbtn-settings" onclick="switchParentTab('settings')">Settings</button>
+  </nav>
 
-    <h2>➕ Allocate a task</h2>
-    <div class="card">
-      <div class="field">
-        <label>Task</label>
-        <div class="input-row">
-          <input id="p-title" type="text" placeholder="e.g. Feed the dog" autocomplete="off">
-          <button class="mic-btn hidden" id="p-mic" onclick="toggleMic()">🎤</button>
+  <main class="parent-main">
+    <div id="p-tab-approvals" class="parent-panel">
+      <section class="parent-section">
+        <h2 class="parent-section-title">Awaiting your approval</h2>
+        <div id="p-pending"></div>
+      </section>
+      <section class="parent-section">
+        <h2 class="parent-section-title">Reward requests</h2>
+        <div id="p-reward-requests"></div>
+      </section>
+    </div>
+
+    <div id="p-tab-tasks" class="parent-panel hidden">
+      <section class="parent-section">
+        <h2 class="parent-section-title">Allocate a task</h2>
+        <div class="card parent-card">
+          <div class="field">
+            <label>Task</label>
+            <div class="input-row">
+              <input id="p-title" type="text" placeholder="e.g. Feed the dog" autocomplete="off">
+              <button class="mic-btn hidden" id="p-mic" onclick="toggleMic()">🎤</button>
+            </div>
+          </div>
+          <div class="field"><label>Who</label><select id="p-kid"></select></div>
+          <div class="field"><label>How often</label>
+            <select id="p-cycle" onchange="updateDueVisibility()">
+              <option value="daily">Every day</option>
+              <option value="weekly">Once a week</option>
+              <option value="oneoff">One-off</option>
+            </select>
+          </div>
+          <div class="field hidden" id="p-due-wrap">
+            <label>Due by (optional)</label>
+            <input id="p-due" type="datetime-local">
+          </div>
+          <div class="field"><label>Points</label><input id="p-points" type="number" value="5" min="1"></div>
+          <button class="btn" onclick="parentAddTask()">Allocate task</button>
         </div>
-      </div>
-      <div class="field"><label>Who</label><select id="p-kid"></select></div>
-      <div class="field"><label>How often</label>
-        <select id="p-cycle" onchange="updateDueVisibility()">
-          <option value="daily">Every day</option>
-          <option value="weekly">Once a week</option>
-          <option value="oneoff">One-off</option>
-        </select>
-      </div>
-      <div class="field hidden" id="p-due-wrap">
-        <label>Due by (optional)</label>
-        <input id="p-due" type="datetime-local">
-      </div>
-      <div class="field"><label>Points</label><input id="p-points" type="number" value="5" min="1"></div>
-      <button class="btn" onclick="parentAddTask()">Allocate task</button>
+      </section>
+
+      <section class="parent-section">
+        <h2 class="parent-section-title">Current tasks</h2>
+        <div id="p-tasks"></div>
+      </section>
     </div>
 
-    <h2>📋 Current tasks</h2>
-    <div id="p-tasks"></div>
+    <div id="p-tab-rewards" class="parent-panel hidden">
+      <section class="parent-section">
+        <h2 class="parent-section-title">Add a reward</h2>
+        <div class="card parent-card">
+          <div class="field"><label>Reward</label><input id="p-reward-title" type="text" placeholder="e.g. Movie night" autocomplete="off"></div>
+          <div class="field"><label>Cost in points</label><input id="p-reward-cost" type="number" value="20" min="1"></div>
+          <div class="field">
+            <label class="check-row">
+              <input id="p-reward-approval" type="checkbox" checked>
+              <span>Needs my approval</span>
+            </label>
+          </div>
+          <button class="btn" onclick="parentAddReward()">Add reward</button>
+        </div>
+      </section>
 
-    <h2>⏳ Reward requests</h2>
-    <div id="p-reward-requests"></div>
-
-    <h2>🎁 Rewards</h2>
-    <div class="card">
-      <div class="field"><label>Reward</label><input id="p-reward-title" type="text" placeholder="e.g. Movie night" autocomplete="off"></div>
-      <div class="field"><label>Cost in points</label><input id="p-reward-cost" type="number" value="20" min="1"></div>
-      <div class="field">
-        <label style="display:flex;align-items:center;gap:10px;color:var(--ink);margin-bottom:0">
-          <input id="p-reward-approval" type="checkbox" checked style="width:auto;padding:0;border:none;border-radius:0;accent-color:var(--brand)">
-          Needs my approval
-        </label>
-      </div>
-      <button class="btn" onclick="parentAddReward()">Add reward</button>
-    </div>
-    <div id="p-rewards"></div>
-
-    <h2>🔕 Quiet hours</h2>
-    <div class="card">
-      <div class="field"><label>Current setting</label><div id="p-quiet-hours-status" class="sub">Off</div></div>
-      <div class="field"><label>Start time</label><input id="p-quiet-hours-start" type="time"></div>
-      <div class="field"><label>End time</label><input id="p-quiet-hours-end" type="time"></div>
-      <div class="approve-row">
-        <button class="btn" onclick="parentSaveQuietHours()">Save quiet hours</button>
-        <button class="btn ghost small" onclick="parentClearQuietHours()">Turn off</button>
-      </div>
+      <section class="parent-section">
+        <h2 class="parent-section-title">Rewards</h2>
+        <div id="p-rewards"></div>
+      </section>
     </div>
 
-    <h2>👧 Add a kid</h2>
-    <div class="card">
-      <div class="field"><label>Name</label><input id="p-kid-name" type="text" autocomplete="off"></div>
-      <div class="field"><label>Avatar</label>
-        <select id="p-kid-emoji">
-          <option>🦄</option><option>🐯</option><option>🦖</option><option>🐼</option>
-          <option>🦊</option><option>🐸</option><option>🦁</option><option>🐨</option>
-          <option>🐧</option><option>🦋</option><option>⚽</option><option>🎮</option>
-        </select>
-      </div>
-      <div class="field"><label>PIN (optional, 4 digits)</label><input id="p-kid-pin" type="text" inputmode="numeric" maxlength="4" autocomplete="off"></div>
-      <button class="btn ghost" onclick="parentAddKid()">Add kid</button>
-    </div>
+    <div id="p-tab-settings" class="parent-panel hidden">
+      <section class="parent-section">
+        <h2 class="parent-section-title">Quiet hours</h2>
+        <div class="card parent-card">
+          <div class="field">
+            <label>Current setting</label>
+            <div id="p-quiet-hours-status" class="status-chip">Off</div>
+          </div>
+          <div class="field"><label>Start time</label><input id="p-quiet-hours-start" type="time"></div>
+          <div class="field"><label>End time</label><input id="p-quiet-hours-end" type="time"></div>
+          <div class="approve-row">
+            <button class="btn" onclick="parentSaveQuietHours()">Save quiet hours</button>
+            <button class="btn ghost small" onclick="parentClearQuietHours()">Turn off</button>
+          </div>
+        </div>
+      </section>
 
-  </div>
+      <section class="parent-section">
+        <h2 class="parent-section-title">Add a kid</h2>
+        <div class="card parent-card">
+          <div class="field"><label>Name</label><input id="p-kid-name" type="text" autocomplete="off"></div>
+          <div class="field"><label>Avatar</label>
+            <select id="p-kid-emoji">
+              <option>🦄</option><option>🐯</option><option>🦖</option><option>🐼</option>
+              <option>🦊</option><option>🐸</option><option>🦁</option><option>🐨</option>
+              <option>🐧</option><option>🦋</option><option>⚽</option><option>🎮</option>
+            </select>
+          </div>
+          <div class="field"><label>PIN (optional, 4 digits)</label><input id="p-kid-pin" type="text" inputmode="numeric" maxlength="4" autocomplete="off"></div>
+          <button class="btn ghost" onclick="parentAddKid()">Add kid</button>
+        </div>
+      </section>
+    </div>
+  </main>
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════ -->
@@ -632,8 +898,10 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
     <h3 id="pin-title">Enter PIN</h3>
     <input class="pin-input" id="pin-input" type="password" inputmode="numeric" maxlength="6" autocomplete="off">
     <div class="pin-err" id="pin-err"></div>
-    <button class="btn" onclick="submitPin()">Let's go!</button>
-    <button class="btn ghost" style="margin-top:var(--space-2)" onclick="closePin()">Cancel</button>
+    <div class="modal-actions">
+      <button class="btn" onclick="submitPin()">Let's go!</button>
+      <button class="btn ghost" onclick="closePin()">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -668,6 +936,7 @@ let session = JSON.parse(localStorage.getItem('hero-session') || 'null');
 let pinTarget = null;
 let pushSetupPersonId = null;
 let kidTab = 'home';
+let parentTab = 'approvals';
 
 async function api(payload) {
   const res = await fetch(API_URL, {
@@ -812,6 +1081,26 @@ function switchTab(tab) {
     }
     btn.classList.toggle('active', active);
   });
+}
+
+function syncParentTab(animate) {
+  ['approvals', 'tasks', 'rewards', 'settings'].forEach(function(t) {
+    var panel = document.getElementById('p-tab-' + t);
+    var btn = document.getElementById('p-tabbtn-' + t);
+    var active = t === parentTab;
+    panel.classList.toggle('hidden', !active);
+    if (active && animate) {
+      panel.classList.add('entering');
+      setTimeout(function() { panel.classList.remove('entering'); }, 300);
+    }
+    btn.classList.toggle('active', active);
+  });
+}
+
+function switchParentTab(tab) {
+  if (parentTab === tab) return;
+  parentTab = tab;
+  syncParentTab(true);
 }
 
 function renderWho() {
@@ -993,19 +1282,25 @@ function renderRedemptions(kid) {
 function renderParent(person) {
   document.getElementById('p-hq-title').textContent = '👑 ' + person.name + '\'s HQ';
   var pending = state.completions.filter(function(c) { return c.status === 'pending'; });
+  var pendingRedemptions = (state.redemptions || []).filter(function(r) { return r.status === 'pending'; });
+  var approvalCount = pending.length + pendingRedemptions.length;
+  var approvalBadge = document.getElementById('p-approvals-badge');
+  approvalBadge.textContent = approvalCount;
+  approvalBadge.classList.toggle('hidden', approvalCount === 0);
+
   var el = document.getElementById('p-pending');
   if (pending.length === 0) {
-    el.innerHTML = '<div class="empty"><span class="empty-emoji">✨</span><span class="empty-line1">Nothing waiting — all caught up!</span></div>';
+    el.innerHTML = buildEmptyState('✨', 'Nothing waiting — all caught up! ✨', 'You can pop over to tasks or settings whenever you are ready.');
   } else {
     el.innerHTML = pending.map(function(c) {
       var kid = state.people.find(function(k) { return k.id === c.kidId; }) || { name: '?', emoji: '❓' };
       var isExtra = !c.taskId;
-      return '<div class="card">'
-        + '<div style="display:flex;align-items:center;gap:var(--space-2)">'
-        + '<span style="font-size:var(--text-xl)">' + kid.emoji + '</span>'
-        + '<div style="flex:1">'
-        + '<strong>' + esc(kid.name) + '</strong>: ' + esc(c.title)
-        + (isExtra ? ' <span class="tag extra">kid-added</span>' : '')
+      return '<div class="card parent-card">'
+        + '<div class="parent-summary-row">'
+        + '<span class="parent-kid-mark">' + kid.emoji + '</span>'
+        + '<div class="parent-copy">'
+        + '<strong>' + esc(kid.name) + '</strong>'
+        + '<div>' + esc(c.title) + (isExtra ? ' <span class="tag extra">kid-added</span>' : '') + '</div>'
         + '<div class="sub">' + c.date + (isExtra ? '' : ' · worth ' + c.points + ' pts') + '</div>'
         + '</div>'
         + '</div>'
@@ -1027,33 +1322,40 @@ function renderParent(person) {
   var cycleLabel = { daily: 'daily', weekly: 'weekly', oneoff: 'one-off' };
   var kids = kidsOnly();
   document.getElementById('p-tasks').innerHTML = kids.map(function(k) {
-    var mine  = state.tasks.filter(function(t) { return t.kidId === k.id; });
+    var mine = state.tasks.filter(function(t) { return t.kidId === k.id; });
     var stats = state.stats[k.id] || {};
-    return '<div class="card">'
+    return '<div class="card parent-card">'
+      + '<div class="parent-item-head">'
+      + '<div class="parent-copy">'
       + '<strong>' + k.emoji + ' ' + esc(k.name) + '</strong>'
-      + '<div class="sub" style="margin-top:var(--space-1)">' + (stats.balance || 0) + ' balance · ' + (stats.points || 0) + ' lifetime pts</div>'
-      + (mine.length === 0 ? '<div class="empty" style="padding:var(--space-3) 0 0"><span class="empty-line1">No tasks allocated.</span></div>' : '')
-      + mine.map(function(t) {
-          return '<div style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2) 0;border-bottom:1px solid var(--border)">'
-            + '<div style="flex:1">' + esc(t.title)
-            + '<div class="sub">' + (cycleLabel[t.cycle] || t.cycle) + ' · ' + t.points + ' pts' + (t.dueBy ? ' · due ' + formatDue(t.dueBy) : '') + '</div>'
-            + '</div>'
-            + '<button class="btn red-ghost small" onclick="parentDeleteTask(\'' + t.id + '\')">Remove</button>'
-            + '</div>';
-        }).join('')
+      + '<div class="sub">' + (stats.balance || 0) + ' balance · ' + (stats.points || 0) + ' lifetime pts</div>'
+      + '</div>'
+      + '<span class="parent-badge">' + mine.length + ' task' + (mine.length === 1 ? '' : 's') + '</span>'
+      + '</div>'
+      + (mine.length === 0
+          ? buildEmptyState('🗂️', 'No tasks allocated.', 'Add one above to get this kid moving.')
+          : '<div class="parent-list">' + mine.map(function(t) {
+              return '<div class="parent-list-row">'
+                + '<div class="parent-copy">'
+                + '<span class="parent-list-title">' + esc(t.title) + '</span>'
+                + '<div class="sub">' + (cycleLabel[t.cycle] || t.cycle) + ' · ' + t.points + ' pts' + (t.dueBy ? ' · due ' + formatDue(t.dueBy) : '') + '</div>'
+                + '</div>'
+                + '<button class="btn red-ghost small" onclick="parentDeleteTask(\'' + t.id + '\')">Remove</button>'
+                + '</div>';
+            }).join('') + '</div>')
       + '</div>';
-  }).join('') || '<div class="empty"><span class="empty-line1">Add a kid to start assigning tasks.</span></div>';
+  }).join('') || buildEmptyState('👧', 'Add a kid to start assigning tasks.', 'Once a kid is added, you can assign chores from this tab.');
 
-  var pendingRedemptions = (state.redemptions || []).filter(function(r) { return r.status === 'pending'; });
   document.getElementById('p-reward-requests').innerHTML = pendingRedemptions.length === 0
-    ? '<div class="empty"><span class="empty-emoji">🎁</span><span class="empty-line1">No reward requests right now</span></div>'
+    ? buildEmptyState('🎁', 'No reward requests right now', 'When kids redeem rewards, they will show up here for approval.')
     : pendingRedemptions.map(function(r) {
         var kid = state.people.find(function(k) { return k.id === r.kidId; }) || { name: '?', emoji: '❓' };
-        return '<div class="card">'
-          + '<div style="display:flex;align-items:center;gap:var(--space-2)">'
-          + '<span style="font-size:var(--text-xl)">' + kid.emoji + '</span>'
-          + '<div style="flex:1">'
-          + '<strong>' + esc(kid.name) + '</strong>: ' + esc(r.title)
+        return '<div class="card parent-card">'
+          + '<div class="parent-summary-row">'
+          + '<span class="parent-kid-mark">' + kid.emoji + '</span>'
+          + '<div class="parent-copy">'
+          + '<strong>' + esc(kid.name) + '</strong>'
+          + '<div>' + esc(r.title) + '</div>'
           + '<div class="sub">' + r.cost + ' pts</div>'
           + '</div>'
           + '</div>'
@@ -1066,14 +1368,15 @@ function renderParent(person) {
 
   var rewards = (state.rewards || []).filter(function(r) { return r.active !== false; });
   document.getElementById('p-rewards').innerHTML = rewards.length === 0
-    ? '<div class="empty"><span class="empty-emoji">🎁</span><span class="empty-line1">No rewards yet.</span></div>'
+    ? buildEmptyState('🎁', 'No rewards yet.', 'Add a reward above so kids have something to save for.')
     : rewards.map(function(r) {
-        return '<div class="card">'
-          + '<div style="display:flex;align-items:flex-start;gap:var(--space-3);justify-content:space-between">'
-          + '<div style="flex:1;min-width:0">'
+        return '<div class="card parent-card">'
+          + '<div class="parent-item-head">'
+          + '<div class="parent-copy">'
           + '<strong>' + esc(r.title) + '</strong>'
-          + '<div class="sub" style="margin-top:var(--space-1)">' + r.cost + ' pts · ' + (r.needsApproval ? 'needs approval' : 'auto-approved') + '</div>'
+          + '<div class="sub">' + r.cost + ' pts · ' + (r.needsApproval ? 'needs approval' : 'auto-approved') + '</div>'
           + '</div>'
+          + '<span class="parent-badge">' + (r.needsApproval ? 'Manual' : 'Auto') + '</span>'
           + '</div>'
           + '<div class="approve-row">'
           + '<button class="btn ghost small" onclick="parentEditReward(\'' + r.id + '\')">Edit</button>'
@@ -1087,7 +1390,9 @@ function renderParent(person) {
     ? quietHours.start + ' to ' + quietHours.end
     : 'Off';
   document.getElementById('p-quiet-hours-start').value = quietHours ? quietHours.start : '';
-  document.getElementById('p-quiet-hours-end').value   = quietHours ? quietHours.end   : '';
+  document.getElementById('p-quiet-hours-end').value = quietHours ? quietHours.end : '';
+
+  syncParentTab(false);
 }
 
 function esc(s) {
@@ -1231,7 +1536,6 @@ async function parentApprove(completionId, isExtra) {
     points = prompt('How many points is this worth?', '5');
     if (points === null) return;
   }
-  celebrate();
   await api({ action: 'approve', parentId: session.personId, parentPin: session.pin, completionId, points });
 }
 
@@ -1341,7 +1645,6 @@ async function parentClearQuietHours() {
 }
 
 async function parentApproveRedemption(redemptionId) {
-  celebrate();
   var result = await api({ action: 'approveRedemption', parentId: session.personId, parentPin: session.pin, redemptionId });
   if (toastApiError(result)) return;
   toast('Reward approved! 🎉');

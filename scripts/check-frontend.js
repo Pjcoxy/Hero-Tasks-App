@@ -23,6 +23,12 @@ const closes = (html.match(/<\/script>/g) || []).length;
 check(opens === closes, `script tags balanced (${opens} open, ${closes} close)`);
 check(opens > 0, 'at least one inline script block found');
 
+const parentTabButtons = html.match(/id="p-tabbtn-(approvals|tasks|rewards|settings)"/g) || [];
+check(parentTabButtons.length === 4, `parent HQ exposes 4 tab buttons (${parentTabButtons.length} found)`);
+check(/let parentTab = 'approvals';/.test(html), 'parent tab state defaults to approvals');
+check(/function switchParentTab\(tab\)/.test(html), 'parent tab switcher exists');
+check(/id="p-approvals-badge"/.test(html), 'approvals badge exists');
+
 // Syntax-check each inline script body.
 const bodies = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
 bodies.forEach((body, i) => {
