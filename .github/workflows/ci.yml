@@ -83,3 +83,68 @@ jobs:
                   print(f"BROKEN {f}\n{e}")
           sys.exit(1 if bad else 0)
           EOF
+
+  smoke:
+    # Deliberately a SEPARATE job, not more steps on 'test'.
+    #
+    # auto-merge.yml gates on a check run named exactly 'test', so this one does
+    # not block a merge yet. That is on purpose: the pipeline is unattended, and
+    # a flaky browser test would bounce Copilot pull requests back for no reason.
+    # It proves itself here first. Once it has a run of green weeks, add 'smoke'
+    # to the gate in auto-merge.yml - until then it reports rather than gates,
+    # which is the same weak position ci.yml itself was in before #63, and worth
+    # not leaving indefinitely.
+    if: >-
+      github.event_name != 'pull_request_target'
+      || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install API dependencies
+        working-directory: api
+        run: npm install --no-audit --no-fund
+
+      - name: Install Playwright
+        working-directory: tests/smoke
+        # The browser itself is already on the runner image - this installs the
+        # test runner only. PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD stops the
+        # postinstall hook fetching one on every run.
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: npm install --no-audit --no-fund
+
+      - name: Locate the preinstalled Chromium
+        id: chromium
+        # Playwright pins an exact browser build per release, so the path moves
+        # when either the image or the package updates. Find it rather than
+        # hardcode it, and say so plainly if it is missing instead of silently
+        # falling back to a download.
+        run: |
+          BIN=$(find "${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}" \
+                  -maxdepth 3 -type f -name chrome 2>/dev/null | head -1)
+          if [ -z "$BIN" ]; then
+            echo "::error::No preinstalled Chromium found under ${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}"
+            exit 1
+          fi
+          echo "Using $BIN"
+          echo "path=$BIN" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the running app
+        env:
+          SMOKE_CHROMIUM: ${{ steps.chromium.outputs.path }}
+        run: npx --prefix tests/smoke playwright test -c tests/smoke/playwright.config.js
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-traces
+          path: tests/smoke/test-results/
+          retention-days: 7
