@@ -105,6 +105,11 @@ async function main() {
     updateQuietHours,
     sendDueReminders,
   } = require('./src/functions/hero.js');
+  const {
+    extractVoiceIntent,
+    setAnthropicClientFactory,
+    resetAnthropicClientFactory,
+  } = require('./src/lib/llm.js');
   const { sendPush } = require('./src/lib/push.js');
 
   const chores = mockContainer('chores');
@@ -788,10 +793,127 @@ async function main() {
   }
   console.log('✓ getState().redemptions has correct shape and is sorted newest first');
 
+  process.env.LLM_API_KEY = 'test-llm-key';
+  const llmCalls = [];
+  setAnthropicClientFactory((apiKey) => {
+    llmCalls.push({ apiKey });
+    return {
+      messages: {
+        create: async (payload) => {
+          llmCalls.push(payload);
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                intent: {
+                  what: 'Remind Ollie to feed the dog',
+                  when: 'after school',
+                  who: 'Ollie',
+                },
+                confidence: {
+                  what: 0.93,
+                  when: 0.88,
+                  who: 0.94,
+                },
+              }),
+            }],
+          };
+        },
+      },
+    };
+  });
+  let result = await ROUTES.validateVoiceNote({
+    personId: 'toby',
+    pin: '1234',
+    transcript: 'tell Ollie to feed the dog after school',
+  });
+  assert.deepStrictEqual(result, {
+    ok: true,
+    available: true,
+    intent: {
+      what: 'Remind Ollie to feed the dog',
+      when: 'after school',
+      who: 'ollie',
+    },
+    confidence: {
+      what: 0.93,
+      when: 0.88,
+      who: 0.94,
+    },
+    needsConfirmation: false,
+  });
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(result, 'people'), false, 'voice validation must not return app state');
+  assert.strictEqual(llmCalls[0].apiKey, 'test-llm-key', 'voice validation should build the Anthropic client with LLM_API_KEY');
+  assert.strictEqual(llmCalls[1].model, 'claude-haiku-4-5', 'voice validation should use the low-cost extraction model');
+  assert.ok(
+    llmCalls[1].messages[0].content.includes('toby: Toby (requesting kid)'),
+    'voice validation prompt should identify the requesting kid'
+  );
+  console.log('✓ validateVoiceNote returns a confident structured suggestion without app state');
+
+  let missingKeyFactoryCalled = false;
+  process.env.LLM_API_KEY = '';
+  setAnthropicClientFactory(() => {
+    missingKeyFactoryCalled = true;
+    return {
+      messages: {
+        create: async () => ({ content: [] }),
+      },
+    };
+  });
+  result = await ROUTES.validateVoiceNote({
+    personId: 'toby',
+    pin: '1234',
+    transcript: 'feed the dog tomorrow',
+  });
+  assert.deepStrictEqual(result, {
+    ok: true,
+    available: false,
+    intent: {
+      what: 'feed the dog tomorrow',
+      when: null,
+      who: null,
+    },
+    confidence: {
+      what: 0,
+      when: 0,
+      who: 0,
+    },
+    needsConfirmation: true,
+  });
+  assert.strictEqual(missingKeyFactoryCalled, false, 'missing LLM_API_KEY should skip the network client entirely');
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(result, 'people'), false, 'missing-key fallback must not return app state');
+  console.log('✓ validateVoiceNote degrades cleanly when LLM_API_KEY is missing');
+
+  process.env.LLM_API_KEY = 'test-llm-key';
+  setAnthropicClientFactory(() => ({
+    messages: {
+      create: async () => ({
+        content: [{ type: 'text', text: 'definitely not json' }],
+      }),
+    },
+  }));
+  result = await extractVoiceIntent('feed the dog tomorrow', [{ id: 'toby', name: 'Toby', isRequester: true }]);
+  assert.deepStrictEqual(result, {
+    available: true,
+    intent: {
+      what: 'feed the dog tomorrow',
+      when: null,
+      who: null,
+    },
+    confidence: {
+      what: 0,
+      when: 0,
+      who: 0,
+    },
+  });
+  resetAnthropicClientFactory();
+  console.log('✓ extractVoiceIntent tolerates malformed model output without throwing');
+
   // ---- Quiet hours settings tests ----
   const households = mockContainer('households');
 
-  let result = await updateQuietHours({
+  result = await updateQuietHours({
     parentId: 'peter',
     parentPin: '1234',
     start: '21:30',
@@ -873,6 +995,55 @@ async function main() {
     'cross-kid completeTask should be rejected without writing a new completion'
   );
   console.log('✓ completeTask rejects acting as another kid and writes nothing');
+
+  // ---- saveVoiceReminder tests ----
+  const planningItems = mockContainer('planningItems');
+
+  // Blank title should be rejected
+  const blankTitleResult = await ROUTES.saveVoiceReminder({
+    personId: 'toby',
+    pin: '1234',
+    kidId: 'toby',
+    title: '   ',
+    when: null,
+    transcript: '',
+  });
+  assert.deepStrictEqual(blankTitleResult, { ok: false, error: 'title is required' });
+  const afterBlank = (await planningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
+  assert.strictEqual(afterBlank.length, 0, 'blank title should not write a planningItem');
+  console.log('✓ saveVoiceReminder rejects blank title without writing');
+
+  // Valid save — kid saves a reminder for themselves
+  const stateAfterSave = await ROUTES.saveVoiceReminder({
+    personId: 'toby',
+    pin: '1234',
+    kidId: 'toby',
+    title: 'Take out the bins',
+    when: '2026-09-01T09:00:00.000Z',
+    transcript: 'remind me to take out the bins tomorrow morning',
+  });
+  assert.strictEqual(stateAfterSave.ok, true, 'saveVoiceReminder should return getState() with ok: true');
+  const savedItems = (await planningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
+  assert.strictEqual(savedItems.length, 1, 'one planningItem should be created');
+  const saved = savedItems[0];
+  assert.strictEqual(saved.kidId, 'toby', 'kidId should match');
+  assert.strictEqual(saved.title, 'Take out the bins', 'title should match');
+  assert.strictEqual(saved.source, 'voice', 'source should be voice');
+  assert.strictEqual(saved.type, 'reminder', 'type should be reminder');
+  assert.strictEqual(saved.status, 'confirmed', 'status should be confirmed');
+  assert.strictEqual(saved.when, '2026-09-01T09:00:00.000Z', 'when should match');
+  assert.strictEqual(saved.transcript, 'remind me to take out the bins tomorrow morning', 'transcript should be stored');
+  assert.strictEqual(saved.householdId, HOUSEHOLD_ID, 'householdId should match');
+  console.log('✓ saveVoiceReminder creates planningItem with correct shape');
+
+  // Cross-kid attempt: ollie cannot save a reminder for toby
+  await assert.rejects(
+    () => ROUTES.saveVoiceReminder({ personId: 'ollie', pin: '1234', kidId: 'toby', title: 'Sneaky reminder' }),
+    (err) => err && err.status === 401
+  );
+  const afterCrossKid = (await planningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
+  assert.strictEqual(afterCrossKid.length, 1, 'cross-kid save should be rejected without writing');
+  console.log('✓ saveVoiceReminder rejects cross-kid save');
 
   console.log('\nALL LOGIC TESTS PASSED');
 }

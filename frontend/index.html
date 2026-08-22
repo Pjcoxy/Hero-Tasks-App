@@ -190,7 +190,31 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   flex-shrink: 0;
   z-index: 10;
 }
-.kid-header-left { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; }
+.kid-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  /* A button, but it should read as the kid's name badge rather than as a
+     control - the swap glyph is the only affordance until it is pressed. */
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  min-height: 44px;
+  touch-action: manipulation;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.kid-header-left:active { transform: scale(0.97); }
+.switch-hint {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  flex-shrink: 0;
+}
 .kid-avatar-wrap {
   width: 2.5rem; height: 2.5rem;
   min-width: 2.5rem;
@@ -791,10 +815,12 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 <div id="screen-kid" class="screen hidden">
 
   <header class="kid-header" id="kid-header">
-    <div class="kid-header-left">
+    <button class="kid-header-left" onclick="logout()"
+            aria-label="Switch to a different person">
       <div class="kid-avatar-wrap"><span id="k-avatar"></span></div>
       <span class="kid-header-name" id="k-name"></span>
-    </div>
+      <span class="switch-hint" aria-hidden="true">⇄</span>
+    </button>
     <div class="points-chip">
       <span>⭐</span>
       <span id="k-points" style="font-variant-numeric:tabular-nums"></span>
