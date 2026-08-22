@@ -155,6 +155,25 @@ async function requireParent(parentId, parentPin) {
   }
 }
 
+async function requireSelf(personId, pin, expectedId) {
+  if (!personId || !expectedId) {
+    throw Object.assign(new Error('Missing person credentials'), { status: 401 });
+  }
+  const { resource: person } = await container('people')
+    .item(personId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!person) {
+    throw Object.assign(new Error('Person not found'), { status: 401 });
+  }
+  if (String(person.pin) !== '' && String(person.pin) !== String(pin || '')) {
+    throw Object.assign(new Error('Wrong PIN'), { status: 401 });
+  }
+  if (String(personId) !== String(expectedId)) {
+    throw Object.assign(new Error('Not allowed'), { status: 401 });
+  }
+}
+
 async function login(req) {
   const { resource: person } = await container('people')
     .item(req.personId, HOUSEHOLD_ID)
@@ -169,6 +188,7 @@ async function login(req) {
 
 async function savePushSubscription(req) {
   const personId = String(req.personId || '').trim();
+  await requireSelf(personId, req.pin, personId);
   const subscription = req.subscription || {};
   const endpoint = String(subscription.endpoint || '').trim();
   const p256dh = String(subscription.keys && subscription.keys.p256dh || '').trim();
@@ -177,12 +197,6 @@ async function savePushSubscription(req) {
   if (!personId || !endpoint || !p256dh || !auth) {
     return { ok: false, error: 'Invalid push subscription' };
   }
-
-  const { resource: person } = await container('people')
-    .item(personId, HOUSEHOLD_ID)
-    .read()
-    .catch(() => ({ resource: null }));
-  if (!person) return { ok: false, error: 'Person not found' };
 
   const existing = (await queryHousehold('pushSubscriptions')).find(
     (doc) => doc.personId === personId && doc.endpoint === endpoint
@@ -200,6 +214,7 @@ async function savePushSubscription(req) {
 
 async function removePushSubscription(req) {
   const personId = String(req.personId || '').trim();
+  await requireSelf(personId, req.pin, personId);
   const endpoint = String(req.endpoint || '').trim();
   if (!personId || !endpoint) return { ok: false, error: 'personId and endpoint are required' };
 
@@ -254,6 +269,7 @@ async function completeTask(req) {
   const chores = await queryHousehold('chores');
   const chore = chores.find((t) => t.id === req.taskId);
   if (!chore) return { ok: false, error: 'Task not found' };
+  await requireSelf(req.personId, req.pin, chore.kidId);
   await container('completions').items.create({
     id: randomUUID(),
     householdId: HOUSEHOLD_ID,
@@ -289,12 +305,14 @@ async function uncomplete(req) {
     .read()
     .catch(() => ({ resource: null }));
   if (completion && completion.status === 'pending') {
+    await requireSelf(req.personId, req.pin, completion.kidId);
     await completions.item(req.completionId, HOUSEHOLD_ID).delete();
   }
   return getState();
 }
 
 async function addExtra(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
   await container('completions').items.create({
     id: randomUUID(),
     householdId: HOUSEHOLD_ID,
@@ -438,6 +456,7 @@ async function updateQuietHours(req) {
 }
 
 async function redeemReward(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
   const rewards = container('rewards');
   const { resource: reward } = await rewards
     .item(req.rewardId, HOUSEHOLD_ID)
@@ -516,6 +535,7 @@ async function rejectRedemption(req) {
 }
 
 async function cancelRedemption(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
   const rewards = container('rewards');
   const { resource: redemption } = await rewards
     .item(req.redemptionId, HOUSEHOLD_ID)
