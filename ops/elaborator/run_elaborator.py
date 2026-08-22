@@ -11,7 +11,7 @@ produced by setup_elaborator.py), with:
 
 Required environment variables:
   ANTHROPIC_API_KEY
-  ELABORATOR_GITHUB_TOKEN
+  HEROTASK_GITHUB_TOKEN
 """
 import json
 import os
@@ -41,7 +41,7 @@ def main():
         cfg = json.load(f)
 
     client = anthropic.Anthropic()
-    gh_token = os.environ["ELABORATOR_GITHUB_TOKEN"]
+    gh_token = os.environ["HEROTASK_GITHUB_TOKEN"]
 
     session = client.beta.sessions.create(
         agent={"type": "agent", "id": cfg["agent_id"], "version": cfg["agent_version"]},

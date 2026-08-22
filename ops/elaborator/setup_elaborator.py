@@ -11,7 +11,7 @@ agent definition is updated in place (creating a new immutable version).
 
 Required environment variables:
   ANTHROPIC_API_KEY         - Anthropic API key (platform.claude.com)
-  ELABORATOR_GITHUB_TOKEN   - fine-grained GitHub PAT for Pjcoxy/Hero-Tasks-App
+  HEROTASK_GITHUB_TOKEN     - fine-grained GitHub PAT for Pjcoxy/Hero-Tasks-App
                               (Contents: read, Issues: read+write, Metadata: read)
 """
 import json
@@ -99,9 +99,9 @@ def main():
         print(f"Created environment {env.id}")
 
     if "vault_id" not in cfg:
-        gh_token = os.environ.get("ELABORATOR_GITHUB_TOKEN")
+        gh_token = os.environ.get("HEROTASK_GITHUB_TOKEN")
         if not gh_token:
-            sys.exit("ELABORATOR_GITHUB_TOKEN is not set - cannot create the vault credential.")
+            sys.exit("HEROTASK_GITHUB_TOKEN is not set - cannot create the vault credential.")
         vault = client.beta.vaults.create(name="herotasks-agents")
         cfg["vault_id"] = vault.id
         client.beta.vaults.credentials.create(

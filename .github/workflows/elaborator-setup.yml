@@ -1,7 +1,7 @@
 name: Elaborator - one-time setup
 
 # Run this manually (Actions tab -> "Elaborator - one-time setup" -> Run workflow)
-# after adding the ANTHROPIC_API_KEY and ELABORATOR_GITHUB_TOKEN repo secrets.
+# after adding the ANTHROPIC_API_KEY and HEROTASK_GITHUB_TOKEN repo secrets.
 # It creates the Anthropic-hosted agent/environment/vault and commits their IDs
 # back to ops/elaborator/agent_config.json. Safe to re-run (updates the agent
 # definition in place).
@@ -31,7 +31,7 @@ jobs:
       - name: Create/update the Elaborator agent
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ELABORATOR_GITHUB_TOKEN: ${{ secrets.ELABORATOR_GITHUB_TOKEN }}
+          HEROTASK_GITHUB_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
         run: python ops/elaborator/setup_elaborator.py
 
       - name: Commit agent_config.json

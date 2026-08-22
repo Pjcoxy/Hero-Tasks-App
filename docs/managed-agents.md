@@ -65,7 +65,7 @@ scheduled sweep should be created with `timezone: "Australia/Perth"`.
 3. **Add both as repo secrets** — Hero-Tasks-App → Settings → Secrets and
    variables → Actions → New repository secret:
    - `ANTHROPIC_API_KEY`
-   - `ELABORATOR_GITHUB_TOKEN`
+   - `HEROTASK_GITHUB_TOKEN`
 4. **Run setup** — Actions tab → *Elaborator — one-time setup* → Run
    workflow. It creates the agent/environment/vault and commits their IDs to
    `ops/elaborator/agent_config.json`.
