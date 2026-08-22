@@ -382,6 +382,14 @@ In-flight is now derived from open Copilot pull requests that name the issue
 such pull request is a **stale assignment**: the queue clears the assignee,
 warns, and builds it.
 
+**With a grace period, because "assigned" and "building" are not simultaneous.**
+Copilot opens its draft pull request a minute or two after being assigned, and
+in that window an issue is indistinguishable from an abandoned one. Un-assigning
+there would start a second Copilot session on the same issue and produce two
+conflicting branches — the very thing the in-flight cap exists to prevent. An
+assignment only counts as stale after 20 minutes, read from the issue's last
+`assigned` event.
+
 The rule underneath both: **a queue must measure the thing it actually cares
 about.** Counting assignments instead of open work, like counting workflow runs
 instead of issues elaborated, produces a queue that looks healthy while nothing
