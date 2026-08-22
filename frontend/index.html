@@ -1008,6 +1008,10 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   <main class="parent-main">
     <div id="p-tab-approvals" class="parent-panel">
       <section class="parent-section">
+        <h2 class="parent-section-title">Today &amp; this week</h2>
+        <div id="p-approvals-glance"></div>
+      </section>
+      <section class="parent-section">
         <h2 class="parent-section-title">Awaiting your approval</h2>
         <div id="p-pending"></div>
       </section>
@@ -1268,6 +1272,10 @@ let parentTab = 'approvals';
 let parentCalendarView = 'week';
 let parentCalendarItems = [];
 let parentCalendarLoading = false;
+let parentApprovalsGlanceItems = [];
+let parentApprovalsGlanceLoading = false;
+let parentApprovalsGlanceLoaded = false;
+let parentApprovalsGlanceStateRef = null;
 
 async function api(payload) {
   const res = await fetch(API_URL, {
@@ -1649,20 +1657,21 @@ function updatePlanningTypeVisibility() {
   document.getElementById('p-plan-end-wrap').classList.toggle('hidden', !isEvent);
 }
 
-function parentCalendarBounds() {
+function parentCalendarBounds(viewOverride) {
+  var view = viewOverride || parentCalendarView;
   var now = new Date();
   now.setHours(0, 0, 0, 0);
   var start = new Date(now);
   var end = new Date(now);
   var label = '';
 
-  if (parentCalendarView === 'week') {
+  if (view === 'week') {
     start = startOfWeek(now);
     end = addDays(start, 6);
     label = start.toLocaleDateString([], { month: 'short', day: 'numeric' })
       + ' – '
       + end.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-  } else if (parentCalendarView === 'month') {
+  } else if (view === 'month') {
     start = new Date(now.getFullYear(), now.getMonth(), 1);
     end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     label = start.toLocaleDateString([], { month: 'long', year: 'numeric' });
@@ -1705,6 +1714,87 @@ function parentCalendarWho(item) {
   if (item.personId === null || item.personId === undefined) return 'Whole family';
   var person = state.people.find(function(p) { return p.id === item.personId; });
   return person ? person.emoji + ' ' + person.name : 'Assigned kid';
+}
+
+function parentCalendarSkeletonHtml() {
+  return '<div class="parent-calendar-loading">'
+    + '<div class="parent-calendar-skel"><div class="parent-calendar-skel-line short"></div><div class="parent-calendar-skel-line"></div><div class="parent-calendar-skel-line short"></div></div>'
+    + '<div class="parent-calendar-skel"><div class="parent-calendar-skel-line short"></div><div class="parent-calendar-skel-line"></div><div class="parent-calendar-skel-line short"></div></div>'
+    + '</div>';
+}
+
+function parentCalendarSortWhen(a, b) {
+  var aWhen = a.startAt || a.occurrenceAt || '';
+  var bWhen = b.startAt || b.occurrenceAt || '';
+  return aWhen < bWhen ? -1 : aWhen > bWhen ? 1 : 0;
+}
+
+function parentCalendarIsComplete(item) {
+  if (!item || item.kind !== 'chore' || !item.taskId) return false;
+  var live = (state.completions || []).filter(function(c) {
+    return c.taskId === item.taskId && (c.status === 'pending' || c.status === 'approved');
+  });
+  if (live.length === 0) return false;
+  if (item.cycle === 'daily') {
+    var dayKey = parentCalendarDayKey(item);
+    return !!dayKey && live.some(function(c) { return c.date === dayKey; });
+  }
+  if (item.cycle === 'weekly') {
+    var weekKey = parentCalendarDayKey(item);
+    return !!weekKey && live.some(function(c) { return isoWeek(c.date) === isoWeek(weekKey); });
+  }
+  return true;
+}
+
+function renderParentGlanceRows(items, emptyText) {
+  if (!items.length) return '<div class="sub">' + esc(emptyText) + '</div>';
+  return '<div class="parent-list">' + items.map(function(item) {
+    var notes = item.notes ? '<div class="sub">📝 ' + esc(item.notes) + '</div>' : '';
+    return '<div class="parent-list-row">'
+      + '<div class="parent-copy">'
+      + '<span class="parent-list-title">' + esc(item.title || 'Untitled') + '</span>'
+      + '<div class="sub"><span class="tag parent-calendar-kind">' + esc(item.kind || 'item') + '</span>'
+      + ' · ' + esc(parentCalendarItemTime(item))
+      + ' · ' + esc(parentCalendarWho(item))
+      + (item.kind === 'chore' && item.points ? ' · ' + item.points + ' pts' : '')
+      + '</div>'
+      + notes
+      + '</div>'
+      + '</div>';
+  }).join('') + '</div>';
+}
+
+function renderParentApprovalsGlance() {
+  var el = document.getElementById('p-approvals-glance');
+  if (!el) return;
+  if (parentApprovalsGlanceLoading || !parentApprovalsGlanceLoaded) {
+    el.innerHTML = parentCalendarSkeletonHtml();
+    return;
+  }
+  var todayKey = todayStr();
+  var undecided = (parentApprovalsGlanceItems || []).filter(function(item) {
+    return item.kind !== 'chore' || !parentCalendarIsComplete(item);
+  });
+  var todayItems = undecided
+    .filter(function(item) { return parentCalendarDayKey(item) === todayKey; })
+    .sort(parentCalendarSortWhen);
+  var weekItems = undecided
+    .filter(function(item) { return parentCalendarDayKey(item) !== todayKey; })
+    .sort(parentCalendarSortWhen);
+  var nothingScheduled = todayItems.length === 0 && weekItems.length === 0;
+  el.innerHTML = (nothingScheduled
+      ? buildEmptyState('🗓️', 'Nothing scheduled today or this week.', 'You’re all caught up for now.')
+      : '<div class="card parent-card">'
+        + '<h3 class="parent-section-title">Today</h3>'
+        + renderParentGlanceRows(todayItems, 'Nothing today.')
+        + '</div>'
+        + '<div class="card parent-card">'
+        + '<h3 class="parent-section-title">This week</h3>'
+        + renderParentGlanceRows(weekItems, 'Nothing else this week.')
+        + '</div>')
+    + '<div class="parent-actions">'
+    + '<button class="btn ghost small" onclick="switchParentTab(\'calendar\')">View calendar</button>'
+    + '</div>';
 }
 
 function renderParentCalendarChecklists(item) {
@@ -1755,10 +1845,7 @@ function renderParentCalendar() {
   range.textContent = bounds.label;
 
   if (parentCalendarLoading) {
-    list.innerHTML = '<div class="parent-calendar-loading">'
-      + '<div class="parent-calendar-skel"><div class="parent-calendar-skel-line short"></div><div class="parent-calendar-skel-line"></div><div class="parent-calendar-skel-line short"></div></div>'
-      + '<div class="parent-calendar-skel"><div class="parent-calendar-skel-line short"></div><div class="parent-calendar-skel-line"></div><div class="parent-calendar-skel-line short"></div></div>'
-      + '</div>';
+    list.innerHTML = parentCalendarSkeletonHtml();
     return;
   }
 
@@ -1776,11 +1863,7 @@ function renderParentCalendar() {
   }
 
   list.innerHTML = days.map(function(dayKey) {
-    var dayItems = byDay[dayKey].slice().sort(function(a, b) {
-      var aWhen = a.startAt || a.occurrenceAt || '';
-      var bWhen = b.startAt || b.occurrenceAt || '';
-      return aWhen < bWhen ? -1 : aWhen > bWhen ? 1 : 0;
-    });
+    var dayItems = byDay[dayKey].slice().sort(parentCalendarSortWhen);
     var heading = new Date(dayKey + 'T12:00:00').toLocaleDateString([], {
       weekday: 'long',
       month: 'short',
@@ -1853,6 +1936,50 @@ async function loadParentCalendar() {
   parentCalendarItems = Array.isArray(result && result.items) ? result.items : [];
   parentCalendarLoading = false;
   renderParentCalendar();
+}
+
+function parentApprovalsGlanceBounds() {
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  var week = parentCalendarBounds('week');
+  var spanMs = week.end.getTime() - week.start.getTime();
+  var end = new Date(today.getTime() + spanMs);
+  end.setHours(23, 59, 59, 999);
+  return { start: today, end: end };
+}
+
+async function loadParentApprovalsGlance() {
+  if (!session || session.role !== 'parent') return;
+  if (parentApprovalsGlanceLoading) return;
+  parentApprovalsGlanceLoading = true;
+  renderParentApprovalsGlance();
+  var bounds = parentApprovalsGlanceBounds();
+  var result;
+  try {
+    result = await api({
+      action: 'calendar',
+      parentId: session.personId,
+      parentPin: session.pin,
+      start: bounds.start.toISOString(),
+      end: bounds.end.toISOString(),
+    });
+  } catch (e) {
+    parentApprovalsGlanceLoading = false;
+    parentApprovalsGlanceLoaded = true;
+    parentApprovalsGlanceItems = [];
+    renderParentApprovalsGlance();
+    return;
+  }
+  if (result && result.ok === false) {
+    parentApprovalsGlanceLoading = false;
+    parentApprovalsGlanceLoaded = true;
+    renderParentApprovalsGlance();
+    return;
+  }
+  parentApprovalsGlanceItems = Array.isArray(result && result.items) ? result.items : [];
+  parentApprovalsGlanceLoading = false;
+  parentApprovalsGlanceLoaded = true;
+  renderParentApprovalsGlance();
 }
 
 function formatDue(iso) {
@@ -1994,6 +2121,13 @@ function renderParent(person) {
   var approvalBadge = document.getElementById('p-approvals-badge');
   approvalBadge.textContent = approvalCount;
   approvalBadge.classList.toggle('hidden', approvalCount === 0);
+
+  if (parentApprovalsGlanceStateRef !== state) {
+    parentApprovalsGlanceStateRef = state;
+    parentApprovalsGlanceLoaded = false;
+    loadParentApprovalsGlance();
+  }
+  renderParentApprovalsGlance();
 
   var el = document.getElementById('p-pending');
   if (pending.length === 0) {

@@ -34,6 +34,15 @@ check(/action:\s*'addPlanningItem'/.test(html), 'parent calendar form calls addP
 check(/action:\s*'updatePlanningItem'/.test(html), 'parent calendar edit calls updatePlanningItem');
 check(/action:\s*'deletePlanningItem'/.test(html), 'parent calendar delete calls deletePlanningItem');
 check(/id="p-approvals-badge"/.test(html), 'approvals badge exists');
+check(/id="p-approvals-glance"/.test(html), 'approvals tab includes at-a-glance container');
+check(/Today &amp; this week/.test(html), 'approvals tab includes Today & this week title');
+const approvalsGlanceIndex = html.indexOf('id="p-approvals-glance"');
+const approvalsPendingIndex = html.indexOf('id="p-pending"');
+check(approvalsGlanceIndex !== -1 && approvalsPendingIndex !== -1 && approvalsGlanceIndex < approvalsPendingIndex, 'at-a-glance section appears before pending approvals list');
+check(/function loadParentApprovalsGlance\(\)/.test(html), 'approvals at-a-glance loader exists');
+check(/action:\s*'calendar'[\s\S]*parentId:\s*session\.personId[\s\S]*parentPin:\s*session\.pin/.test(html), 'approvals at-a-glance reuses calendar action with parent credentials');
+check(/function renderParentApprovalsGlance\(\)/.test(html), 'approvals at-a-glance renderer exists');
+check(/switchParentTab\('calendar'\)|switchParentTab\\\('calendar'\\\)/.test(html), 'approvals at-a-glance includes View calendar action');
 check(/parentEditTask\(\\'/.test(html), 'task rows wire an Edit button');
 const kidTabButtons = html.match(/id="tabbtn-(home|missions|rewards|leaderboard|calendar)"/g) || [];
 check(kidTabButtons.length === 5, `kid nav exposes 5 tab buttons (${kidTabButtons.length} found)`);
