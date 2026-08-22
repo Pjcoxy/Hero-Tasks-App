@@ -358,6 +358,40 @@ bar before merging it, and it cleared that. Adding `smoke` to the gate is the
 next step, and should not be left forever: a test nothing is obliged to pass is
 decoration, which is exactly the position `ci.yml` was in before #63.
 
+### The pipeline enforces the budget Copilot will not
+
+A Claude agent session carries a hard dollar cap - `budget: {type: "limit",
+max_list_cost: ...}` in `ops/agents/runner.py` - and stops when it reaches it.
+The Copilot coding agent has no equivalent. The allowance is the only limit, and
+it is monthly rather than per-task.
+
+That allowance is not a flaw: on 22 August it stopped a runaway and capped the
+loss, which is exactly what a budget is for. But it is a hard stop, and a hard
+stop is a bad first line of defence. Two softer ones now sit underneath it in
+`build-queue.yml`:
+
+- **A daily ceiling** — 8 builds in a rolling 24h. Counted as Copilot pull
+  requests opened, **not** workflow runs; counting runs is what made the
+  elaborate and architect guards self-defeating. This guard already existed as a
+  disabled stub in `build.yml` with a note to restore it "once the backlog is
+  built" — it was restored in the workflow that actually runs, which is not the
+  one it was written in.
+- **Dud-session detection** — a Copilot pull request more than ten minutes old
+  with **zero changed files**. #81 and #156 each spent a session and produced
+  exactly that; #81 then merged empty and auto-closed its issue, so #75 was
+  silently never built. The pull request is closed and the issue marked
+  `needs-human` rather than rebuilt, because a second attempt spends another
+  session on the same outcome. It also unblocks the queue, since a dud otherwise
+  counts as a build in flight forever.
+
+Both fail safe: an unreadable file count is treated as real work, so a bad API
+response can never close a live pull request.
+
+The third source of waste — building something already built (#124) — is not
+mechanically checkable and is fixed at source instead, in the Elaborator's
+audit instruction. That is guidance, not enforcement, and worth remembering as
+the weakest of the three.
+
 ### Three things spend Copilot credits, not one
 
 Worth knowing before wondering where an allowance went. In one day this project
