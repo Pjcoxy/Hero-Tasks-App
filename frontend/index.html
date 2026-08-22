@@ -285,6 +285,24 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   margin-top: calc(-1 * var(--space-5));
   padding: var(--space-5) var(--space-4) 0;
 }
+.kid-home-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+}
+.kid-home-actions .btn {
+  flex: 1 1 12rem;
+}
+.voice-trigger {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
+}
+.voice-trigger.listening {
+  background: var(--danger-wash);
+  color: var(--danger);
+}
 
 /* ─── Tab bar ─────────────────────────────────────────────────────────── */
 .tab-bar {
@@ -416,7 +434,8 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 /* ─── Forms ───────────────────────────────────────────────────────────── */
 .field { margin-bottom: var(--space-3); }
 .field label { display: block; font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--ink-muted); margin-bottom: var(--space-1); }
-.field input, .field select { width: 100%; padding: var(--space-3); font-size: var(--text-base); border: 2px solid var(--border); border-radius: var(--radius-md); font-family: inherit; background: var(--surface); color: var(--ink); }
+.field input, .field select, .field textarea { width: 100%; padding: var(--space-3); font-size: var(--text-base); border: 2px solid var(--border); border-radius: var(--radius-md); font-family: inherit; background: var(--surface); color: var(--ink); }
+.field textarea { resize: vertical; min-height: 6rem; }
 .input-row { display: flex; gap: var(--space-2); }
 .input-row input { flex: 1; }
 .mic-btn { background: var(--brand-wash); color: var(--brand); border-radius: var(--radius-md); width: 48px; min-width: 48px; font-size: 1.3rem; touch-action: manipulation; }
@@ -674,6 +693,55 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .modal h3 { margin-bottom: var(--space-3); font-size: var(--text-lg); font-weight: var(--weight-bold); }
 .pin-input { font-size: var(--text-2xl); text-align: center; letter-spacing: 0.4em; width: 100%; padding: var(--space-3); border: 2px solid var(--border); border-radius: var(--radius-md); font-family: inherit; color: var(--ink); background: var(--surface-sunken); }
 .pin-err { color: var(--danger); font-size: var(--text-sm); min-height: 1.2em; }
+.voice-modal {
+  max-width: 28rem;
+  max-height: calc(100svh - var(--space-7));
+  overflow-y: auto;
+  text-align: left;
+}
+.voice-modal h3 {
+  margin-bottom: 0;
+}
+.voice-status {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+.voice-field {
+  margin-bottom: 0;
+}
+.voice-field.attention {
+  background: var(--warning-wash);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+}
+.voice-field.attention label {
+  color: var(--warning);
+}
+.voice-transcript-box,
+.voice-readonly {
+  width: 100%;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+.voice-transcript-box {
+  white-space: pre-wrap;
+}
+.voice-help {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  margin-top: var(--space-2);
+}
+.voice-when-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.voice-when-choices .choice-pill {
+  background: var(--surface);
+}
 
 /* ─── Confetti canvas ─────────────────────────────────────────────────── */
 #confetti-canvas { position: fixed; inset: 0; pointer-events: none; z-index: 99; }
@@ -752,7 +820,10 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
       <div class="home-content-sheet">
         <h2 class="section-title">📅 Today's Missions</h2>
         <div id="k-daily"></div>
-        <button class="btn ghost" style="margin-top:var(--space-3)" onclick="addExtraPrompt()">➕ I did something extra!</button>
+        <div class="kid-home-actions">
+          <button class="btn ghost" onclick="addExtraPrompt()">➕ I did something extra!</button>
+          <button class="btn voice-trigger" id="k-voice-reminder-btn" onclick="openVoiceReminderFlow()">🎤 Add a voice reminder</button>
+        </div>
         <h2 class="section-title">🕘 Recent activity</h2>
         <div id="k-activity"></div>
       </div>
@@ -957,6 +1028,46 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   </div>
 </div>
 
+<div id="voice-reminder-modal" class="modal-bg hidden" aria-hidden="true">
+  <div class="modal voice-modal">
+    <h3 id="voice-reminder-title">🎤 Add a voice reminder</h3>
+    <div id="voice-reminder-status" class="voice-status hidden"></div>
+    <div class="field voice-field" id="voice-transcript-field">
+      <label for="voice-transcript-input">What did you say?</label>
+      <div id="voice-transcript-display" class="voice-transcript-box hidden"></div>
+      <textarea id="voice-transcript-input" class="hidden" placeholder="Type your reminder here" oninput="updateVoiceReminderTranscript(this.value)"></textarea>
+      <div id="voice-transcript-help" class="voice-help hidden"></div>
+    </div>
+    <div id="voice-reminder-fields" class="hidden">
+      <div class="field voice-field" id="voice-what-field">
+        <label for="voice-what-input">What should I remind you about?</label>
+        <input id="voice-what-input" type="text" autocomplete="off" oninput="updateVoiceReminderWhat(this.value)">
+        <div id="voice-what-help" class="voice-help hidden"></div>
+      </div>
+      <div class="field voice-field" id="voice-when-field">
+        <label for="voice-when-input">When should I remind you?</label>
+        <input id="voice-when-input" type="text" autocomplete="off" oninput="updateVoiceReminderWhen(this.value)">
+        <div id="voice-when-choices" class="voice-when-choices hidden">
+          <button class="choice-pill" id="voice-when-choice-today" type="button" onclick="chooseVoiceReminderWhen('today')">Today</button>
+          <button class="choice-pill" id="voice-when-choice-tomorrow" type="button" onclick="chooseVoiceReminderWhen('tomorrow')">Tomorrow</button>
+          <button class="choice-pill" id="voice-when-choice-weekend" type="button" onclick="chooseVoiceReminderWhen('weekend')">This weekend</button>
+          <button class="choice-pill" id="voice-when-choice-anytime" type="button" onclick="chooseVoiceReminderWhen('anytime')">No specific time</button>
+        </div>
+        <div id="voice-when-help" class="voice-help hidden"></div>
+      </div>
+      <div class="field voice-field" id="voice-who-field">
+        <label>Who is it for?</label>
+        <div id="voice-who-display" class="voice-readonly"></div>
+        <div id="voice-who-help" class="voice-help hidden"></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="voice-reminder-primary" onclick="handleVoiceReminderPrimary()">Check it</button>
+      <button class="btn ghost" id="voice-reminder-secondary" onclick="handleVoiceReminderSecondary()">Maybe later</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="hidden"></div>
 
 <script>
@@ -1053,6 +1164,18 @@ let pinTarget = null;
 let pushSetupPersonId = null;
 let kidTab = 'home';
 let parentTab = 'approvals';
+const VOICE_REMINDER_CONFIRMATION_THRESHOLD = 0.6;
+const VOICE_REMINDER_WHEN_CHOICES = {
+  today: { value: 'Today', label: 'Today' },
+  tomorrow: { value: 'Tomorrow', label: 'Tomorrow' },
+  weekend: { value: 'This weekend', label: 'This weekend' },
+  anytime: { value: '', label: 'No specific time' },
+};
+var kidVoiceRecognition = null;
+var kidVoiceListening = false;
+var kidVoiceTranscript = '';
+var kidVoiceFallbackMessage = '';
+var voiceReminderDraft = null;
 
 async function api(payload) {
   const res = await fetch(API_URL, {
@@ -1247,6 +1370,7 @@ function renderKid(kid) {
   var kidIdx = Math.min(kids.findIndex(function(k) { return k.id === kid.id; }), 3);
   var kidColorVal = 'var(--kid-' + (kidIdx + 1) + ')';
   document.getElementById('screen-kid').style.setProperty('--kid-color', kidColorVal);
+  syncKidVoiceTrigger();
 
   var st = state.stats[kid.id] || { points: 0, balance: 0, streak: 0 };
   var lf = levelFor(st.points);
@@ -1614,6 +1738,7 @@ async function submitPin() {
 
 function saveSession() { localStorage.setItem('hero-session', JSON.stringify(session)); }
 function logout() {
+  closeVoiceReminder();
   session = null;
   pushSetupPersonId = null;
   localStorage.removeItem('hero-session');
@@ -1718,6 +1843,372 @@ async function addExtraPrompt() {
   if (!title || !title.trim()) return;
   toast('Sent to your grown-up! ⏳');
   await api({ action: 'addExtra', kidId: session.personId, personId: session.personId, pin: session.pin, title: title.trim() });
+}
+
+function newVoiceReminderDraft(overrides) {
+  return Object.assign({
+    transcript: '',
+    typedFallback: false,
+    canRetryRecording: false,
+    validated: false,
+    validating: false,
+    available: true,
+    what: '',
+    when: '',
+    suggestedWhoId: session ? session.personId : null,
+    selectedWhenChoice: '',
+    flags: { transcript: false, what: false, when: false, who: false },
+    showWhenChoices: false,
+    status: '',
+  }, overrides || {});
+}
+
+function currentKidPerson() {
+  return state && session && session.role === 'kid'
+    ? state.people.find(function(person) { return person.id === session.personId; })
+    : null;
+}
+
+function voiceReminderWhoLabel(kidId) {
+  var person = state && state.people && state.people.find(function(entry) { return entry.id === kidId; });
+  if (person) return person.emoji + ' ' + person.name;
+  return 'You';
+}
+
+function voiceReminderChoiceKey(value) {
+  var normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return 'anytime';
+  if (normalized === 'today') return 'today';
+  if (normalized === 'tomorrow') return 'tomorrow';
+  if (normalized === 'this weekend') return 'weekend';
+  return '';
+}
+
+function syncKidVoiceTrigger() {
+  var btn = document.getElementById('k-voice-reminder-btn');
+  if (!btn) return;
+  btn.classList.toggle('listening', kidVoiceListening);
+  btn.textContent = kidVoiceListening ? '🎤 Listening…' : '🎤 Add a voice reminder';
+}
+
+function showVoiceReminderModal() {
+  var modal = document.getElementById('voice-reminder-modal');
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeVoiceReminder() {
+  var modal = document.getElementById('voice-reminder-modal');
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
+  voiceReminderDraft = null;
+}
+
+function focusVoiceReminderInput() {
+  var targetId = voiceReminderDraft && voiceReminderDraft.typedFallback
+    ? 'voice-transcript-input'
+    : (voiceReminderDraft && voiceReminderDraft.validated ? 'voice-what-input' : '');
+  if (!targetId) return;
+  setTimeout(function() {
+    var el = document.getElementById(targetId);
+    if (el && !document.getElementById('voice-reminder-modal').classList.contains('hidden')) el.focus();
+  }, 50);
+}
+
+function renderVoiceReminderModal() {
+  if (!voiceReminderDraft) return;
+  var transcriptField = document.getElementById('voice-transcript-field');
+  var whatField = document.getElementById('voice-what-field');
+  var whenField = document.getElementById('voice-when-field');
+  var whoField = document.getElementById('voice-who-field');
+  var status = document.getElementById('voice-reminder-status');
+  var transcriptInput = document.getElementById('voice-transcript-input');
+  var transcriptDisplay = document.getElementById('voice-transcript-display');
+  var transcriptHelp = document.getElementById('voice-transcript-help');
+  var fields = document.getElementById('voice-reminder-fields');
+  var whatInput = document.getElementById('voice-what-input');
+  var whenInput = document.getElementById('voice-when-input');
+  var whoDisplay = document.getElementById('voice-who-display');
+  var primary = document.getElementById('voice-reminder-primary');
+  var secondary = document.getElementById('voice-reminder-secondary');
+  var whenChoices = document.getElementById('voice-when-choices');
+  var whatHelp = document.getElementById('voice-what-help');
+  var whenHelp = document.getElementById('voice-when-help');
+  var whoHelp = document.getElementById('voice-who-help');
+
+  transcriptField.classList.toggle('attention', !!voiceReminderDraft.flags.transcript);
+  whatField.classList.toggle('attention', !!voiceReminderDraft.flags.what);
+  whenField.classList.toggle('attention', !!voiceReminderDraft.flags.when);
+  whoField.classList.toggle('attention', !!voiceReminderDraft.flags.who);
+
+  status.textContent = voiceReminderDraft.status || '';
+  status.classList.toggle('hidden', !voiceReminderDraft.status);
+
+  transcriptInput.classList.toggle('hidden', !voiceReminderDraft.typedFallback);
+  transcriptDisplay.classList.toggle('hidden', !!voiceReminderDraft.typedFallback);
+  transcriptInput.value = voiceReminderDraft.transcript || '';
+  transcriptDisplay.textContent = voiceReminderDraft.transcript || 'Nothing there yet.';
+  transcriptHelp.textContent = voiceReminderDraft.typedFallback
+    ? 'Type it here and I’ll help check the details.'
+    : 'Here’s what I heard.';
+  transcriptHelp.classList.remove('hidden');
+
+  fields.classList.toggle('hidden', !voiceReminderDraft.validated);
+  whatInput.value = voiceReminderDraft.what || '';
+  whenInput.value = voiceReminderDraft.when || '';
+  whoDisplay.textContent = voiceReminderWhoLabel(voiceReminderDraft.suggestedWhoId || session.personId);
+
+  whenChoices.classList.toggle('hidden', !voiceReminderDraft.showWhenChoices);
+  Object.keys(VOICE_REMINDER_WHEN_CHOICES).forEach(function(key) {
+    var btn = document.getElementById('voice-when-choice-' + key);
+    if (btn) btn.classList.toggle('active', voiceReminderDraft.selectedWhenChoice === key);
+  });
+
+  whatHelp.textContent = voiceReminderDraft.flags.what ? 'This bit needs a quick check.' : '';
+  whenHelp.textContent = voiceReminderDraft.flags.when
+    ? 'Pick one of the buttons or type a simple time like “after school”.'
+    : '';
+  whoHelp.textContent = voiceReminderDraft.flags.who
+    ? 'Reminders save onto your list, so make sure this sounds right.'
+    : '';
+  whatHelp.classList.toggle('hidden', !whatHelp.textContent);
+  whenHelp.classList.toggle('hidden', !whenHelp.textContent);
+  whoHelp.classList.toggle('hidden', !whoHelp.textContent);
+
+  primary.disabled = !!voiceReminderDraft.validating;
+  secondary.disabled = !!voiceReminderDraft.validating;
+  primary.textContent = voiceReminderDraft.validated
+    ? (voiceReminderDraft.validating ? 'Saving…' : 'Confirm')
+    : (voiceReminderDraft.validating ? 'Checking…' : 'Check it');
+  secondary.textContent = voiceReminderDraft.validated ? 'Try again' : 'Maybe later';
+}
+
+function openTypedVoiceReminderFallback(message) {
+  voiceReminderDraft = newVoiceReminderDraft({
+    typedFallback: true,
+    canRetryRecording: false,
+    status: message || 'This browser can’t record here yet, so let’s type it together.',
+    flags: { transcript: true, what: false, when: false, who: false },
+  });
+  renderVoiceReminderModal();
+  showVoiceReminderModal();
+  focusVoiceReminderInput();
+}
+
+function openVoiceReminderFlow() {
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    openTypedVoiceReminderFallback('This browser can’t record here yet, so let’s type it together.');
+    return;
+  }
+  startKidVoiceRecording();
+}
+
+function ensureKidVoiceRecognition() {
+  if (kidVoiceRecognition) return kidVoiceRecognition;
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  kidVoiceRecognition = new SR();
+  kidVoiceRecognition.lang = 'en-AU';
+  kidVoiceRecognition.interimResults = false;
+  kidVoiceRecognition.maxAlternatives = 1;
+  kidVoiceRecognition.onresult = function(e) {
+    kidVoiceTranscript = '';
+    if (e.results && e.results[0] && e.results[0][0]) {
+      kidVoiceTranscript = String(e.results[0][0].transcript || '').trim();
+    }
+  };
+  kidVoiceRecognition.onerror = function(e) {
+    kidVoiceFallbackMessage = e && e.error === 'not-allowed'
+      ? 'Mic access is off, so let’s type it together.'
+      : 'Let’s type it together instead.';
+  };
+  kidVoiceRecognition.onend = function() {
+    kidVoiceListening = false;
+    syncKidVoiceTrigger();
+    if (kidVoiceTranscript) {
+      voiceReminderDraft = newVoiceReminderDraft({
+        transcript: kidVoiceTranscript,
+        canRetryRecording: true,
+        status: 'Checking what you said…',
+        validating: true,
+      });
+      renderVoiceReminderModal();
+      showVoiceReminderModal();
+      validateVoiceReminderTranscript();
+      return;
+    }
+    if (kidVoiceFallbackMessage) {
+      openTypedVoiceReminderFallback(kidVoiceFallbackMessage);
+      return;
+    }
+    toast('I didn’t catch that — try again.');
+  };
+  return kidVoiceRecognition;
+}
+
+function startKidVoiceRecording() {
+  var recognition = ensureKidVoiceRecognition();
+  if (!recognition) {
+    openTypedVoiceReminderFallback('This browser can’t record here yet, so let’s type it together.');
+    return;
+  }
+  closeVoiceReminder();
+  kidVoiceTranscript = '';
+  kidVoiceFallbackMessage = '';
+  kidVoiceListening = true;
+  syncKidVoiceTrigger();
+  toast('Tell me your reminder! 🎤');
+  try {
+    recognition.start();
+  } catch (err) {
+    kidVoiceListening = false;
+    syncKidVoiceTrigger();
+    openTypedVoiceReminderFallback('Let’s type it together instead.');
+  }
+}
+
+function updateVoiceReminderTranscript(value) {
+  if (!voiceReminderDraft) return;
+  voiceReminderDraft.transcript = value;
+}
+
+function updateVoiceReminderWhat(value) {
+  if (!voiceReminderDraft) return;
+  voiceReminderDraft.what = value;
+}
+
+function updateVoiceReminderWhen(value) {
+  if (!voiceReminderDraft) return;
+  voiceReminderDraft.when = value;
+  voiceReminderDraft.selectedWhenChoice = voiceReminderChoiceKey(value);
+  Object.keys(VOICE_REMINDER_WHEN_CHOICES).forEach(function(key) {
+    var btn = document.getElementById('voice-when-choice-' + key);
+    if (btn) btn.classList.toggle('active', voiceReminderDraft.selectedWhenChoice === key);
+  });
+}
+
+function chooseVoiceReminderWhen(choiceKey) {
+  if (!voiceReminderDraft || !VOICE_REMINDER_WHEN_CHOICES[choiceKey]) return;
+  voiceReminderDraft.selectedWhenChoice = choiceKey;
+  voiceReminderDraft.when = VOICE_REMINDER_WHEN_CHOICES[choiceKey].value;
+  document.getElementById('voice-when-input').value = voiceReminderDraft.when;
+  updateVoiceReminderWhen(voiceReminderDraft.when);
+}
+
+function applyVoiceReminderValidation(result) {
+  var intent = result && result.intent ? result.intent : {};
+  var confidence = result && result.confidence ? result.confidence : {};
+  var suggestedWhoId = intent.who || session.personId;
+  var parseFallback = !result || result.available === false || (
+    Number(confidence.what) === 0 && Number(confidence.when) === 0 && Number(confidence.who) === 0
+  );
+  voiceReminderDraft.validating = false;
+  voiceReminderDraft.validated = true;
+  voiceReminderDraft.available = !!(result && result.available);
+  voiceReminderDraft.what = String(intent.what || voiceReminderDraft.transcript || '').trim();
+  voiceReminderDraft.when = String(intent.when || '').trim();
+  voiceReminderDraft.suggestedWhoId = suggestedWhoId;
+  voiceReminderDraft.selectedWhenChoice = voiceReminderChoiceKey(voiceReminderDraft.when);
+  voiceReminderDraft.flags = {
+    transcript: parseFallback,
+    what: parseFallback || Number(confidence.what) < VOICE_REMINDER_CONFIRMATION_THRESHOLD,
+    when: parseFallback || Number(confidence.when) < VOICE_REMINDER_CONFIRMATION_THRESHOLD,
+    who: parseFallback || Number(confidence.who) < VOICE_REMINDER_CONFIRMATION_THRESHOLD || suggestedWhoId !== session.personId,
+  };
+  voiceReminderDraft.showWhenChoices = !!voiceReminderDraft.flags.when;
+  voiceReminderDraft.status = voiceReminderDraft.available
+    ? (result.needsConfirmation ? 'Double-check the highlighted bits before you save it.' : 'Looks good — give it one quick check!')
+    : 'Voice helper isn’t set up yet, so let’s fill this in together.';
+  renderVoiceReminderModal();
+  focusVoiceReminderInput();
+}
+
+async function validateVoiceReminderTranscript() {
+  if (!voiceReminderDraft) return;
+  var transcript = String(voiceReminderDraft.transcript || '').trim();
+  if (!transcript) {
+    toast('Tell me the reminder first.');
+    return;
+  }
+  voiceReminderDraft.validating = true;
+  voiceReminderDraft.status = 'Checking what you said…';
+  renderVoiceReminderModal();
+  var result;
+  try {
+    result = await api({ action: 'validateVoiceNote', personId: session.personId, pin: session.pin, transcript: transcript });
+  } catch (e) {
+    result = { ok: true, available: false, intent: { what: transcript, when: null, who: session.personId }, confidence: { what: 0, when: 0, who: 0 }, needsConfirmation: true };
+  }
+  if (result && result.ok === false) {
+    voiceReminderDraft.validating = false;
+    voiceReminderDraft.status = result.error || 'Please check what you typed.';
+    renderVoiceReminderModal();
+    toast(result.error || 'Could not check that reminder.');
+    return;
+  }
+  applyVoiceReminderValidation(result);
+}
+
+async function handleVoiceReminderPrimary() {
+  if (!voiceReminderDraft) return;
+  if (!voiceReminderDraft.validated) {
+    await validateVoiceReminderTranscript();
+    return;
+  }
+  var title = String(document.getElementById('voice-what-input').value || '').trim();
+  var when = String(document.getElementById('voice-when-input').value || '').trim();
+  if (!title) {
+    voiceReminderDraft.flags.what = true;
+    voiceReminderDraft.status = 'Tell me what to remind you about first.';
+    renderVoiceReminderModal();
+    toast('Tell me what to remind you about.');
+    return;
+  }
+  voiceReminderDraft.what = title;
+  voiceReminderDraft.when = when;
+  voiceReminderDraft.validating = true;
+  voiceReminderDraft.status = 'Saving your reminder…';
+  renderVoiceReminderModal();
+  var result;
+  try {
+    result = await api({
+      action: 'saveVoiceReminder',
+      personId: session.personId,
+      pin: session.pin,
+      kidId: session.personId,
+      title: title,
+      when: when || null,
+      transcript: voiceReminderDraft.transcript,
+    });
+  } catch (e) {
+    voiceReminderDraft.validating = false;
+    voiceReminderDraft.status = 'Connection problem — check it and try again.';
+    renderVoiceReminderModal();
+    toast('Connection problem — try again.');
+    return;
+  }
+  if (toastApiError(result)) {
+    voiceReminderDraft.validating = false;
+    voiceReminderDraft.status = 'Please check it and try again.';
+    renderVoiceReminderModal();
+    return;
+  }
+  closeVoiceReminder();
+  toast('Voice reminder saved! 🎤');
+}
+
+function handleVoiceReminderSecondary() {
+  if (!voiceReminderDraft) return;
+  if (!voiceReminderDraft.validated) {
+    closeVoiceReminder();
+    return;
+  }
+  if (voiceReminderDraft.canRetryRecording) {
+    startKidVoiceRecording();
+    return;
+  }
+  openTypedVoiceReminderFallback('Okay — type it again and I’ll help check it.');
 }
 
 async function redeemKidReward(rewardId, cost) {

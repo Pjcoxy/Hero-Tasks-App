@@ -29,6 +29,12 @@ check(/let parentTab = 'approvals';/.test(html), 'parent tab state defaults to a
 check(/function switchParentTab\(tab\)/.test(html), 'parent tab switcher exists');
 check(/id="p-approvals-badge"/.test(html), 'approvals badge exists');
 check(/parentEditTask\(\\'/.test(html), 'task rows wire an Edit button');
+check(/id="k-voice-reminder-btn"/.test(html), 'kid Home tab includes a voice reminder button');
+check(/id="voice-reminder-modal"/.test(html), 'voice reminder confirmation modal exists');
+check(/window\.SpeechRecognition \|\| window\.webkitSpeechRecognition/.test(html), 'voice reminder flow feature-detects SpeechRecognition support');
+check(/action:\s*'validateVoiceNote'/.test(html), 'voice reminder flow calls validateVoiceNote');
+check(/action:\s*'saveVoiceReminder'/.test(html), 'voice reminder flow calls saveVoiceReminder');
+check(/This weekend/.test(html) && /No specific time/.test(html), 'voice reminder flow includes low-confidence when choice pills');
 
 // Syntax-check each inline script body.
 const bodies = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
