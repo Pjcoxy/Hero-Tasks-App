@@ -137,11 +137,33 @@ jobs:
                 echo "    being built now (open Copilot pull request) - skipping"
                 continue
               fi
-              # Assigned, but nothing open is building it - the pull request was
-              # closed or abandoned. Left alone this is permanent: the issue
-              # keeps its 'build' label, is skipped every run, and the pipeline
-              # reports success while the work never happens.
-              echo "    ::warning::#${NUM} is assigned to Copilot but has no open pull request - stale assignment, re-queueing it"
+              # Assigned, but nothing open is building it. Two very different
+              # situations look identical here:
+              #
+              #   1. Copilot was assigned seconds ago and has not opened its
+              #      draft pull request yet - normally a minute or two.
+              #   2. The pull request was closed or abandoned, so nothing will
+              #      ever build this and the issue is stuck forever.
+              #
+              # Treating (1) as (2) un-assigns Copilot mid-startup and assigns
+              # it again, so two sessions work the same issue and produce
+              # conflicting branches. So only call it stale once the assignment
+              # is older than the grace period.
+              STALE_AFTER_MIN=20
+              ASSIGNED_AT=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${NUM}/events?per_page=100" \
+                --jq '[.[] | select(.event == "assigned")] | last | .created_at' 2>/dev/null || echo "")
+
+              AGE_MIN=99999
+              if [ -n "$ASSIGNED_AT" ] && [ "$ASSIGNED_AT" != "null" ]; then
+                AGE_MIN=$(( ( $(date -u +%s) - $(date -u -d "$ASSIGNED_AT" +%s) ) / 60 ))
+              fi
+
+              if [ "$AGE_MIN" -lt "$STALE_AFTER_MIN" ]; then
+                echo "    assigned ${AGE_MIN}m ago, no pull request yet - Copilot is probably still starting up, leaving it"
+                continue
+              fi
+
+              echo "    ::warning::#${NUM} has been assigned to Copilot for ${AGE_MIN}m with no open pull request - stale, re-queueing it"
               gh api -X DELETE "repos/${GITHUB_REPOSITORY}/issues/${NUM}/assignees" \
                 -f "assignees[]=Copilot" >/dev/null 2>&1 \
                 || echo "    ::warning::could not clear the stale assignee on #${NUM}; it will be retried next run"
