@@ -4,15 +4,27 @@ name: Auto-merge agent PRs
 # auto-merge, so they merge themselves once CI is green. Human-authored pull
 # requests are untouched - you merge those yourself.
 #
-# Why this polls rather than reacting to an event:
+# What wakes this up:
 #   Copilot opens its pull request as a DRAFT and then works for several
-#   minutes. It never fires 'ready_for_review' - it just renames the title from
-#   "[WIP] ..." to the final title and stops. So there is no event meaning
-#   "finished", and acting on 'opened' would mark half-written work ready and
-#   merge it.
+#   minutes. It never fires 'ready_for_review' by itself - it just renames the
+#   title from "[WIP] ..." to the final title and stops. So there is no event
+#   meaning "finished", and acting on 'opened' would mark half-written work
+#   ready and merge it.
 #
-# The finished signal used here: authored by Copilot, still a draft, and the
-# title no longer starts with "[WIP]".
+#   The finished signal used here: authored by Copilot and the title no longer
+#   starts with "[WIP]".
+#
+#   The primary trigger is CI completing (workflow_run below). That is the
+#   moment the merge gate could newly pass, and by then Copilot has finished
+#   working and renamed the title - it renames when it stops, while CI is still
+#   running on its last push. Reacting to it takes the decision from tens of
+#   minutes to seconds.
+#
+#   The cron is now only a backstop, and it is worth being honest about what it
+#   actually does. It is written "*/5" but GitHub does not honour that: the
+#   observed gaps between scheduled runs on this repository were 22, 23, 26,
+#   31, 32, 36, 41, 44 and 48 minutes. High-frequency crons are throttled.
+#   Anything that has to happen promptly cannot be hung off it.
 #
 # This does NOT use GitHub's --auto. That merges as soon as the *required*
 # checks pass, and this repository has no branch protection, so nothing is
@@ -28,6 +40,14 @@ name: Auto-merge agent PRs
 # To stop one merging, put it back to draft.
 
 on:
+  # The real trigger: CI has just concluded on some commit, so a pull request
+  # that was waiting on it may now be mergeable. Fires for CI runs on main too,
+  # which is harmless - the job re-reads the whole candidate list every time and
+  # does nothing when there is nothing waiting.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  # Backstop only. See the note above about how rarely this actually fires.
   schedule:
     - cron: "*/5 * * * *"
   # Fires when you mark something ready by hand, and on events raised by your
@@ -64,18 +84,24 @@ jobs:
         run: |
           set -uo pipefail
 
-          # Open pull requests authored by Copilot that look finished: still a
-          # draft, and no longer titled "[WIP] ...".
+          # Open pull requests authored by Copilot that look finished: no longer
+          # titled "[WIP] ...".
+          #
+          # Draft state is deliberately NOT part of this filter. It used to
+          # require draft == true, which meant a pull request that had been
+          # marked ready - by hand, or by an earlier pass of this workflow that
+          # then found CI still running - dropped out of the candidate set for
+          # good and needed a human to merge it. Whether it is a draft says
+          # nothing about whether Copilot has finished; the title does.
           CANDIDATES=$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" \
             --jq '[.[]
                    | select(.user.login == "Copilot" or (.user.login | endswith("[bot]")))
-                   | select(.draft == true)
                    | select(.title | startswith("[WIP]") | not)
                    | {number, title}]' 2>/dev/null || echo '[]')
 
           COUNT=$(echo "$CANDIDATES" | jq 'length')
           if [ "$COUNT" -eq 0 ]; then
-            echo "No finished Copilot drafts waiting."
+            echo "No finished Copilot pull requests waiting."
           else
             echo "Found ${COUNT}:"
             echo "$CANDIDATES" | jq -r '.[] | "  #\(.number)  \(.title)"'
