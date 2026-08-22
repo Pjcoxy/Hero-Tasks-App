@@ -726,6 +726,17 @@ async function completeTask(req) {
   const chore = chores.find((t) => t.id === req.taskId);
   if (!chore) return { ok: false, error: 'Task not found' };
   await requireSelf(req.personId, req.pin, chore.kidId);
+
+  // Idempotency: if a client-generated key is supplied, skip creating a
+  // duplicate completion record when the same request is replayed (e.g. after
+  // an offline sync retry).
+  if (req.idempotencyKey) {
+    const existing = await queryHousehold('completions');
+    if (existing.some((c) => c.idempotencyKey === req.idempotencyKey)) {
+      return getState();
+    }
+  }
+
   await container('completions').items.create({
     id: randomUUID(),
     householdId: HOUSEHOLD_ID,
@@ -736,6 +747,7 @@ async function completeTask(req) {
     date: todayStr(),
     status: 'pending',
     createdAt: new Date().toISOString(),
+    ...(req.idempotencyKey ? { idempotencyKey: req.idempotencyKey } : {}),
   });
   const [people, quietHours] = await Promise.all([
     queryHousehold('people'),
