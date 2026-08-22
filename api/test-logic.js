@@ -1030,11 +1030,32 @@ async function main() {
   assert.strictEqual(saved.title, 'Take out the bins', 'title should match');
   assert.strictEqual(saved.source, 'voice', 'source should be voice');
   assert.strictEqual(saved.type, 'reminder', 'type should be reminder');
-  assert.strictEqual(saved.status, 'confirmed', 'status should be confirmed');
+  assert.strictEqual(saved.status, 'open', 'status should default to open');
+  assert.strictEqual(saved.category, null, 'voice reminders should default category to null');
+  assert.strictEqual(saved.order, 0, 'first planning item should start at order 0');
   assert.strictEqual(saved.when, '2026-09-01T09:00:00.000Z', 'when should match');
   assert.strictEqual(saved.transcript, 'remind me to take out the bins tomorrow morning', 'transcript should be stored');
   assert.strictEqual(saved.householdId, HOUSEHOLD_ID, 'householdId should match');
-  console.log('✓ saveVoiceReminder creates planningItem with correct shape');
+  assert.deepStrictEqual(
+    stateAfterSave.planningItems.map((item) => ({
+      kidId: item.kidId,
+      title: item.title,
+      type: item.type,
+      status: item.status,
+      order: item.order,
+      source: item.source,
+    })),
+    [{
+      kidId: 'toby',
+      title: 'Take out the bins',
+      type: 'reminder',
+      status: 'open',
+      order: 0,
+      source: 'voice',
+    }],
+    'getState should expose planningItems for kid filtering'
+  );
+  console.log('✓ saveVoiceReminder creates planningItem with correct shape and exposes it via getState');
 
   // Cross-kid attempt: ollie cannot save a reminder for toby
   await assert.rejects(
@@ -1044,6 +1065,108 @@ async function main() {
   const afterCrossKid = (await planningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
   assert.strictEqual(afterCrossKid.length, 1, 'cross-kid save should be rejected without writing');
   console.log('✓ saveVoiceReminder rejects cross-kid save');
+
+  const invalidPlanningType = await ROUTES.addPlanningItem({
+    personId: 'toby',
+    pin: '1234',
+    kidId: 'toby',
+    title: 'Wish list',
+    type: 'chore',
+  });
+  assert.deepStrictEqual(invalidPlanningType, { ok: false, error: 'invalid type' });
+  console.log('✓ addPlanningItem rejects invalid types');
+
+  const stateAfterManualAdd = await ROUTES.addPlanningItem({
+    personId: 'toby',
+    pin: '1234',
+    kidId: 'toby',
+    title: '  Lego castle  ',
+    type: 'plan',
+    category: 'fun',
+  });
+  const manualItem = stateAfterManualAdd.planningItems.find((item) => item.title === 'Lego castle');
+  assert.ok(manualItem, 'manual planning item should be returned from getState');
+  assert.strictEqual(manualItem.source, 'manual');
+  assert.strictEqual(manualItem.order, 1, 'manual add should append after the highest order');
+  assert.strictEqual(manualItem.category, 'fun');
+  console.log('✓ addPlanningItem appends kid items and returns them from getState');
+
+  const updatedState = await ROUTES.updatePlanningItem({
+    personId: 'toby',
+    pin: '1234',
+    kidId: 'toby',
+    planningItemId: manualItem.id,
+    title: '  Lego city  ',
+    category: '',
+    status: 'done',
+  });
+  const updatedManualItem = updatedState.planningItems.find((item) => item.id === manualItem.id);
+  assert.deepStrictEqual(
+    {
+      title: updatedManualItem.title,
+      category: updatedManualItem.category,
+      status: updatedManualItem.status,
+    },
+    {
+      title: 'Lego city',
+      category: null,
+      status: 'done',
+    }
+  );
+  console.log('✓ updatePlanningItem edits title, category, and status');
+
+  const ollieState = await ROUTES.addPlanningItem({
+    personId: 'ollie',
+    pin: '1234',
+    kidId: 'ollie',
+    title: 'Practice spelling',
+    type: 'note',
+  });
+  const ollieItem = ollieState.planningItems.find((item) => item.kidId === 'ollie');
+  const crossKidUpdate = await ROUTES.updatePlanningItem({
+    personId: 'toby',
+    pin: '1234',
+    kidId: 'toby',
+    planningItemId: ollieItem.id,
+    title: 'Sneaky edit',
+  });
+  assert.deepStrictEqual(crossKidUpdate, { ok: false, error: 'Not your planning item' });
+  console.log('✓ updatePlanningItem rejects cross-kid ownership changes');
+
+  const reorderState = await ROUTES.reorderPlanningItems({
+    personId: 'toby',
+    pin: '1234',
+    kidId: 'toby',
+    itemIds: [manualItem.id, saved.id],
+  });
+  const tobyItemsAfterReorder = reorderState.planningItems.filter((item) => item.kidId === 'toby');
+  assert.deepStrictEqual(
+    tobyItemsAfterReorder.map((item) => ({ id: item.id, order: item.order })),
+    [
+      { id: manualItem.id, order: 0 },
+      { id: saved.id, order: 1 },
+    ],
+    'reorderPlanningItems should rewrite order to match the supplied sequence'
+  );
+  const badReorder = await ROUTES.reorderPlanningItems({
+    personId: 'toby',
+    pin: '1234',
+    kidId: 'toby',
+    itemIds: [manualItem.id],
+  });
+  assert.deepStrictEqual(badReorder, { ok: false, error: 'itemIds must exactly match existing planning items' });
+  console.log('✓ reorderPlanningItems requires an exact id set and rewrites order');
+
+  const stateAfterDelete = await ROUTES.deletePlanningItem({
+    personId: 'toby',
+    pin: '1234',
+    kidId: 'toby',
+    planningItemId: manualItem.id,
+  });
+  assert.ok(!stateAfterDelete.planningItems.some((item) => item.id === manualItem.id), 'deleted planning item should disappear from getState');
+  const storedAfterDelete = (await planningItems.items.query({ parameters: [{ name: '@h', value: HOUSEHOLD_ID }] }).fetchAll()).resources;
+  assert.ok(!storedAfterDelete.some((item) => item.id === manualItem.id), 'deletePlanningItem should hard-delete the document');
+  console.log('✓ deletePlanningItem hard-deletes kid-owned planning items');
 
   console.log('\nALL LOGIC TESTS PASSED');
 }

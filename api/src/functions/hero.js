@@ -60,6 +60,57 @@ async function queryHousehold(containerName) {
   return resources;
 }
 
+function planningItemOrderValue(item, fallback = -1) {
+  const order = Number(item && item.order);
+  return Number.isFinite(order) ? order : fallback;
+}
+
+function normalizePlanningItemStatus(status) {
+  return status === 'done' ? 'done' : 'open';
+}
+
+function mapPlanningItemsForState(items) {
+  const nextOrderByKid = new Map();
+  return items
+    .slice()
+    .sort((a, b) => {
+      if (String(a.kidId || '') !== String(b.kidId || '')) {
+        return String(a.kidId || '').localeCompare(String(b.kidId || ''));
+      }
+      const orderDiff = planningItemOrderValue(a, Number.MAX_SAFE_INTEGER) - planningItemOrderValue(b, Number.MAX_SAFE_INTEGER);
+      if (orderDiff !== 0) return orderDiff;
+      return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+    })
+    .map((item) => {
+      const kidId = String(item.kidId || '');
+      const nextOrder = nextOrderByKid.get(kidId) || 0;
+      const order = planningItemOrderValue(item, nextOrder);
+      nextOrderByKid.set(kidId, Math.max(nextOrder, order + 1));
+      return {
+        id: item.id,
+        kidId: item.kidId,
+        type: item.type,
+        title: item.title,
+        category: item.category || null,
+        order,
+        status: normalizePlanningItemStatus(item.status),
+        source: item.source || 'manual',
+        when: item.when || null,
+        transcript: item.transcript || '',
+        createdAt: item.createdAt,
+      };
+    });
+}
+
+async function getNextPlanningItemOrder(kidId) {
+  const items = (await queryHousehold('planningItems')).filter((item) => item.kidId === kidId);
+  const highestOrder = items.reduce(
+    (max, item, index) => Math.max(max, planningItemOrderValue(item, index)),
+    -1
+  );
+  return highestOrder + 1;
+}
+
 const BADGES = [
   { id: 'first-steps',     emoji: '🌱', label: 'First Steps',      test: (count, _streak) => count >= 1  },
   { id: 'getting-started', emoji: '💪', label: 'Getting Started',   test: (count, _streak) => count >= 10 },
@@ -107,6 +158,7 @@ async function getState() {
   const rewardDocs = (await queryHousehold('rewards')).filter((r) => r.type === 'reward' && r.active !== false);
   const allRewardRows = await queryHousehold('rewards');
   const redemptionDocs = allRewardRows.filter((r) => r.type === 'redemption');
+  const planningItems = mapPlanningItemsForState(await queryHousehold('planningItems'));
 
   const stats = {};
   people
@@ -159,6 +211,7 @@ async function getState() {
       createdAt: c.createdAt,
       decidedAt: c.decidedAt || null,
     })),
+    planningItems,
     stats,
     quietHours: household && household.quietHours ? household.quietHours : null,
     today: todayStr(),
@@ -681,6 +734,7 @@ async function saveVoiceReminder(req) {
   await requireSelf(req.personId, req.pin, req.kidId);
   const title = String(req.title || '').trim();
   if (!title) return { ok: false, error: 'title is required' };
+  const order = await getNextPlanningItemOrder(req.kidId);
   await container('planningItems').items.create({
     id: randomUUID(),
     householdId: HOUSEHOLD_ID,
@@ -688,11 +742,103 @@ async function saveVoiceReminder(req) {
     source: 'voice',
     kidId: req.kidId,
     title,
+    category: null,
+    order,
     when: req.when || null,
     transcript: req.transcript || '',
-    status: 'confirmed',
+    status: 'open',
     createdAt: new Date().toISOString(),
   });
+  return getState();
+}
+
+async function addPlanningItem(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
+  const title = (req.title || '').trim();
+  if (!title) return { ok: false, error: 'title is required' };
+  if (!['note', 'reminder', 'plan'].includes(req.type)) {
+    return { ok: false, error: 'invalid type' };
+  }
+  const order = await getNextPlanningItemOrder(req.kidId);
+  await container('planningItems').items.create({
+    id: randomUUID(),
+    householdId: HOUSEHOLD_ID,
+    kidId: req.kidId,
+    type: req.type,
+    title,
+    category: (req.category || '').trim() || null,
+    order,
+    status: 'open',
+    source: 'manual',
+    when: req.when || null,
+    transcript: req.transcript || '',
+    createdAt: new Date().toISOString(),
+  });
+  return getState();
+}
+
+async function updatePlanningItem(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
+  const planningItems = container('planningItems');
+  const { resource: planningItem } = await planningItems
+    .item(req.planningItemId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!planningItem) return { ok: false, error: 'Planning item not found' };
+  if (planningItem.kidId !== req.kidId) {
+    return { ok: false, error: 'Not your planning item' };
+  }
+  if (req.title !== undefined) {
+    const title = (req.title || '').trim();
+    if (!title) return { ok: false, error: 'title is required' };
+    planningItem.title = title;
+  }
+  if (req.category !== undefined) {
+    planningItem.category = (req.category || '').trim() || null;
+  }
+  if (req.status !== undefined) {
+    if (!['open', 'done'].includes(req.status)) return { ok: false, error: 'invalid status' };
+    planningItem.status = req.status;
+  }
+  await planningItems.item(req.planningItemId, HOUSEHOLD_ID).replace(planningItem);
+  return getState();
+}
+
+async function deletePlanningItem(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
+  const planningItems = container('planningItems');
+  const { resource: planningItem } = await planningItems
+    .item(req.planningItemId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!planningItem) return { ok: false, error: 'Planning item not found' };
+  if (planningItem.kidId !== req.kidId) {
+    return { ok: false, error: 'Not your planning item' };
+  }
+  await planningItems.item(req.planningItemId, HOUSEHOLD_ID).delete();
+  return getState();
+}
+
+async function reorderPlanningItems(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
+  const itemIds = Array.isArray(req.itemIds) ? req.itemIds.map((id) => String(id)) : [];
+  const planningItems = container('planningItems');
+  const kidItems = (await queryHousehold('planningItems')).filter((item) => item.kidId === req.kidId);
+  const existingIds = kidItems.map((item) => String(item.id));
+  const hasExactIds = itemIds.length === existingIds.length
+    && new Set(itemIds).size === itemIds.length
+    && itemIds.every((id) => existingIds.includes(id))
+    && existingIds.every((id) => itemIds.includes(id));
+  if (!hasExactIds) {
+    return { ok: false, error: 'itemIds must exactly match existing planning items' };
+  }
+  await Promise.all(
+    itemIds.map(async (id, index) => {
+      const planningItem = kidItems.find((item) => String(item.id) === id);
+      planningItem.order = index;
+      await planningItems.item(id, HOUSEHOLD_ID).replace(planningItem);
+    })
+  );
   return getState();
 }
 
@@ -719,6 +865,10 @@ const ROUTES = {
   approveRedemption,
   rejectRedemption,
   cancelRedemption,
+  addPlanningItem,
+  updatePlanningItem,
+  deletePlanningItem,
+  reorderPlanningItems,
   saveVoiceReminder,
 };
 
