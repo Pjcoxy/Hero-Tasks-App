@@ -250,6 +250,81 @@ Same tokens, different register:
 
 ---
 
+## Reference patterns
+
+Taken from published kids/lifestyle app design that reads as premium. These are
+**layout and interaction patterns to reuse**, not palettes to copy.
+
+### The curved hero sheet
+
+The strongest "app, not web page" device available, and the one worth taking
+first. A coloured or illustrated hero band across the top, with the white
+content surface curving up over it — a large `border-radius` on the top corners
+of the content sheet, pulled up so it overlaps the hero by `--space-5` or so. An
+avatar or icon badge straddles the join, centred.
+
+Use it on the kid home screen (their avatar, their colour as the hero) and on a
+single reward's detail. Not in Parent HQ.
+
+### A persistent points chip
+
+Points balance lives as a pill in the header on every kid screen — icon plus
+`tabular-nums` figure, `--radius-full`, on `--brand-wash`. Always visible means
+always motivating, and it gives the count-up animation somewhere fixed to happen.
+
+### Tile grid, not a list
+
+For a kid's top-level choices, a two-column grid of large square-ish tiles —
+big emoji or inline SVG, a `--text-lg` label, a `--text-sm` sub-label, each on
+`--surface` with `--radius-lg` and `--shadow-1`. Lists read as admin; tiles read
+as an app and are far easier to hit.
+
+Parent HQ stays list-based — density matters more there.
+
+### Goal progress with the numbers
+
+Reward progress as a full-width bar, `--radius-full`, filled in the kid's colour
+(a subtle gradient toward `--brand` is fine), with `earned / target` stated
+underneath in `--text-sm`. Seeing "$3,856 / $5,000" alongside the bar is what
+makes it feel like progress rather than decoration. Same for points toward a
+reward.
+
+### Choice pills
+
+Where a kid picks between a few options, use a row of pills with one active —
+`--radius-full`, inactive on `--surface-sunken` with `--ink-muted`, active on
+the kid's colour with white text. Better than a dropdown for a child, and better
+than radio buttons for a thumb.
+
+### Soft gradients on primary surfaces
+
+The hero band and the primary action can carry a gentle gradient between two
+adjacent hues rather than a flat fill. Restraint is the whole trick: two stops,
+low contrast between them. A gradient on every card looks cheap; one on the hero
+looks considered.
+
+### What we cannot take from these references
+
+**They are carried by custom illustration** — hand-drawn scenes, 3D character
+renders, bespoke iconography. We have no build step, no asset pipeline and no
+illustrator, so promising that would specify something unbuildable.
+
+Substitute deliberately, and it still works:
+
+- **Large emoji as hero art.** At `--text-3xl` and above, on a gradient band, an
+  emoji reads as intentional rather than lazy — and it is free, instant, offline
+  and accessible.
+- **Inline SVG for shapes** — progress rings, badges, simple decorative blobs.
+  Small, themeable with `currentColor`, no request.
+- **Colour and gradient do the work** illustration would otherwise do.
+- **The kid's own avatar and colour** carry identity in place of a character.
+
+Judged against these references the result will be plainer. It should not be
+less consistent, less generous with space, or less rewarding to use — and those
+are the parts that actually read as premium.
+
+---
+
 ## What this does not cover
 
 Dark mode, theming, and any per-household customisation. Deliberately out of
