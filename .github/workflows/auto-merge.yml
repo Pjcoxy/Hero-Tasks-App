@@ -1,32 +1,86 @@
 name: Auto-merge agent PRs
 
-# Enables GitHub's auto-merge on pull requests opened by the Copilot coding
-# agent, so they merge themselves once CI is green. Human-authored PRs are
-# untouched - you merge those yourself.
+# Marks finished Copilot pull requests ready for review and enables GitHub's
+# auto-merge, so they merge themselves once CI is green. Human-authored pull
+# requests are untouched - you merge those yourself.
 #
-# Auto-merge only completes when required checks pass; a red CI run leaves the
-# PR open. To stop a specific PR merging, mark it draft or disable auto-merge
-# on the PR itself.
+# Why this polls rather than reacting to an event:
+#   Copilot opens its pull request as a DRAFT and then works for several
+#   minutes. It never fires 'ready_for_review' - it just renames the title from
+#   "[WIP] ..." to the final title and stops. So there is no event meaning
+#   "finished", and acting on 'opened' would mark half-written work ready and
+#   merge it.
+#
+# The finished signal used here: authored by Copilot, still a draft, and the
+# title no longer starts with "[WIP]".
+#
+# Auto-merge only completes when required checks pass; red CI leaves the pull
+# request open. To stop one merging, put it back to draft or turn auto-merge
+# off on the pull request itself.
 
 on:
+  schedule:
+    - cron: "*/5 * * * *"
+  # Fires when you mark something ready by hand, and on events raised by your
+  # own actions (Copilot's own events are gated behind approval).
   pull_request_target:
-    types: [opened, ready_for_review]
+    types: [ready_for_review]
+  issues:
+    types: [closed]
+  workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: auto-merge-agent-prs
+  cancel-in-progress: false
+
 jobs:
   enable-auto-merge:
-    # Only PRs authored by the Copilot coding agent.
-    if: github.event.pull_request.user.login == 'Copilot' || endsWith(github.event.pull_request.user.login, '[bot]')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Enable auto-merge
+      - name: Ready and auto-merge finished Copilot pull requests
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
         run: |
-          echo "Enabling auto-merge on PR #${PR} by ${{ github.event.pull_request.user.login }}"
-          gh pr ready "$PR" --repo "$GITHUB_REPOSITORY" || echo "PR already ready for review"
-          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --squash --auto
+          set -uo pipefail
+
+          # Open pull requests authored by Copilot that look finished: still a
+          # draft, and no longer titled "[WIP] ...".
+          CANDIDATES=$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" \
+            --jq '[.[]
+                   | select(.user.login == "Copilot" or (.user.login | endswith("[bot]")))
+                   | select(.draft == true)
+                   | select(.title | startswith("[WIP]") | not)
+                   | {number, title}]' 2>/dev/null || echo '[]')
+
+          COUNT=$(echo "$CANDIDATES" | jq 'length')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No finished Copilot drafts waiting."
+          else
+            echo "Found ${COUNT}:"
+            echo "$CANDIDATES" | jq -r '.[] | "  #\(.number)  \(.title)"'
+          fi
+
+          # A pull request marked ready by hand arrives here too - handle it in
+          # the same pass so nothing is missed.
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            CANDIDATES=$(echo "$CANDIDATES" | jq --argjson n "${{ github.event.pull_request.number }}" \
+              '. + [{number: $n, title: "(marked ready by hand)"}] | unique_by(.number)')
+          fi
+
+          for NUM in $(echo "$CANDIDATES" | jq -r '.[].number'); do
+            echo "--- #${NUM}"
+            gh pr ready "$NUM" --repo "$GITHUB_REPOSITORY" 2>/dev/null \
+              && echo "    marked ready for review" \
+              || echo "    already ready"
+
+            if gh pr merge "$NUM" --repo "$GITHUB_REPOSITORY" --squash --auto 2>&1; then
+              echo "    auto-merge enabled - it will merge when CI passes"
+            else
+              echo "    ::warning::could not enable auto-merge on #${NUM}. If the error mentions auto-merge not being allowed, turn it on at Settings -> General -> Pull Requests -> Allow auto-merge."
+            fi
+          done

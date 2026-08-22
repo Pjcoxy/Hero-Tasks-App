@@ -164,6 +164,12 @@ disabled, so it hard-stops rather than billing you.
 
 - **Copilot's PRs auto-merge** once CI passes (`auto-merge.yml`). Your own PRs
   do not — you merge those.
+- **Copilot opens its PRs as drafts** and works for several minutes, then just
+  renames the title from `[WIP] …` and stops. It never fires a
+  `ready_for_review` event, so there is no "finished" signal to react to.
+  `auto-merge.yml` therefore polls every 5 minutes for Copilot drafts whose
+  title has lost its `[WIP]` prefix, marks those ready and enables auto-merge.
+  Acting on `opened` instead would mark half-written work ready and merge it.
 - **CI** (`ci.yml`) runs `node api/test-logic.js` plus a frontend parse check
   on every PR. Red CI blocks the auto-merge; the PR just waits. **This is the
   only automatic check that can stop a change reaching the app.**
