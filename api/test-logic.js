@@ -100,6 +100,7 @@ async function main() {
   const {
     getState,
     calcStreak,
+    calcBadges,
     ROUTES,
     updateQuietHours,
     sendDueReminders,
@@ -229,6 +230,35 @@ async function main() {
   assert.strictEqual(calcStreak([{ status: 'approved', date: today }]), 1);
   assert.strictEqual(calcStreak([]), 0, 'no completions ever should be a 0 streak, not crash on empty today');
   console.log('✓ calcStreak handles populated and empty history');
+
+  // calcBadges unit checks
+  const noBadges = calcBadges(0, 0);
+  assert.ok(Array.isArray(noBadges), 'calcBadges returns an array');
+  assert.ok(noBadges.every((b) => b.earned === false), 'no completions → all badges unearned');
+  console.log('✓ calcBadges: no completions → all badges unearned');
+
+  const firstStepsBadges = calcBadges(1, 0);
+  const firstSteps = firstStepsBadges.find((b) => b.id === 'first-steps');
+  assert.ok(firstSteps && firstSteps.earned === true, '1 approved completion → first-steps earned');
+  const gettingStarted = firstStepsBadges.find((b) => b.id === 'getting-started');
+  assert.ok(gettingStarted && gettingStarted.earned === false, '1 approved completion → getting-started not earned');
+  console.log('✓ calcBadges: 1 approval → first-steps earned, getting-started not earned');
+
+  const streakBadges = calcBadges(0, 3);
+  const onARoll = streakBadges.find((b) => b.id === 'on-a-roll');
+  assert.ok(onARoll && onARoll.earned === true, 'streak 3 → on-a-roll earned');
+  const weekWarrior = streakBadges.find((b) => b.id === 'week-warrior');
+  assert.ok(weekWarrior && weekWarrior.earned === false, 'streak 3 → week-warrior not earned');
+  console.log('✓ calcBadges: streak 3 → on-a-roll earned, week-warrior not earned');
+
+  // getState badges shape/values
+  state = await getState();
+  const tobyBadges = state.stats.toby.badges;
+  assert.ok(Array.isArray(tobyBadges), 'getState stats include badges array');
+  const tobyFirstSteps = tobyBadges.find((b) => b.id === 'first-steps');
+  assert.ok(tobyFirstSteps && tobyFirstSteps.earned === true, 'toby has first-steps after approval');
+  assert.ok(tobyBadges.every((b) => 'id' in b && 'emoji' in b && 'label' in b && 'earned' in b), 'each badge has id/emoji/label/earned');
+  console.log('✓ getState stats.toby.badges includes first-steps earned=true with correct shape');
 
   // dueBy round-trips through getState for one-off tasks
   const dueIso = '2026-08-25T18:00:00.000Z';
