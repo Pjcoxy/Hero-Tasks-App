@@ -55,6 +55,33 @@ Work in this order:
      deleteTask). Acceptance criteria that name real code are buildable;
      generic ones are not.
 
+2b. UI WORK EXTENDS THE SHELL, IT DOES NOT APPEND TO THE PAGE.
+
+   The frontend is a single file, frontend/index.html, and the whole backlog
+   edits it. Left unguided, each feature appends another section to the bottom
+   and the app degrades into a long scrolling page - which is exactly what
+   issue #67 exists to fix, and what thirteen subsequent issues would quietly
+   undo.
+
+   So whenever a sub-issue touches the frontend, its acceptance criteria MUST:
+   - place the work inside the existing view and navigation structure - a new
+     screen reached by navigation, or an addition to a screen that already
+     exists. Never "add a section to index.html";
+   - name the real design tokens and conventions you found while auditing (the
+     CSS custom properties for colour, spacing, type and radius; the card and
+     button classes; how a kid's colour and avatar are applied) and require the
+     new work to use them rather than introduce its own values;
+   - keep the register right: playful and generous on kid screens, calm and
+     efficient in Parent HQ;
+   - preserve the app-like behaviour that already exists - the content region
+     scrolls rather than the page, actions give immediate feedback rather than
+     waiting on the API, and decorative motion is skipped under
+     prefers-reduced-motion.
+
+   If the shell and design system do not exist yet in the code you audited, say
+   so plainly in your comment and note that the sub-issue depends on #67, so it
+   is not built against a structure that is about to change underneath it.
+
 3. Produce the elaboration:
    - "Already built" - what exists today, with file references. May be empty.
    - Split the REMAINING work into 2-4 sub-issues, each independently
