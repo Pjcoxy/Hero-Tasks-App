@@ -301,6 +301,47 @@ deleted. Work now moves the instant something unblocks it.
 | `auto-merge.yml` (nominally 5 min) | Copilot never signals "finished" — it opens a draft and later just renames the title from `[WIP] …`. There is no event meaning done |
 | ~~`approve-agent-workflows.yml`~~ | **Deleted.** It never worked — see below |
 
+### Never count workflow runs to measure work
+
+The elaborate/architect queues each had a "runaway guard" that counted workflow
+*runs* in a rolling 24 hours. That is the wrong number, and it caused two
+separate stalls.
+
+A run that is cancelled by the concurrency group, skipped by a guard, or that
+finds an empty queue costs nothing. Counting it the same as a real run means a
+sweep on a timer inflates the count until the ceiling is hit — and then the
+ceiling holds forever, because the sweeps keep counting. That is what happened
+in #59, and it is why every sweep was deleted rather than fixed.
+
+Both guards now count **issues that carry the `elaborated` / `architected`
+label and were updated in the last 24 hours**. That is a direct measure of what
+actually costs money — the label goes on exactly once per issue — and it is
+completely independent of how often the workflow wakes up. Counting the right
+thing is what allowed the backstop schedules to be restored.
+
+Both guards also **fail open**: if the count cannot be read, the run proceeds.
+A guard that cannot read its own number must never be the thing that stops the
+pipeline.
+
+### A count taken at the start of a run is stale by the end of it
+
+Each queue run picked the oldest labelled issue, recorded how many were left,
+and used that number at the end to decide whether to dispatch the next run.
+
+A run takes several minutes. Thirteen issues labelled over ninety seconds all
+arrived *after* the first run had already counted — so it believed the queue
+held one item, skipped the "wake the next one" step, and the chain stopped dead
+after a single issue. The label events for the other twelve were cancelled by
+the concurrency group, as designed, and nothing ever came back for them. The
+comment in the step said the five-minute sweep would catch it; that sweep had
+been deleted in #59, so nothing did.
+
+The wake step now **re-reads the queue at the end of the run** instead of
+trusting the earlier count.
+
+The general rule, which has now cost three separate stalls: **anything measured
+before a long-running step must be measured again after it.**
+
 ### GitHub throttles high-frequency cron, so nothing urgent can hang off it
 
 `auto-merge.yml` is written `*/5 * * * *`. It does not run every five minutes.

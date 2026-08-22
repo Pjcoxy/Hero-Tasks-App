@@ -34,6 +34,13 @@ on:
         required: false
   issues:
     types: [labeled]
+  # Backstop. The label event and the self-dispatch below are what normally
+  # move the queue; this catches the cases where neither fires - a failed run,
+  # a dispatch that could not be made, or a label added while a run was already
+  # going. Without it a stall is permanent and silent, which is exactly what
+  # happened when thirteen issues were labelled at once.
+  schedule:
+    - cron: "*/30 * * * *"
 
 permissions:
   actions: read
@@ -48,20 +55,41 @@ jobs:
   architect:
     if: >-
       github.event_name == 'workflow_dispatch'
+      || github.event_name == 'schedule'
       || github.event.label.name == 'architect'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Runaway guard (max 80 runs per rolling 24h)
+      - name: Runaway guard (max 40 issues per rolling 24h)
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          SINCE=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
-          COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/architect.yml/runs?created=%3E%3D${SINCE}" --jq '.total_count')
-          echo "Architect runs in last 24h (including this one): ${COUNT}"
-          if [ "${COUNT}" -gt 80 ]; then
-            echo "::notice::Runaway ceiling of 80 architect runs reached. Labelled issues stay queued and resume once the window clears."
+          # Counts ISSUES WORKED, not workflow runs.
+          #
+          # This used to count runs, and that was wrong twice over. A run that
+          # is cancelled by the concurrency group, skipped by a guard, or that
+          # finds an empty queue costs nothing - but it counted the same as a
+          # real one. With a sweep on the clock the ceiling was reached within
+          # hours and then held forever, stalling the queue permanently. That
+          # is why the sweeps were deleted in #59; counting the right thing is
+          # what lets a backstop schedule exist again.
+          #
+          # What actually costs money is one issue being worked. The
+          # 'architected' label is applied exactly once per issue, so counting
+          # issues that carry it and were touched recently measures spend
+          # directly, and is immune to however often this workflow wakes up.
+          SINCE=$(date -u -d '24 hours ago' +%Y-%m-%d)
+          COUNT=$(gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+label:architected+updated:%3E%3D${SINCE}" \
+            --jq '.total_count // 0' 2>/dev/null || echo 0)
+
+          # Fail OPEN, never closed. A guard that cannot read its own number
+          # must not be the thing that stops the pipeline - that is the failure
+          # mode this whole change exists to remove.
+          case "$COUNT" in ''|*[!0-9]*) COUNT=0 ;; esac
+          echo "Issues architected in the last 24h: ${COUNT}"
+          if [ "${COUNT:-0}" -gt 40 ]; then
+            echo "::notice::Runaway ceiling of 40 issues reached. Labelled issues stay queued and resume once the window clears."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
@@ -147,13 +175,28 @@ jobs:
           fi
 
       - name: Wake the next one straight away
-        # Optional speed-up; needs HEROTASK_GITHUB_TOKEN to carry Actions: Read
-        # and write. Failure here is fine - the 5-minute sweep is the backstop.
-        if: success() && steps.issue.outputs.remaining != '' && steps.issue.outputs.remaining != '0'
+        # Re-reads the queue rather than trusting the count taken at the START
+        # of this run. A run takes several minutes, and anything labelled
+        # during that window was invisible to that earlier count - so a queue
+        # of thirteen looked like a queue of one, this step was skipped, and
+        # the chain stopped dead after a single issue.
+        #
+        # Needs HEROTASK_GITHUB_TOKEN to carry Actions: Read and write - the
+        # built-in token cannot dispatch a workflow. Failure here is survivable
+        # now that the schedule above exists as a backstop.
+        if: success() && steps.issue.outputs.number != ''
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
         run: |
+          LEFT=$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=architect&per_page=100" \
+            --jq '[.[] | select(.pull_request == null)] | length' 2>/dev/null || echo 0)
+
+          if [ "${LEFT:-0}" -eq 0 ]; then
+            echo "Queue empty - nothing left to wake."
+            exit 0
+          fi
+
           gh workflow run architect.yml --repo "$GITHUB_REPOSITORY" --ref main \
-            && echo "Dispatched the next drain (${{ steps.issue.outputs.remaining }} left)." \
-            || echo "::notice::Could not self-dispatch; the 5-minute sweep will take the next one."
+            && echo "Dispatched the next drain (${LEFT} left)." \
+            || echo "::notice::Could not self-dispatch; the backstop schedule will take the next one."
