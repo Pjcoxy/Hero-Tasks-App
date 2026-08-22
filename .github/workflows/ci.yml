@@ -114,28 +114,44 @@ jobs:
 
       - name: Install Playwright
         working-directory: tests/smoke
-        # The browser itself is already on the runner image - this installs the
-        # test runner only. PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD stops the
-        # postinstall hook fetching one on every run.
+        # Installs the test runner only; the browser is handled by the next
+        # step, which knows whether one is already present.
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: npm install --no-audit --no-fund
 
-      - name: Locate the preinstalled Chromium
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tests/smoke/package-lock.json') }}
+
+      - name: Resolve a Chromium
         id: chromium
-        # Playwright pins an exact browser build per release, so the path moves
-        # when either the image or the package updates. Find it rather than
-        # hardcode it, and say so plainly if it is missing instead of silently
-        # falling back to a download.
+        # Some images ship a browser already (PLAYWRIGHT_BROWSERS_PATH); GitHub's
+        # hosted runners do not. Use one if it is there, install one if it is
+        # not. Playwright pins an exact browser build per release, so the path
+        # moves whenever either the image or the package updates - hence finding
+        # it rather than hardcoding it.
+        #
+        # This started life assuming a preinstalled browser, which was true of
+        # the sandbox it was written in and false of the runner it had to run
+        # on. It failed loudly rather than quietly downloading, which is how the
+        # wrong assumption was caught in one run instead of becoming a slow
+        # mystery later.
         run: |
-          BIN=$(find "${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}" \
-                  -maxdepth 3 -type f -name chrome 2>/dev/null | head -1)
-          if [ -z "$BIN" ]; then
-            echo "::error::No preinstalled Chromium found under ${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}"
-            exit 1
+          BIN=""
+          if [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ] && [ -d "${PLAYWRIGHT_BROWSERS_PATH}" ]; then
+            BIN=$(find "${PLAYWRIGHT_BROWSERS_PATH}" -maxdepth 3 -type f -name chrome 2>/dev/null | head -1)
           fi
-          echo "Using $BIN"
-          echo "path=$BIN" >> "$GITHUB_OUTPUT"
+          if [ -n "$BIN" ]; then
+            echo "Using the preinstalled browser at $BIN"
+            echo "path=$BIN" >> "$GITHUB_OUTPUT"
+          else
+            echo "No preinstalled browser - installing Playwright's own Chromium."
+            npx --prefix tests/smoke playwright install --with-deps chromium
+            echo "path=" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Smoke test the running app
         env:

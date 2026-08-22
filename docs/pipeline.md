@@ -340,6 +340,14 @@ tab renders; the page loads with no JavaScript error.
 - Real Cosmos DB behaviour: partition keys, conflicts, throttling.
 - The deployed app. This tests the code in the pull request, not what is live.
 
+**On the browser.** The job uses a preinstalled Chromium when the image has one
+and installs Playwright's own when it does not, cached between runs. The first
+version assumed a browser was already present — true of the sandbox it was
+written in, false of GitHub's hosted runners. It failed loudly rather than
+quietly downloading one, which is why the wrong assumption surfaced on the first
+CI run instead of becoming a slow mystery later. Worth keeping that shape: a
+step that cannot find what it needs should say so, not improvise.
+
 **It does not gate merges yet.** `auto-merge.yml` waits on a check run named
 exactly `test`; this job is called `smoke`, so a red one will not stop a merge.
 That is deliberate — an unattended pipeline plus a flaky browser test means
