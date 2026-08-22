@@ -13,17 +13,23 @@ name: Build queue
 # So 'build' means "queued", and this picks one at a time, in order, skipping
 # anything whose dependencies are still open.
 #
-# Pace: every 30 minutes, up to 3 builds per run. This is deliberately fast for
-# the initial build-out of the backlog, which Peter is watching. The dependency
-# check below is NOT a pacing device - it prevents Copilot writing against code
-# that does not exist yet - so it stays regardless of speed.
+# When it runs: on the events that can change what is buildable, so work starts
+# as soon as it is unblocked rather than waiting for a clock:
+#   - a 'build' label added        -> that issue may be ready right now
+#   - a pull request closed/merged -> whatever depended on it may be unblocked
+#   - an issue closed              -> same
+# The hourly schedule is only a safety net for events that get missed.
 #
-# To slow down for ongoing feature work later: change the cron to "0 */6 * * *"
-# and MAX_PER_RUN to 1.
+# MAX_PER_RUN caps how many start at once. For the initial build-out it is 3;
+# drop it to 1 for ongoing feature work.
 
 on:
+  issues:
+    types: [labeled, closed]
+  pull_request:
+    types: [closed]
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -36,6 +42,12 @@ concurrency:
 
 jobs:
   next:
+    # Skip label events for labels other than 'build' - every other event type
+    # (closed issue, closed PR, schedule, manual) is worth a look at the queue.
+    if: >-
+      github.event_name != 'issues' ||
+      github.event.action == 'closed' ||
+      github.event.label.name == 'build'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
