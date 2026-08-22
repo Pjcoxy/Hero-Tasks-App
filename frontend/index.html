@@ -608,6 +608,8 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   color: var(--brand);
 }
 .tag.extra { background: var(--brand-wash); color: var(--brand); }
+.tag.approved { background: var(--success-wash); color: var(--success); }
+.tag.rejected { background: var(--danger-wash); color: var(--danger); }
 .check-row {
   display: flex;
   align-items: center;
@@ -807,6 +809,10 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
       <section class="parent-section">
         <h2 class="parent-section-title">Reward requests</h2>
         <div id="p-reward-requests"></div>
+      </section>
+      <section class="parent-section">
+        <h2 class="parent-section-title">Recently decided</h2>
+        <div id="p-decided"></div>
       </section>
     </div>
 
@@ -1451,8 +1457,29 @@ function renderParent(person) {
           + '</div>';
       }).join('');
 
+  var decided = state.completions
+    .filter(function(c) { return c.status === 'approved' || c.status === 'rejected'; })
+    .slice()
+    .sort(function(a, b) { return new Date(b.decidedAt) - new Date(a.decidedAt); })
+    .slice(0, 15);
+  document.getElementById('p-decided').innerHTML = decided.length === 0
+    ? buildEmptyState('🗂️', 'No decisions recorded yet.', 'Approved and rejected completions will appear here.')
+    : '<div class="parent-list">' + decided.map(function(c) {
+        var kid = state.people.find(function(k) { return k.id === c.kidId; }) || { name: '?', emoji: '❓' };
+        var decisionLabel = c.status === 'approved' ? '✓ Approved' : '✗ Rejected';
+        var decisionClass = c.status === 'approved' ? 'tag approved' : 'tag rejected';
+        return '<div class="parent-list-row">'
+          + '<div class="parent-copy">'
+          + '<span class="parent-list-title">' + kid.emoji + ' ' + esc(kid.name) + ' — ' + esc(c.title) + '</span>'
+          + '<div class="sub"><span class="' + decisionClass + '">' + decisionLabel + '</span>'
+          + (c.status === 'approved' ? ' · ' + (c.points || 0) + ' pts' : '')
+          + (c.decidedAt ? ' · ' + formatRewardDate(c.decidedAt) : '')
+          + '</div>'
+          + '</div>'
+          + '</div>';
+      }).join('') + '</div>';
+
   var rewards = (state.rewards || []).filter(function(r) { return r.active !== false; });
-  document.getElementById('p-rewards').innerHTML = rewards.length === 0
     ? buildEmptyState('🎁', 'No rewards yet.', 'Add a reward above so kids have something to save for.')
     : rewards.map(function(r) {
         return '<div class="card parent-card">'
