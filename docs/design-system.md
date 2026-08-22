@@ -12,6 +12,19 @@ poorly. This turns the work into implementation.
 [`pipeline.md`](pipeline.md)). It cannot judge taste — that is what the
 component specs below are for.
 
+**How this reaches work that has not been written yet.** Three routes, so it
+survives issues added long after this was written:
+
+1. The **Elaborator** reads this file on every run and must ground frontend
+   acceptance criteria in it, so specs cite real tokens rather than adjectives.
+2. **`.github/copilot-instructions.md`** points here, and Copilot reads that on
+   every task in this repository — including issues that skip elaboration
+   entirely.
+3. **`check-design.js`** fails the build on raw values, external asset requests
+   and content added outside the view structure, whatever route the code took.
+
+The first two guide; only the third can stop a merge.
+
 ---
 
 ## Principles
