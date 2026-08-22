@@ -49,8 +49,13 @@ The tester needs no label: Copilot's review is requested automatically on every
 agent-authored PR (`request-review.yml`).
 
 **When to use `architect`:** only where a genuine technical choice exists —
-issues carrying `role:architect` (#12, #15, #16, #21, #5). CRUD-shaped work
-goes straight from `elaborate` to `build`.
+issues carrying `role:architect` (#12, #15, #16, #21, #5, #43). CRUD-shaped
+work goes straight from `elaborate` to `build`.
+
+**`role:developer` is not applied any more.** Every sub-issue is developer work
+by default, so the label carried no information. `role:architect` still does:
+it means design this before building it. Older issues still carry
+`role:developer` — harmless, ignore it.
 
 **Never label an epic `build`.** The workflow refuses and says so, but the
 rule is: build the sub-issues, not the parent.

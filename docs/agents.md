@@ -46,8 +46,9 @@ on the cheaper thinking roles.
 
 1. You add the `elaborate` label to a backlog issue.
 2. **Elaborator** audits the codebase, then splits the remaining work into
-   sub-issues with checkable acceptance criteria, labelled `role:developer` or
-   `role:architect`, and links each as a **native GitHub sub-issue** of the
+   sub-issues with checkable acceptance criteria, labelling only the ones that
+   need design first (`role:architect`), and links each as a **native GitHub
+   sub-issue** of the
    parent so the parent shows a real "N of M complete" progress bar. The
    parent stays open as the umbrella and loses its `role:*` label.
 3. You add `architect` to anything with a genuine design decision — the

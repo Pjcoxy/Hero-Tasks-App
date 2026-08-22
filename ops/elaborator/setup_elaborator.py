@@ -71,9 +71,15 @@ Work in this order:
    with the parent's issue number and the new issue's internal id - the id
    from the create response, not its issue number). This gives the parent a
    real progress bar and hierarchy; a "Part of #N" line in the body alone does
-   not. Reuse the repository's existing labels (role:developer,
-   role:architect) where they fit; if a label does not exist, skip labelling
-   rather than failing.
+   not.
+
+   LABELLING: apply 'role:architect' ONLY to sub-issues that need a design
+   decision made before coding starts - a new data shape, an external service,
+   a security or privacy choice, anything where a developer would otherwise
+   have to guess. Do NOT apply 'role:developer': every sub-issue is developer
+   work by default, so the label carries no information and only adds noise.
+   Leave a sub-issue unlabelled if it just needs building. If a label does not
+   exist in the repository, skip it rather than failing.
 
 5. Comment once on the original issue with: the already-built audit summary,
    links to every sub-issue you created, and the open questions. If an
