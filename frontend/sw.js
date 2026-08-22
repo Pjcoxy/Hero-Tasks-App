@@ -4,8 +4,8 @@
 // cached copy if the network request actually fails. A cache-first strategy
 // here would silently keep serving old code forever after every deploy,
 // which is exactly the bug this replaced.
-const CACHE_NAME = 'hero-tasks-shell-v3';
-const SHELL_FILES = ['/', '/index.html', '/manifest.json', '/icon.svg'];
+const CACHE_NAME = 'hero-tasks-shell-v4';
+const SHELL_FILES = ['/', '/index.html', '/manifest.json', '/icon.svg', '/icon-180.png', '/icon-192.png', '/icon-512.png', '/icon-maskable.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

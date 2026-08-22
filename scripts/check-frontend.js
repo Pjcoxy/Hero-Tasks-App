@@ -6,7 +6,17 @@ const fs = require('fs');
 const path = require('path');
 
 const file = path.join(__dirname, '..', 'frontend', 'index.html');
+const manifestFile = path.join(__dirname, '..', 'frontend', 'manifest.json');
+const svgIconFile = path.join(__dirname, '..', 'frontend', 'icon.svg');
+const swFile = path.join(__dirname, '..', 'frontend', 'sw.js');
+const icon180File = path.join(__dirname, '..', 'frontend', 'icon-180.png');
+const icon192File = path.join(__dirname, '..', 'frontend', 'icon-192.png');
+const icon512File = path.join(__dirname, '..', 'frontend', 'icon-512.png');
+const maskableIconFile = path.join(__dirname, '..', 'frontend', 'icon-maskable.png');
 const html = fs.readFileSync(file, 'utf8');
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+const svgIcon = fs.readFileSync(svgIconFile, 'utf8');
+const sw = fs.readFileSync(swFile, 'utf8');
 let failures = 0;
 
 function check(ok, message) {
@@ -18,16 +28,98 @@ function check(ok, message) {
   }
 }
 
+function pngSize(filePath) {
+  const png = fs.readFileSync(filePath);
+  return {
+    width: png.readUInt32BE(16),
+    height: png.readUInt32BE(20),
+  };
+}
+
 const opens = (html.match(/<script\b/g) || []).length;
 const closes = (html.match(/<\/script>/g) || []).length;
 check(opens === closes, `script tags balanced (${opens} open, ${closes} close)`);
 check(opens > 0, 'at least one inline script block found');
+check(/<meta name="theme-color" content="#6d3bf5">/.test(html), 'theme-color meta matches the design-system brand');
+check(/<meta name="apple-mobile-web-app-capable" content="yes">/.test(html), 'apple mobile web app capable meta is present');
+check(/<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">/.test(html), 'apple status bar meta is present');
+check(/<meta name="apple-mobile-web-app-title" content="Hero Tasks">/.test(html), 'apple mobile web app title meta is present');
+check(/<link rel="apple-touch-icon" href="icon-180.png">/.test(html), 'apple touch icon link is present');
 
-const parentTabButtons = html.match(/id="p-tabbtn-(approvals|tasks|rewards|settings)"/g) || [];
-check(parentTabButtons.length === 4, `parent HQ exposes 4 tab buttons (${parentTabButtons.length} found)`);
+check(manifest.theme_color === '#6d3bf5', 'manifest theme_color matches the design-system brand');
+check(manifest.background_color === '#f7f5ff', 'manifest background_color matches the design-system background');
+check(Array.isArray(manifest.icons), 'manifest icons array exists');
+check(/fill="#6d3bf5"/.test(svgIcon), 'SVG icon uses the design-system brand fill');
+if (Array.isArray(manifest.icons)) {
+  const svgIcon = manifest.icons.find((icon) => icon.src === 'icon.svg');
+  const icon192 = manifest.icons.find((icon) => icon.src === 'icon-192.png');
+  const icon512 = manifest.icons.find((icon) => icon.src === 'icon-512.png');
+  const maskableIcon = manifest.icons.find((icon) => icon.src === 'icon-maskable.png');
+  check(Boolean(svgIcon), 'manifest keeps the SVG icon');
+  check(svgIcon && svgIcon.purpose === 'any', 'SVG icon purpose is any');
+  check(icon192 && icon192.sizes === '192x192' && icon192.type === 'image/png' && icon192.purpose === 'any', 'manifest includes the 192px PNG icon');
+  check(icon512 && icon512.sizes === '512x512' && icon512.type === 'image/png' && icon512.purpose === 'any', 'manifest includes the 512px PNG icon');
+  check(maskableIcon && maskableIcon.sizes === '512x512' && maskableIcon.type === 'image/png' && maskableIcon.purpose === 'maskable', 'manifest includes the maskable PNG icon');
+}
+
+check(fs.existsSync(icon180File), '180px Apple touch icon file exists');
+check(fs.existsSync(icon192File), '192px install icon file exists');
+check(fs.existsSync(icon512File), '512px install icon file exists');
+check(fs.existsSync(maskableIconFile), 'maskable install icon file exists');
+if (fs.existsSync(icon180File)) {
+  const size = pngSize(icon180File);
+  check(size.width === 180 && size.height === 180, 'Apple touch icon is 180x180');
+}
+if (fs.existsSync(icon192File)) {
+  const size = pngSize(icon192File);
+  check(size.width === 192 && size.height === 192, 'install icon is 192x192');
+}
+if (fs.existsSync(icon512File)) {
+  const size = pngSize(icon512File);
+  check(size.width === 512 && size.height === 512, 'install icon is 512x512');
+}
+if (fs.existsSync(maskableIconFile)) {
+  const size = pngSize(maskableIconFile);
+  check(size.width === 512 && size.height === 512, 'maskable install icon is 512x512');
+}
+
+check(/const CACHE_NAME = 'hero-tasks-shell-v4';/.test(sw), 'service worker cache name bumped to v4');
+check(/'\/icon-180\.png'/.test(sw), 'service worker caches the Apple touch icon');
+check(/'\/icon-192\.png'/.test(sw), 'service worker caches the 192px icon');
+check(/'\/icon-512\.png'/.test(sw), 'service worker caches the 512px icon');
+check(/'\/icon-maskable\.png'/.test(sw), 'service worker caches the maskable icon');
+
+const parentTabButtons = html.match(/id="p-tabbtn-(approvals|tasks|rewards|calendar|settings)"/g) || [];
+check(parentTabButtons.length === 5, `parent HQ exposes 5 tab buttons (${parentTabButtons.length} found)`);
 check(/let parentTab = 'approvals';/.test(html), 'parent tab state defaults to approvals');
 check(/function switchParentTab\(tab\)/.test(html), 'parent tab switcher exists');
+check(/id="p-tab-calendar"/.test(html), 'parent calendar tab panel exists');
+check(/\['approvals', 'tasks', 'rewards', 'calendar', 'settings'\]/.test(html), 'parent tab switcher includes calendar');
+check(/function switchParentCalendarView\(view\)/.test(html), 'parent calendar view switcher exists');
+check(/action:\s*'addPlanningItem'/.test(html), 'parent calendar form calls addPlanningItem');
+check(/action:\s*'updatePlanningItem'/.test(html), 'parent calendar edit calls updatePlanningItem');
+check(/action:\s*'deletePlanningItem'/.test(html), 'parent calendar delete calls deletePlanningItem');
 check(/id="p-approvals-badge"/.test(html), 'approvals badge exists');
+check(/id="p-approvals-glance"/.test(html), 'approvals tab includes at-a-glance container');
+check(/Today &amp; this week/.test(html), 'approvals tab includes Today & this week title');
+check(/id="p-approvals-today-by-kid"/.test(html), 'approvals tab includes today-by-kid container');
+check(/Today, by kid/.test(html), 'approvals tab includes Today, by kid title');
+const approvalsGlanceIndex = html.indexOf('id="p-approvals-glance"');
+const approvalsTodayByKidIndex = html.indexOf('id="p-approvals-today-by-kid"');
+const approvalsPendingIndex = html.indexOf('id="p-pending"');
+check(approvalsGlanceIndex !== -1 && approvalsPendingIndex !== -1 && approvalsGlanceIndex < approvalsPendingIndex, 'at-a-glance section appears before pending approvals list');
+check(approvalsGlanceIndex !== -1 && approvalsTodayByKidIndex !== -1 && approvalsGlanceIndex < approvalsTodayByKidIndex, 'today-by-kid section appears after at-a-glance section');
+check(approvalsTodayByKidIndex !== -1 && approvalsPendingIndex !== -1 && approvalsTodayByKidIndex < approvalsPendingIndex, 'today-by-kid section appears before pending approvals list');
+check(/function loadParentApprovalsGlance\(\)/.test(html), 'approvals at-a-glance loader exists');
+check(/action:\s*'calendar'[\s\S]*parentId:\s*session\.personId[\s\S]*parentPin:\s*session\.pin/.test(html), 'approvals at-a-glance reuses calendar action with parent credentials');
+check(/function renderParentApprovalsGlance\(\)/.test(html), 'approvals at-a-glance renderer exists');
+check(/function parentCalendarLiveCompletion\(item\)/.test(html), 'calendar live completion matcher exists');
+check(/function parentCalendarOverviewStatus\(item\)/.test(html), 'calendar overview status helper exists');
+check(/function renderParentApprovalsTodayByKid\(\)/.test(html), 'approvals today-by-kid renderer exists');
+check(/function renderParentApprovalsSummary\(\)/.test(html), 'approvals summary renderer exists');
+check(/\.tag\.waiting\s*\{\s*background:\s*var\(--warning-wash\);\s*color:\s*var\(--warning\);\s*\}/.test(html), 'waiting tag uses warning tokens');
+check(/item\.kind === 'chore' && item\.kidId === kid\.id && parentCalendarDayKey\(item\) === todayKey/.test(html), 'today-by-kid renderer filters today chore occurrences per kid');
+check(/switchParentTab\('calendar'\)|switchParentTab\\\('calendar'\\\)/.test(html), 'approvals at-a-glance includes View calendar action');
 check(/parentEditTask\(\\'/.test(html), 'task rows wire an Edit button');
 check(/id="k-voice-reminder-btn"/.test(html), 'kid Home tab includes a voice reminder button');
 check(/id="voice-reminder-modal"/.test(html), 'voice reminder confirmation modal exists');
@@ -35,6 +127,11 @@ check(/window\.SpeechRecognition \|\| window\.webkitSpeechRecognition/.test(html
 check(/action:\s*'validateVoiceNote'/.test(html), 'voice reminder flow calls validateVoiceNote');
 check(/action:\s*'saveVoiceReminder'/.test(html), 'voice reminder flow calls saveVoiceReminder');
 check(/This weekend/.test(html) && /No specific time/.test(html), 'voice reminder flow includes low-confidence when choice pills');
+const kidTabButtons = html.match(/id="tabbtn-(home|missions|rewards|leaderboard|calendar)"/g) || [];
+check(kidTabButtons.length === 5, `kid nav exposes 5 tab buttons (${kidTabButtons.length} found)`);
+check(/id="tab-calendar"/.test(html), 'calendar tab panel exists');
+check(/\['home', 'missions', 'rewards', 'leaderboard', 'calendar'\]/.test(html), 'kid tab switcher includes calendar');
+check(/function switchCalendarView\(view\)/.test(html), 'calendar view switcher exists');
 
 // Syntax-check each inline script body.
 const bodies = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);

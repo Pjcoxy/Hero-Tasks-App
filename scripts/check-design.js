@@ -197,10 +197,10 @@ if (bodyMatch) {
     return visible;
   }
 
-  const visibleKidPanels = countVisiblePanels(['tab-home', 'tab-missions', 'tab-rewards', 'tab-leaderboard']);
+  const visibleKidPanels = countVisiblePanels(['tab-home', 'tab-missions', 'tab-rewards', 'tab-leaderboard', 'tab-calendar']);
   check(visibleKidPanels <= 1, `at most one kid tab panel visible in static markup (${visibleKidPanels} visible)`);
 
-  const visibleParentPanels = countVisiblePanels(['p-tab-approvals', 'p-tab-tasks', 'p-tab-rewards', 'p-tab-settings']);
+  const visibleParentPanels = countVisiblePanels(['p-tab-approvals', 'p-tab-tasks', 'p-tab-rewards', 'p-tab-calendar', 'p-tab-settings']);
   check(visibleParentPanels <= 1, `at most one parent tab panel visible in static markup (${visibleParentPanels} visible)`);
 }
 
