@@ -36,12 +36,17 @@ check(/action:\s*'deletePlanningItem'/.test(html), 'parent calendar delete calls
 check(/id="p-approvals-badge"/.test(html), 'approvals badge exists');
 check(/id="p-approvals-glance"/.test(html), 'approvals tab includes at-a-glance container');
 check(/Today &amp; this week/.test(html), 'approvals tab includes Today & this week title');
+check(/id="p-family-snapshot"/.test(html), 'approvals tab includes family snapshot container');
+check(/Family snapshot/.test(html), 'approvals tab includes Family snapshot title');
+const familySnapshotIndex = html.indexOf('id="p-family-snapshot"');
 const approvalsGlanceIndex = html.indexOf('id="p-approvals-glance"');
 const approvalsPendingIndex = html.indexOf('id="p-pending"');
+check(familySnapshotIndex !== -1 && approvalsGlanceIndex !== -1 && familySnapshotIndex < approvalsGlanceIndex, 'family snapshot appears before today & this week section');
 check(approvalsGlanceIndex !== -1 && approvalsPendingIndex !== -1 && approvalsGlanceIndex < approvalsPendingIndex, 'at-a-glance section appears before pending approvals list');
 check(/function loadParentApprovalsGlance\(\)/.test(html), 'approvals at-a-glance loader exists');
 check(/action:\s*'calendar'[\s\S]*parentId:\s*session\.personId[\s\S]*parentPin:\s*session\.pin/.test(html), 'approvals at-a-glance reuses calendar action with parent credentials');
 check(/function renderParentApprovalsGlance\(\)/.test(html), 'approvals at-a-glance renderer exists');
+check(/function renderParentFamilySnapshot\(\)/.test(html), 'family snapshot renderer exists');
 check(/switchParentTab\('calendar'\)|switchParentTab\\\('calendar'\\\)/.test(html), 'approvals at-a-glance includes View calendar action');
 check(/parentEditTask\(\\'/.test(html), 'task rows wire an Edit button');
 const kidTabButtons = html.match(/id="tabbtn-(home|missions|rewards|leaderboard|calendar)"/g) || [];
@@ -63,8 +68,11 @@ bodies.forEach((body, i) => {
 });
 
 function extractFunctionSource(name) {
-  const signature = `async function ${name}(`;
-  const start = html.indexOf(signature);
+  const signatures = [`async function ${name}(`, `function ${name}(`];
+  const start = signatures.reduce((found, signature) => {
+    if (found !== -1) return found;
+    return html.indexOf(signature);
+  }, -1);
   if (start === -1) return '';
   const openBrace = html.indexOf('{', start);
   if (openBrace === -1) return '';
@@ -218,10 +226,99 @@ async function runParentEditTaskChecks() {
   }
 }
 
+function runParentFamilySnapshotChecks() {
+  const source = extractFunctionSource('renderParentFamilySnapshot');
+  check(Boolean(source), 'renderParentFamilySnapshot exists');
+  if (!source) return;
+
+  const factory = new Function(
+    'state',
+    'kidsOnly',
+    'renderAvatarHtml',
+    'buildEmptyState',
+    'esc',
+    source.replace(/^function renderParentFamilySnapshot/, 'return function')
+  );
+
+  const renderAvatarHtml = (value) => `<span>${value || '❓'}</span>`;
+  const buildEmptyState = (emoji, line1, line2) => '<div class="empty">'
+    + '<span class="empty-emoji">' + emoji + '</span>'
+    + '<span class="empty-line1">' + line1 + '</span>'
+    + (line2 ? '<span class="empty-line2">' + line2 + '</span>' : '')
+    + '</div>';
+  const esc = (value) => String(value).replace(/[&<>"']/g, (m) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]
+  ));
+
+  {
+    const state = {
+      people: [
+        { id: 'parent', role: 'parent', name: 'Pat', emoji: '👑' },
+      ],
+      stats: {},
+    };
+    const renderParentFamilySnapshot = factory(
+      state,
+      () => state.people.filter((person) => person.role === 'kid'),
+      renderAvatarHtml,
+      buildEmptyState,
+      esc
+    );
+    const htmlOut = renderParentFamilySnapshot();
+    check(htmlOut.includes('Add a kid to start assigning tasks.'), 'family snapshot reuses the existing no-kids empty-state heading');
+    check(htmlOut.includes('Once a kid is added, you can assign chores from this tab.'), 'family snapshot reuses the existing no-kids empty-state body');
+  }
+
+  {
+    const state = {
+      people: [
+        { id: 'parent', role: 'parent', name: 'Pat', emoji: '👑' },
+        { id: 'kid-1', role: 'kid', name: 'Ava', emoji: '🦊' },
+        { id: 'kid-2', role: 'kid', name: 'Milo', emoji: '🐻' },
+      ],
+      stats: {
+        'kid-1': {
+          points: 50,
+          balance: 42,
+          streak: 5,
+          badges: [
+            { id: 'first-steps', emoji: '🌱', label: 'First Steps', earned: true },
+            { id: 'on-a-roll', emoji: '🔥', label: 'On a Roll', earned: true },
+            { id: 'week-warrior', emoji: '⚡', label: 'Week Warrior', earned: false },
+          ],
+        },
+        'kid-2': {
+          points: 8,
+          balance: 8,
+          streak: 0,
+          badges: [],
+        },
+      },
+    };
+    const renderParentFamilySnapshot = factory(
+      state,
+      () => state.people.filter((person) => person.role === 'kid'),
+      renderAvatarHtml,
+      buildEmptyState,
+      esc
+    );
+    const htmlOut = renderParentFamilySnapshot();
+    check(htmlOut.includes('Ava'), 'family snapshot renders kid names');
+    check(htmlOut.includes('42 pts'), 'family snapshot renders balance points directly');
+    check(htmlOut.includes('🔥 5 day streak'), 'family snapshot renders the earned streak copy');
+    check(htmlOut.includes('no streak yet'), 'family snapshot renders the calm zero-streak copy');
+    check(htmlOut.includes('title="First Steps">🌱</span>'), 'family snapshot renders earned badge emojis');
+    check(htmlOut.includes('title="On a Roll">🔥</span>'), 'family snapshot renders multiple earned badges');
+    check(!htmlOut.includes('title="Week Warrior">⚡</span>'), 'family snapshot excludes unearned badge emojis');
+    check(htmlOut.includes('0 badges earned'), 'family snapshot shows a zero-badge summary when none are earned');
+  }
+}
+
 check(/<\/html>\s*$/i.test(html.trim() + '\n') || /<\/html>/i.test(html), 'closing </html> present');
 
 (async function main() {
   await runParentEditTaskChecks();
+  runParentFamilySnapshotChecks();
   if (failures) {
     console.error(`\n${failures} frontend check(s) failed`);
     process.exit(1);

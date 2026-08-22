@@ -657,6 +657,37 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .parent-main .empty-emoji { font-size: var(--text-lg); }
 .parent-main .empty-line1 { font-size: var(--text-base); }
 .parent-main .empty-line2 { font-size: var(--text-sm); }
+.parent-snapshot-avatar {
+  background: var(--surface);
+  border: 2px solid var(--kid-color, var(--brand));
+  color: var(--kid-color, var(--brand));
+  overflow: hidden;
+}
+.parent-snapshot-avatar svg {
+  display: block;
+}
+.parent-points-badge {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.parent-snapshot-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+}
+.parent-snapshot-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  min-height: 2rem;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-size: var(--text-lg);
+}
 .parent-summary-row,
 .parent-item-head {
   display: flex;
@@ -1073,6 +1104,10 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 
   <main class="parent-main">
     <div id="p-tab-approvals" class="parent-panel">
+      <section class="parent-section">
+        <h2 class="parent-section-title">Family snapshot</h2>
+        <div id="p-family-snapshot"></div>
+      </section>
       <section class="parent-section">
         <h2 class="parent-section-title">Today &amp; this week</h2>
         <div id="p-approvals-glance"></div>
@@ -1877,6 +1912,38 @@ function renderParentApprovalsGlance() {
     + '</div>';
 }
 
+function renderParentFamilySnapshot() {
+  var kids = kidsOnly();
+  if (kids.length === 0) {
+    return buildEmptyState('👧', 'Add a kid to start assigning tasks.', 'Once a kid is added, you can assign chores from this tab.');
+  }
+  return kids.map(function(kid, index) {
+    var kidColorVal = 'var(--kid-' + (Math.min(index, 3) + 1) + ')';
+    var stats = state.stats[kid.id] || {};
+    var balance = typeof stats.balance === 'number' ? stats.balance : (stats.points || 0);
+    var streak = Number(stats.streak) || 0;
+    var badges = Array.isArray(stats.badges) ? stats.badges : [];
+    var earnedBadges = badges.filter(function(badge) { return badge && badge.earned; });
+    return '<div class="card parent-card">'
+      + '<div class="parent-item-head">'
+      + '<div class="parent-summary-row">'
+      + '<span class="parent-kid-mark parent-snapshot-avatar" style="--kid-color:' + kidColorVal + '">' + renderAvatarHtml(kid.emoji, kidColorVal) + '</span>'
+      + '<div class="parent-copy">'
+      + '<strong>' + esc(kid.name) + '</strong>'
+      + '<div class="sub">' + (streak > 0 ? '🔥 ' + streak + ' day streak' : 'no streak yet') + '</div>'
+      + '</div>'
+      + '</div>'
+      + '<span class="parent-badge parent-points-badge">' + balance + ' pts</span>'
+      + '</div>'
+      + (earnedBadges.length
+          ? '<div class="parent-snapshot-badges">' + earnedBadges.map(function(badge) {
+              return '<span class="parent-snapshot-badge" title="' + esc(badge.label) + '">' + badge.emoji + '</span>';
+            }).join('') + '</div>'
+          : '<div class="sub">0 badges earned</div>')
+      + '</div>';
+  }).join('');
+}
+
 function renderParentCalendarChecklists(item) {
   if (item.kind !== 'event') return '';
   var prepLists = Array.isArray(item.prepLists) ? item.prepLists : [];
@@ -2209,6 +2276,7 @@ function renderParent(person) {
     parentApprovalsGlanceLoaded = false;
     loadParentApprovalsGlance();
   }
+  document.getElementById('p-family-snapshot').innerHTML = renderParentFamilySnapshot();
   renderParentApprovalsGlance();
 
   var el = document.getElementById('p-pending');
