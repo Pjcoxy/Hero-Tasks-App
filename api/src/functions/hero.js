@@ -2,12 +2,51 @@ const { app } = require('@azure/functions');
 const { randomUUID } = require('crypto');
 const { container } = require('../lib/cosmos');
 const { ensureSeeded, HOUSEHOLD_ID } = require('../lib/seed');
+const { sendPush } = require('../lib/push');
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
 const HHMM_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+const DUE_REMINDER_SCHEDULE = '0 */15 * * * *';
+
+function hhmmToMinutes(value) {
+  const [h, m] = String(value).split(':');
+  return (Number(h) * 60) + Number(m);
+}
+
+function isInQuietHours(quietHours, now = new Date()) {
+  if (!quietHours || !HHMM_RE.test(quietHours.start || '') || !HHMM_RE.test(quietHours.end || '')) {
+    return false;
+  }
+  const start = hhmmToMinutes(quietHours.start);
+  const end = hhmmToMinutes(quietHours.end);
+  const nowMinutes = (now.getUTCHours() * 60) + now.getUTCMinutes();
+  if (start === end) return true;
+  if (start < end) return nowMinutes >= start && nowMinutes < end;
+  return nowMinutes >= start || nowMinutes < end;
+}
+
+async function getHouseholdQuietHours() {
+  const { resource: household } = await container('households')
+    .item(HOUSEHOLD_ID, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  return household && household.quietHours ? household.quietHours : null;
+}
+
+async function sendPushIfAllowed(personId, payload, quietHours) {
+  if (!personId || isInQuietHours(quietHours)) return { sent: 0, removed: 0, suppressed: true };
+  try {
+    return await sendPush(personId, payload);
+  } catch (err) {
+    // Push delivery is a side-effect. Never fail the underlying action because
+    // push is unavailable or misconfigured.
+    console.warn('sendPush failed', err && err.message ? err.message : err);
+    return { sent: 0, removed: 0, failed: true };
+  }
+}
 
 async function queryHousehold(containerName) {
   const { resources } = await container(containerName)
@@ -226,6 +265,20 @@ async function completeTask(req) {
     status: 'pending',
     createdAt: new Date().toISOString(),
   });
+  const [people, quietHours] = await Promise.all([
+    queryHousehold('people'),
+    getHouseholdQuietHours(),
+  ]);
+  const kid = people.find((p) => p.id === chore.kidId);
+  const kidName = kid && kid.name ? kid.name : 'A kid';
+  const parents = people.filter((p) => p.role === 'parent');
+  await Promise.all(
+    parents.map((parent) => sendPushIfAllowed(parent.id, {
+      title: 'Approval needed',
+      body: `${kidName} completed ${chore.title}`,
+      url: '/',
+    }, quietHours))
+  );
   return getState();
 }
 
@@ -269,6 +322,12 @@ async function approve(req) {
     }
     completion.status = 'approved';
     await completions.item(req.completionId, HOUSEHOLD_ID).replace(completion);
+    const quietHours = await getHouseholdQuietHours();
+    await sendPushIfAllowed(completion.kidId, {
+      title: 'Nice work! 🎉',
+      body: `You earned ${Number(completion.points) || 0} points for ${completion.title}`,
+      url: '/',
+    }, quietHours);
   }
   return getState();
 }
@@ -477,6 +536,37 @@ async function cancelRedemption(req) {
   return getState();
 }
 
+async function sendDueReminders(now = new Date()) {
+  await ensureSeeded();
+  const [chores, completions, quietHours] = await Promise.all([
+    queryHousehold('chores'),
+    queryHousehold('completions'),
+    getHouseholdQuietHours(),
+  ]);
+  const completedTaskIds = new Set(completions.map((c) => c.taskId).filter(Boolean));
+  const choresContainer = container('chores');
+
+  for (const chore of chores) {
+    if (chore.active === false) continue;
+    if (chore.cycle !== 'oneoff') continue;
+    if (!chore.dueBy || chore.lastReminderSentAt) continue;
+    if (completedTaskIds.has(chore.id)) continue;
+    const dueAt = new Date(chore.dueBy);
+    if (Number.isNaN(dueAt.getTime()) || dueAt.getTime() > now.getTime()) continue;
+
+    if (isInQuietHours(quietHours, now)) continue;
+
+    await sendPushIfAllowed(chore.kidId, {
+      title: 'Chore due',
+      body: `${chore.title} is due now`,
+      url: '/',
+    }, quietHours);
+
+    chore.lastReminderSentAt = now.toISOString();
+    await choresContainer.item(chore.id, HOUSEHOLD_ID).replace(chore);
+  }
+}
+
 const ROUTES = {
   state: () => getState(),
   login,
@@ -525,4 +615,15 @@ app.http('hero', {
   },
 });
 
-module.exports = { getState, calcStreak, ROUTES, updateQuietHours };
+app.timer('choreDueReminder', {
+  schedule: DUE_REMINDER_SCHEDULE,
+  handler: async (_timer, context) => {
+    try {
+      await sendDueReminders();
+    } catch (err) {
+      context.error(err);
+    }
+  },
+});
+
+module.exports = { getState, calcStreak, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders };

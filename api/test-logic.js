@@ -97,7 +97,13 @@ async function main() {
   // "test mode" warning only) but its internal functions aren't exported individually,
   // so drive it the same way the real HTTP layer would: through getState + direct Cosmos
   // writes mirroring what each action does, then assert getState()'s derived fields.
-  const { getState, calcStreak, ROUTES, updateQuietHours } = require('./src/functions/hero.js');
+  const {
+    getState,
+    calcStreak,
+    ROUTES,
+    updateQuietHours,
+    sendDueReminders,
+  } = require('./src/functions/hero.js');
   const { sendPush } = require('./src/lib/push.js');
 
   const chores = mockContainer('chores');
@@ -240,6 +246,213 @@ async function main() {
   const dailyChore = state.tasks.find((t) => t.id === 'chore1');
   assert.strictEqual(dailyChore.dueBy, null, 'daily task with no dueBy set should come back null, not undefined');
   console.log('✓ dueBy round-trips correctly for one-off tasks');
+
+  // ---- Push notification flow tests ----
+  await mockContainer('pushSubscriptions').items.create({
+    id: 'push-parent-1',
+    householdId: HOUSEHOLD_ID,
+    personId: 'peter',
+    endpoint: 'https://push.example/parent-1',
+    keys: { p256dh: 'parent-1-key', auth: 'parent-1-auth' },
+    createdAt: new Date().toISOString(),
+  });
+  await mockContainer('pushSubscriptions').items.create({
+    id: 'push-parent-2',
+    householdId: HOUSEHOLD_ID,
+    personId: 'tymanda',
+    endpoint: 'https://push.example/parent-2',
+    keys: { p256dh: 'parent-2-key', auth: 'parent-2-auth' },
+    createdAt: new Date().toISOString(),
+  });
+  await mockContainer('pushSubscriptions').items.create({
+    id: 'push-ollie',
+    householdId: HOUSEHOLD_ID,
+    personId: 'ollie',
+    endpoint: 'https://push.example/ollie',
+    keys: { p256dh: 'ollie-key', auth: 'ollie-auth' },
+    createdAt: new Date().toISOString(),
+  });
+
+  await chores.items.create({
+    id: 'chore3',
+    householdId: HOUSEHOLD_ID,
+    kidId: 'ollie',
+    title: 'Put toys away',
+    points: 7,
+    cycle: 'daily',
+    createdAt: '2026-01-01',
+    active: true,
+  });
+
+  pushCalls.length = 0;
+  await ROUTES.completeTask({ taskId: 'chore3' });
+  const approvalNeededPushes = pushCalls
+    .filter((call) => call.type === 'send')
+    .map((call) => ({ endpoint: call.subscription.endpoint, payload: JSON.parse(call.payload) }))
+    .filter((call) => call.payload.title === 'Approval needed');
+  assert.strictEqual(approvalNeededPushes.length, 2, 'completeTask should notify each parent');
+  assert.deepStrictEqual(
+    approvalNeededPushes.map((p) => p.endpoint).sort(),
+    ['https://push.example/parent-1', 'https://push.example/parent-2']
+  );
+  approvalNeededPushes.forEach((push) => {
+    assert.strictEqual(push.payload.url, '/');
+    assert.strictEqual(push.payload.body, 'Ollie completed Put toys away');
+  });
+  console.log('✓ completeTask sends approval-needed push to all parents');
+
+  const chore3Completion = (await completions.items.query({}).fetchAll()).resources.find(
+    (c) => c.taskId === 'chore3' && c.status === 'pending'
+  );
+  assert.ok(chore3Completion, 'expected pending completion for chore3');
+
+  pushCalls.length = 0;
+  await ROUTES.approve({
+    parentId: 'peter',
+    parentPin: '1234',
+    completionId: chore3Completion.id,
+  });
+  const rewardPushes = pushCalls
+    .filter((call) => call.type === 'send')
+    .map((call) => ({ endpoint: call.subscription.endpoint, payload: JSON.parse(call.payload) }))
+    .filter((call) => call.payload.title === 'Nice work! 🎉');
+  assert.strictEqual(rewardPushes.length, 2, 'approve should notify all subscriptions for the completion kid');
+  assert.deepStrictEqual(
+    rewardPushes.map((push) => push.endpoint).sort(),
+    ['https://push.example/ollie', 'https://push.example/other']
+  );
+  rewardPushes.forEach((push) => {
+    assert.strictEqual(push.payload.body, 'You earned 7 points for Put toys away');
+    assert.strictEqual(push.payload.url, '/');
+  });
+  console.log('✓ approve sends reward-earned push to the completed chore kid');
+
+  const now = new Date();
+  const startQuiet = new Date(now.getTime() - (60 * 1000));
+  const endQuiet = new Date(now.getTime() + (60 * 1000));
+  const hhmm = (d) => `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  await updateQuietHours({
+    parentId: 'peter',
+    parentPin: '1234',
+    start: hhmm(startQuiet),
+    end: hhmm(endQuiet),
+  });
+
+  await chores.items.create({
+    id: 'chore4',
+    householdId: HOUSEHOLD_ID,
+    kidId: 'ollie',
+    title: 'Water plant',
+    points: 4,
+    cycle: 'daily',
+    createdAt: '2026-01-01',
+    active: true,
+  });
+
+  pushCalls.length = 0;
+  await ROUTES.completeTask({ taskId: 'chore4' });
+  const quietApprovalPushes = pushCalls
+    .filter((call) => call.type === 'send')
+    .map((call) => JSON.parse(call.payload))
+    .filter((payload) => payload.title === 'Approval needed');
+  assert.strictEqual(quietApprovalPushes.length, 0, 'approval-needed pushes should be suppressed during quiet hours');
+
+  const chore4Completion = (await completions.items.query({}).fetchAll()).resources.find(
+    (c) => c.taskId === 'chore4' && c.status === 'pending'
+  );
+  assert.ok(chore4Completion, 'expected pending completion for chore4');
+
+  pushCalls.length = 0;
+  await ROUTES.approve({
+    parentId: 'peter',
+    parentPin: '1234',
+    completionId: chore4Completion.id,
+  });
+  const quietRewardPushes = pushCalls
+    .filter((call) => call.type === 'send')
+    .map((call) => JSON.parse(call.payload))
+    .filter((payload) => payload.title === 'Nice work! 🎉');
+  assert.strictEqual(quietRewardPushes.length, 0, 'reward-earned pushes should be suppressed during quiet hours');
+  console.log('✓ approval-needed and reward-earned pushes are suppressed in quiet hours');
+
+  await updateQuietHours({ parentId: 'peter', parentPin: '1234', start: null, end: null });
+
+  await chores.items.create({
+    id: 'chore5',
+    householdId: HOUSEHOLD_ID,
+    kidId: 'ollie',
+    title: 'Pack school bag',
+    points: 5,
+    cycle: 'oneoff',
+    dueBy: '2026-08-22T09:45:00.000Z',
+    createdAt: '2026-08-01',
+    active: true,
+  });
+  await chores.items.create({
+    id: 'chore6',
+    householdId: HOUSEHOLD_ID,
+    kidId: 'ollie',
+    title: 'Recurring checklist',
+    points: 3,
+    cycle: 'daily',
+    dueBy: '2026-08-22T09:45:00.000Z',
+    createdAt: '2026-08-01',
+    active: true,
+  });
+  await chores.items.create({
+    id: 'chore7',
+    householdId: HOUSEHOLD_ID,
+    kidId: 'ollie',
+    title: 'Completed one-off',
+    points: 6,
+    cycle: 'oneoff',
+    dueBy: '2026-08-22T09:40:00.000Z',
+    createdAt: '2026-08-01',
+    active: true,
+  });
+  await completions.items.create({
+    id: 'completion-chore7',
+    householdId: HOUSEHOLD_ID,
+    taskId: 'chore7',
+    kidId: 'ollie',
+    title: 'Completed one-off',
+    points: 6,
+    date: '2026-08-22',
+    status: 'pending',
+    createdAt: '2026-08-22T09:41:00.000Z',
+  });
+
+  pushCalls.length = 0;
+  await sendDueReminders(new Date('2026-08-22T10:00:00.000Z'));
+  const duePushes = pushCalls
+    .filter((call) => call.type === 'send')
+    .map((call) => ({ endpoint: call.subscription.endpoint, payload: JSON.parse(call.payload) }))
+    .filter((call) => call.payload.title === 'Chore due');
+  assert.strictEqual(duePushes.length, 2, 'due reminder should notify all subscriptions for the assigned kid');
+  assert.deepStrictEqual(
+    duePushes.map((push) => push.endpoint).sort(),
+    ['https://push.example/ollie', 'https://push.example/other']
+  );
+  duePushes.forEach((push) => {
+    assert.strictEqual(push.payload.body, 'Pack school bag is due now');
+  });
+
+  const choreRows = (await chores.items.query({}).fetchAll()).resources;
+  const chore5 = choreRows.find((c) => c.id === 'chore5');
+  const chore6 = choreRows.find((c) => c.id === 'chore6');
+  const chore7 = choreRows.find((c) => c.id === 'chore7');
+  assert.ok(chore5.lastReminderSentAt, 'one-off due reminder should set lastReminderSentAt');
+  assert.strictEqual(chore6.lastReminderSentAt, undefined, 'recurring chore should not get due reminders');
+  assert.strictEqual(chore7.lastReminderSentAt, undefined, 'completed one-off should not get due reminders');
+
+  pushCalls.length = 0;
+  await sendDueReminders(new Date('2026-08-22T10:15:00.000Z'));
+  const repeatedDuePushes = pushCalls
+    .filter((call) => call.type === 'send')
+    .map((call) => JSON.parse(call.payload))
+    .filter((payload) => payload.title === 'Chore due');
+  assert.strictEqual(repeatedDuePushes.length, 0, 'already-reminded one-off should not re-send on later timer ticks');
+  console.log('✓ one-off due reminders fire once and recurring chores are excluded');
 
   // ---- Rewards catalog tests ----
   // hero.js exports getState; drive reward actions by calling ROUTES-equivalent via
