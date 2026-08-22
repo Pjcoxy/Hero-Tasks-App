@@ -42,7 +42,9 @@ on the cheaper thinking roles.
 1. You add the `elaborate` label to a backlog issue.
 2. **Elaborator** audits the codebase, then splits the remaining work into
    sub-issues with checkable acceptance criteria, labelled `role:developer` or
-   `role:architect`. The parent issue stays open as the umbrella.
+   `role:architect`, and links each as a **native GitHub sub-issue** of the
+   parent so the parent shows a real "N of M complete" progress bar. The
+   parent stays open as the umbrella and loses its `role:*` label.
 3. *(Future)* **Architect** reviews anything labelled `role:architect` and
    posts the technical approach.
 4. You assign a sub-issue to **Copilot** — it writes the code and opens a PR.
@@ -64,6 +66,11 @@ integration code between them, and neither engine calls the other.
 - **Epics are not implementation tasks.** Once elaborated, a parent issue
   should not carry a `role:*` label — the sub-issues do. Assigning an epic to
   Copilot produces sprawling, unreviewable PRs.
+- **Sub-issues are linked, not just mentioned.** Use GitHub's native sub-issue
+  relationship, not a "Part of #N" line alone — otherwise the parent has no
+  progress bar and the backlog flattens out as it grows.
+- **A parent closes when its sub-issues are done**, by hand. Nothing closes
+  issues automatically, and no workflow moves an epic's board status.
 
 ## Where things are documented
 
