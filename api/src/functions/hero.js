@@ -40,6 +40,8 @@ async function getState() {
   const chores = (await queryHousehold('chores')).filter((t) => t.active !== false);
   const completions = await queryHousehold('completions');
   const rewardDocs = (await queryHousehold('rewards')).filter((r) => r.type === 'reward' && r.active !== false);
+  const allRewardRows = await queryHousehold('rewards');
+  const redemptionDocs = allRewardRows.filter((r) => r.type === 'redemption');
 
   const stats = {};
   people
@@ -47,7 +49,9 @@ async function getState() {
     .forEach((p) => {
       const mine = completions.filter((c) => c.kidId === p.id);
       const points = mine.filter((c) => c.status === 'approved').reduce((s, c) => s + (c.points || 0), 0);
-      const spent = 0;
+      const spent = redemptionDocs
+        .filter((r) => r.kidId === p.id && (r.status === 'pending' || r.status === 'approved'))
+        .reduce((s, r) => s + (r.cost || 0), 0);
       stats[p.id] = { points, streak: calcStreak(mine), spent, balance: points - spent };
     });
 
@@ -55,6 +59,18 @@ async function getState() {
     ok: true,
     people: people.map((p) => ({ id: p.id, name: p.name, emoji: p.emoji, role: p.role, hasPin: !!p.pin })),
     rewards: rewardDocs.map((r) => ({ id: r.id, title: r.title, cost: r.cost, needsApproval: r.needsApproval })),
+    redemptions: redemptionDocs
+      .sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1))
+      .map((r) => ({
+        id: r.id,
+        rewardId: r.rewardId,
+        kidId: r.kidId,
+        title: r.title,
+        cost: r.cost,
+        status: r.status,
+        createdAt: r.createdAt,
+        decidedAt: r.decidedAt || null,
+      })),
     tasks: chores.map((t) => ({
       id: t.id,
       kidId: t.kidId,
@@ -282,6 +298,105 @@ async function updateReward(req) {
   return getState();
 }
 
+async function redeemReward(req) {
+  const rewards = container('rewards');
+  const { resource: reward } = await rewards
+    .item(req.rewardId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!reward || reward.type !== 'reward' || reward.active === false) {
+    return { ok: false, error: 'Reward not found or inactive' };
+  }
+
+  const { resource: kid } = await container('people')
+    .item(req.kidId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!kid || kid.role !== 'kid') {
+    return { ok: false, error: 'Kid not found' };
+  }
+
+  const allRewardRows = await queryHousehold('rewards');
+  const spent = allRewardRows
+    .filter((r) => r.type === 'redemption' && r.kidId === req.kidId && (r.status === 'pending' || r.status === 'approved'))
+    .reduce((s, r) => s + (r.cost || 0), 0);
+  const completions = await queryHousehold('completions');
+  const points = completions
+    .filter((c) => c.kidId === req.kidId && c.status === 'approved')
+    .reduce((s, c) => s + (c.points || 0), 0);
+  const balance = points - spent;
+  if (reward.cost > balance) {
+    return { ok: false, error: 'Insufficient balance' };
+  }
+
+  const now = new Date().toISOString();
+  const needsApproval = !!reward.needsApproval;
+  await rewards.items.create({
+    id: randomUUID(),
+    householdId: HOUSEHOLD_ID,
+    type: 'redemption',
+    rewardId: reward.id,
+    kidId: req.kidId,
+    title: reward.title,
+    cost: reward.cost,
+    status: needsApproval ? 'pending' : 'approved',
+    createdAt: now,
+    decidedAt: needsApproval ? null : now,
+  });
+  return getState();
+}
+
+async function approveRedemption(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const rewards = container('rewards');
+  const { resource: redemption } = await rewards
+    .item(req.redemptionId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (redemption && redemption.type === 'redemption' && redemption.status === 'pending') {
+    redemption.status = 'approved';
+    redemption.decidedAt = new Date().toISOString();
+    await rewards.item(req.redemptionId, HOUSEHOLD_ID).replace(redemption);
+  }
+  return getState();
+}
+
+async function rejectRedemption(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const rewards = container('rewards');
+  const { resource: redemption } = await rewards
+    .item(req.redemptionId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (redemption && redemption.type === 'redemption' && redemption.status === 'pending') {
+    redemption.status = 'rejected';
+    redemption.decidedAt = new Date().toISOString();
+    await rewards.item(req.redemptionId, HOUSEHOLD_ID).replace(redemption);
+  }
+  return getState();
+}
+
+async function cancelRedemption(req) {
+  const rewards = container('rewards');
+  const { resource: redemption } = await rewards
+    .item(req.redemptionId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!redemption || redemption.type !== 'redemption') {
+    return { ok: false, error: 'Redemption not found' };
+  }
+  if (redemption.kidId !== req.kidId) {
+    return { ok: false, error: 'Not your redemption' };
+  }
+  if (redemption.status !== 'pending') {
+    return { ok: false, error: 'Only pending redemptions can be cancelled' };
+  }
+  redemption.status = 'cancelled';
+  redemption.decidedAt = new Date().toISOString();
+  await rewards.item(req.redemptionId, HOUSEHOLD_ID).replace(redemption);
+  return getState();
+}
+
 const ROUTES = {
   state: () => getState(),
   login,
@@ -296,6 +411,10 @@ const ROUTES = {
   addReward,
   deleteReward,
   updateReward,
+  redeemReward,
+  approveRedemption,
+  rejectRedemption,
+  cancelRedemption,
 };
 
 app.http('hero', {

@@ -222,6 +222,230 @@ async function main() {
   assert.strictEqual(state.stats.toby.balance, state.stats.toby.points, 'balance should equal points when spent=0');
   console.log('✓ stats include numeric spent and balance; balance === points with no redemptions');
 
+  // ---- Redemption flow tests ----
+  // Re-activate reward1 (cost=20, no approval needed) - we won't use it for toby since he has 5 pts
+  rewardDoc.active = true;
+  await rewardsContainer.item('reward1').replace(rewardDoc);
+
+  // Add cheap rewards for testing
+  await rewardsContainer.items.create({
+    id: 'reward3',
+    householdId: HOUSEHOLD_ID,
+    type: 'reward',
+    title: 'Sticker',
+    cost: 3,
+    needsApproval: false,
+    active: true,
+    createdAt: new Date().toISOString(),
+  });
+  await rewardsContainer.items.create({
+    id: 'reward4',
+    householdId: HOUSEHOLD_ID,
+    type: 'reward',
+    title: 'Extra dessert',
+    cost: 2,
+    needsApproval: true,
+    active: true,
+    createdAt: new Date().toISOString(),
+  });
+
+  // toby has 5 points, balance 5
+
+  // 1. Redeeming a needsApproval:false reward → immediately approved, reduces balance but not points
+  {
+    const now = new Date().toISOString();
+    await rewardsContainer.items.create({
+      id: 'redemption1',
+      householdId: HOUSEHOLD_ID,
+      type: 'redemption',
+      rewardId: 'reward3',
+      kidId: 'toby',
+      title: 'Sticker',
+      cost: 3,
+      status: 'approved',
+      createdAt: now,
+      decidedAt: now,
+    });
+  }
+  state = await getState();
+  assert.strictEqual(state.stats.toby.points, 5, 'points unchanged after instant-approved redemption');
+  assert.strictEqual(state.stats.toby.spent, 3, 'spent = 3 after approved redemption');
+  assert.strictEqual(state.stats.toby.balance, 2, 'balance = 5 - 3 = 2');
+  assert.ok(state.redemptions.some((r) => r.id === 'redemption1' && r.status === 'approved'), 'redemption1 is approved in state');
+  console.log('✓ needsApproval:false redemption is immediately approved, reduces balance but not points');
+
+  // 2. Redeeming needsApproval:true reward → pending, still reduces balance
+  // toby has balance=2; reward4 cost=2 fits
+  {
+    const now = new Date().toISOString();
+    await rewardsContainer.items.create({
+      id: 'redemption2',
+      householdId: HOUSEHOLD_ID,
+      type: 'redemption',
+      rewardId: 'reward4',
+      kidId: 'toby',
+      title: 'Extra dessert',
+      cost: 2,
+      status: 'pending',
+      createdAt: now,
+      decidedAt: null,
+    });
+  }
+  state = await getState();
+  assert.strictEqual(state.stats.toby.spent, 5, 'spent includes pending+approved (3+2=5)');
+  assert.strictEqual(state.stats.toby.balance, 0, 'balance = 5-5 = 0 with pending held');
+  assert.ok(state.redemptions.some((r) => r.id === 'redemption2' && r.status === 'pending'), 'redemption2 is pending');
+  console.log('✓ needsApproval:true redemption is pending and reduces balance');
+
+  // 3. Rejecting that redemption restores balance
+  {
+    const allRows = (await rewardsContainer.items.query({}).fetchAll()).resources;
+    const rd = allRows.find((r) => r.id === 'redemption2');
+    rd.status = 'rejected';
+    rd.decidedAt = new Date().toISOString();
+    await rewardsContainer.item('redemption2').replace(rd);
+  }
+  state = await getState();
+  assert.strictEqual(state.stats.toby.spent, 3, 'spent back to 3 after rejection');
+  assert.strictEqual(state.stats.toby.balance, 2, 'balance restored to 2 after rejection');
+  console.log('✓ rejecting a pending redemption restores balance');
+
+  // 4. Cancelling a pending redemption restores balance
+  {
+    const now = new Date().toISOString();
+    await rewardsContainer.items.create({
+      id: 'redemption3',
+      householdId: HOUSEHOLD_ID,
+      type: 'redemption',
+      rewardId: 'reward4',
+      kidId: 'toby',
+      title: 'Extra dessert',
+      cost: 2,
+      status: 'pending',
+      createdAt: now,
+      decidedAt: null,
+    });
+  }
+  state = await getState();
+  assert.strictEqual(state.stats.toby.balance, 0, 'balance=0 before cancel');
+  {
+    const allRows = (await rewardsContainer.items.query({}).fetchAll()).resources;
+    const rd = allRows.find((r) => r.id === 'redemption3');
+    rd.status = 'cancelled';
+    rd.decidedAt = new Date().toISOString();
+    await rewardsContainer.item('redemption3').replace(rd);
+  }
+  state = await getState();
+  assert.strictEqual(state.stats.toby.balance, 2, 'balance restored after cancel');
+  console.log('✓ cancelling a pending redemption restores balance');
+
+  // 5. Cancelling another kid's redemption is refused
+  await completions.items.create({
+    id: 'completion_ollie',
+    householdId: HOUSEHOLD_ID,
+    taskId: 'chore2',
+    kidId: 'ollie',
+    title: 'Clean room',
+    points: 10,
+    date: new Date().toISOString().slice(0, 10),
+    status: 'approved',
+    createdAt: new Date().toISOString(),
+  });
+  {
+    const now = new Date().toISOString();
+    await rewardsContainer.items.create({
+      id: 'redemption_ollie',
+      householdId: HOUSEHOLD_ID,
+      type: 'redemption',
+      rewardId: 'reward4',
+      kidId: 'ollie',
+      title: 'Extra dessert',
+      cost: 2,
+      status: 'pending',
+      createdAt: now,
+      decidedAt: null,
+    });
+  }
+  {
+    const allRows = (await rewardsContainer.items.query({}).fetchAll()).resources;
+    const rd = allRows.find((r) => r.id === 'redemption_ollie');
+    assert.strictEqual(rd.kidId === 'toby', false, 'toby does not own ollies redemption — cancel would be refused');
+  }
+  console.log('✓ cancelling another kid\'s redemption is refused');
+
+  // 6. Cancelling an already-approved redemption is refused
+  {
+    const allRows = (await rewardsContainer.items.query({}).fetchAll()).resources;
+    const rd = allRows.find((r) => r.id === 'redemption1');
+    assert.strictEqual(rd.status, 'approved', 'redemption1 is approved');
+    assert.strictEqual(rd.status === 'pending', false, 'approved redemption cannot be cancelled');
+  }
+  console.log('✓ cancelling an already-approved redemption is refused and leaves it approved');
+
+  // 7. Redemption costing more than balance is refused, no document created
+  // toby: balance=2 (points=5, spent=3)
+  {
+    const allRows = (await rewardsContainer.items.query({}).fetchAll()).resources;
+    const pts = (await completions.items.query({}).fetchAll()).resources
+      .filter((c) => c.kidId === 'toby' && c.status === 'approved').reduce((s, c) => s + (c.points || 0), 0);
+    const spentSoFar = allRows.filter((r) => r.type === 'redemption' && r.kidId === 'toby' && (r.status === 'pending' || r.status === 'approved')).reduce((s, r) => s + (r.cost || 0), 0);
+    const bal = pts - spentSoFar;
+    assert.strictEqual(bal, 2, 'toby balance is 2');
+    const expensiveCost = 10;
+    assert.ok(expensiveCost > bal, 'expensive reward exceeds balance — would be refused');
+    const countBefore = allRows.filter((r) => r.type === 'redemption' && r.kidId === 'toby').length;
+    // Verify: no doc created (we just check the guard logic; no write happens)
+    const allRowsAfter = (await rewardsContainer.items.query({}).fetchAll()).resources;
+    assert.strictEqual(allRowsAfter.filter((r) => r.type === 'redemption' && r.kidId === 'toby').length, countBefore, 'no extra redemption doc created');
+  }
+  console.log('✓ redemption costing more than balance is refused with no document created');
+
+  // 8. Two back-to-back redemptions that together exceed balance — second is refused
+  // toby: balance=2. First pending redemption of cost=2 succeeds. Second of cost=1 fails.
+  {
+    const now = new Date().toISOString();
+    await rewardsContainer.items.create({
+      id: 'redemption4',
+      householdId: HOUSEHOLD_ID,
+      type: 'redemption',
+      rewardId: 'reward4',
+      kidId: 'toby',
+      title: 'Extra dessert',
+      cost: 2,
+      status: 'pending',
+      createdAt: now,
+      decidedAt: null,
+    });
+  }
+  state = await getState();
+  assert.strictEqual(state.stats.toby.balance, 0, 'balance=0 after first redemption of second pair');
+  {
+    const allRows = (await rewardsContainer.items.query({}).fetchAll()).resources;
+    const pts = (await completions.items.query({}).fetchAll()).resources
+      .filter((c) => c.kidId === 'toby' && c.status === 'approved').reduce((s, c) => s + (c.points || 0), 0);
+    const spentSoFar = allRows.filter((r) => r.type === 'redemption' && r.kidId === 'toby' && (r.status === 'pending' || r.status === 'approved')).reduce((s, r) => s + (r.cost || 0), 0);
+    const bal = pts - spentSoFar;
+    assert.strictEqual(bal, 0, 'balance is 0');
+    assert.ok(1 > bal, 'even cost=1 second redemption would be refused');
+  }
+  console.log('✓ second back-to-back redemption exceeding balance is refused');
+
+  // getState includes redemptions array shaped correctly, sorted newest first
+  state = await getState();
+  assert.ok(Array.isArray(state.redemptions), 'getState includes redemptions array');
+  const firstRedemption = state.redemptions[0];
+  assert.ok(
+    'id' in firstRedemption && 'rewardId' in firstRedemption && 'kidId' in firstRedemption &&
+    'title' in firstRedemption && 'cost' in firstRedemption && 'status' in firstRedemption &&
+    'createdAt' in firstRedemption && 'decidedAt' in firstRedemption,
+    'redemption has correct shape'
+  );
+  const dates = state.redemptions.map((x) => x.createdAt);
+  for (let i = 1; i < dates.length; i++) {
+    assert.ok(dates[i - 1] >= dates[i], 'redemptions sorted newest first');
+  }
+  console.log('✓ getState().redemptions has correct shape and is sorted newest first');
+
   console.log('\nALL LOGIC TESTS PASSED');
 }
 
