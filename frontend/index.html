@@ -241,6 +241,20 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   white-space: nowrap;
   flex-shrink: 0;
 }
+.offline-pill {
+  display: none;
+  align-items: center; gap: var(--space-1);
+  background: var(--warning-wash); color: var(--warning);
+  border-radius: var(--radius-full);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm); font-weight: var(--weight-bold);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.offline-pill.visible { display: flex; }
+@media (prefers-reduced-motion: no-preference) {
+  /* no motion — pill appears instantly on all preferences */
+}
 
 /* ─── Kid screen — main scroll area ──────────────────────────────────── */
 .kid-main {
@@ -944,6 +958,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
       <span>⭐</span>
       <span id="k-points" style="font-variant-numeric:tabular-nums"></span>
     </div>
+    <div class="offline-pill" id="kid-offline-pill" aria-live="polite" aria-label="Offline — showing cached data">⚡ Offline</div>
   </header>
 
   <main class="kid-main">
@@ -1041,6 +1056,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
     <div class="parent-header-row">
       <button class="back-btn" onclick="logout()">← Switch user</button>
       <strong id="p-hq-title" class="parent-title">👑 Parent HQ</strong>
+      <div class="offline-pill" id="parent-offline-pill" aria-live="polite" aria-label="Offline — showing cached data">⚡ Offline</div>
     </div>
   </header>
 
@@ -1335,7 +1351,11 @@ async function api(payload) {
     body: JSON.stringify(payload),
   });
   const data = await res.json();
-  if (data.people) { state = data; render(); }
+  if (data.people) {
+    state = data;
+    localStorage.setItem('hero-state-cache', JSON.stringify(state));
+    render();
+  }
   return data;
 }
 
@@ -1345,6 +1365,15 @@ async function refresh() {
   try {
     await api({ action: 'state' });
   } catch (e) {
+    const cached = localStorage.getItem('hero-state-cache');
+    if (cached) {
+      try {
+        state = JSON.parse(cached);
+        document.getElementById('loading').classList.add('hidden');
+        render();
+        return;
+      } catch (_) { /* corrupt cache — fall through to setup-warn */ }
+    }
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('setup-warn').classList.remove('hidden');
   }
@@ -3102,6 +3131,18 @@ refresh();
 setInterval(refresh, 60000);
 document.addEventListener('visibilitychange', function() { if (!document.hidden) refresh(); });
 document.getElementById('pin-input').addEventListener('keydown', function(e) { if (e.key === 'Enter') submitPin(); });
+
+function setOfflineIndicator(offline) {
+  var kidPill    = document.getElementById('kid-offline-pill');
+  var parentPill = document.getElementById('parent-offline-pill');
+  if (kidPill)    kidPill.classList.toggle('visible', offline);
+  if (parentPill) parentPill.classList.toggle('visible', offline);
+}
+
+if (!navigator.onLine) { setOfflineIndicator(true); }
+
+window.addEventListener('offline', function() { setOfflineIndicator(true); });
+window.addEventListener('online',  function() { setOfflineIndicator(false); refresh(); });
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() { navigator.serviceWorker.register('sw.js').catch(function() {}); });
