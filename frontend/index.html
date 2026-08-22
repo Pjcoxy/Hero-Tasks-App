@@ -725,6 +725,8 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
         <h2 class="section-title">📅 Today's Missions</h2>
         <div id="k-daily"></div>
         <button class="btn ghost" style="margin-top:var(--space-3)" onclick="addExtraPrompt()">➕ I did something extra!</button>
+        <h2 class="section-title">🕘 Recent activity</h2>
+        <div id="k-activity"></div>
       </div>
     </div>
 
@@ -1249,6 +1251,7 @@ function renderKid(kid) {
 
   renderRewardShop(kid, balance);
   renderRedemptions(kid);
+  renderRecentActivity(kid);
 
   var ranked = kidsOnly()
     .map(function(k) { return Object.assign({}, k, { pts: (state.stats[k.id] || {}).points || 0 }); })
@@ -1359,6 +1362,38 @@ function renderRedemptions(kid) {
       + (r.status === 'pending'
           ? '<button class="btn red-ghost small" style="margin-top:var(--space-3)" onclick="cancelKidRedemption(\'' + r.id + '\')" touch-action="manipulation">Changed my mind</button>'
           : '')
+      + '</div>';
+  }).join('');
+}
+
+function renderRecentActivity(kid) {
+  var el = document.getElementById('k-activity');
+  var decided = state.completions.filter(function(c) {
+    return c.kidId === kid.id && (c.status === 'approved' || c.status === 'rejected');
+  }).sort(function(a, b) {
+    return String(b.decidedAt || b.date || '').localeCompare(String(a.decidedAt || a.date || ''));
+  }).slice(0, 5);
+  if (decided.length === 0) {
+    el.innerHTML = buildEmptyState('🌱', 'No history yet', 'Complete a mission to see it here!');
+    return;
+  }
+  el.innerHTML = decided.map(function(c) {
+    var task = state.tasks.find(function(t) { return t.id === c.taskId; });
+    var title = task ? esc(task.title) : esc(c.taskTitle || 'Mission');
+    var pts   = task ? task.points : (c.points || 0);
+    var isApproved = c.status === 'approved';
+    var cls  = isApproved ? 'done-approved' : 'done-rejected';
+    var icon = isApproved ? '✅' : '❌';
+    var sub  = isApproved
+      ? 'Nice job! ✅ +' + pts + ' pts'
+      : '❌ Not quite — you can try again';
+    var dateStr = c.decidedAt ? formatRewardDate(c.decidedAt) : (c.date || '');
+    return '<div class="task ' + cls + '">'
+      + '<div class="tick" style="border-color:var(' + (isApproved ? '--success' : '--danger') + ');background:var(' + (isApproved ? '--success-wash' : '--danger-wash') + ');pointer-events:none" aria-hidden="true">' + icon + '</div>'
+      + '<div class="info">'
+      + '<div class="title">' + title + '</div>'
+      + '<div class="sub">' + sub + (dateStr ? ' · ' + dateStr : '') + '</div>'
+      + '</div>'
       + '</div>';
   }).join('');
 }
