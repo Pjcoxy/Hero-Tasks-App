@@ -73,13 +73,35 @@ Work in this order:
    real progress bar and hierarchy; a "Part of #N" line in the body alone does
    not.
 
-   LABELLING: apply 'role:architect' ONLY to sub-issues that need a design
-   decision made before coding starts - a new data shape, an external service,
-   a security or privacy choice, anything where a developer would otherwise
-   have to guess. Do NOT apply 'role:developer': every sub-issue is developer
-   work by default, so the label carries no information and only adds noise.
-   Leave a sub-issue unlabelled if it just needs building. If a label does not
-   exist in the repository, skip it rather than failing.
+   LABELLING: leave a sub-issue unlabelled unless it genuinely needs a design
+   decision before coding. Apply the 'architect' label ONLY in that case - and
+   understand that doing so immediately starts the Architect agent and spends
+   money, so it is a judgement call, not a formality. Most sub-issues do not
+   need it.
+
+   Apply 'architect' when the sub-issue involves any of:
+   - a NEW data shape that later features will build on, where getting it
+     wrong means a migration rather than an edit;
+   - an EXTERNAL service, API or browser capability not already used here
+     (speech recognition, push notifications, an LLM call, email);
+   - a SECURITY, PRIVACY or AUTH decision - who can see or do what, what is
+     stored, what leaves the device;
+   - an ONGOING COST per use, so someone should decide whether it is worth it;
+   - a genuine CHOICE BETWEEN APPROACHES where picking wrong is expensive to
+     undo, and the existing codebase does not already answer it.
+
+   Do NOT apply 'architect' when the sub-issue is:
+   - CRUD following a pattern already in hero.js (addTask, deleteTask,
+     requireParent and friends);
+   - UI following the conventions already in index.html;
+   - adding a field, a filter, a sort or a screen section;
+   - anything where reading the existing code answers "how would we do this
+     here?" - if you could answer it yourself while auditing, so can the
+     developer, and you should simply write it into the acceptance criteria.
+
+   When you do apply it, say in your comment on the parent WHICH sub-issues got
+   it and WHY in one line each, so the decision is reviewable. If a label does
+   not exist in the repository, skip it rather than failing.
 
 5. Comment once on the original issue with: the already-built audit summary,
    links to every sub-issue you created, and the open questions. If an

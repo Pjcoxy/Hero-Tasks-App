@@ -48,9 +48,10 @@ Four labels drive everything. You add a label; agents do the rest.
 The tester needs no label: Copilot's review is requested automatically on every
 agent-authored PR (`request-review.yml`).
 
-**When to use `architect`:** only where a genuine technical choice exists —
-issues carrying `role:architect` (#12, #15, #16, #21, #5, #43). CRUD-shaped
-work goes straight from `elaborate` to `build`.
+**`architect` is applied for you** by the Elaborator where a genuine technical
+choice exists. CRUD-shaped work goes straight from `elaborate` to `build`. You
+can still add it by hand to any issue — the older backlog items that predate
+this (#12, #15, #16, #21, #5, #43) need it applied manually.
 
 ### Label kinds
 
@@ -61,16 +62,32 @@ matters, because two of them cost money and one does not.
 |---|---|---|
 | **Trigger** | `elaborate`, `architect`, `build` | Live wire — adding it starts an agent and spends |
 | **Marker** | `elaborated`, `architected` | Applied *by* an agent; records what has been done |
-| **Flag** | `role:architect` | A note to yourself: this one needs design before building |
 
-`role:developer` and `role:tester` were deleted — every sub-issue is developer
-work by default, and the tester runs automatically on every PR, so neither
-label carried information.
+Every label is live. `role:developer` and `role:tester` were deleted (every
+sub-issue is developer work by default, and the tester runs automatically on
+every PR), and `role:architect` was replaced by the Elaborator applying
+`architect` itself.
 
-`role:architect` is deliberately a flag rather than a trigger: if the
-Elaborator applied `architect` directly it would fire the agent and spend
-money without you deciding. Filter the backlog by it to see exactly what to
-run the architect over.
+### Who applies which trigger
+
+| Trigger | Applied by | Spends |
+|---|---|---|
+| `elaborate` | **You** — deciding an item is worth working on | ~$0.35 |
+| `architect` | **The Elaborator**, on sub-issues it judges need design | ~$0.50 each |
+| `build` | **You** — Copilot credits are finite and monthly | ~40–55 credits |
+
+The Elaborator decides the architect question because it has just read the
+codebase and the issue, so it is better placed than you are to know whether a
+design decision remains. Its criteria are in the `SYSTEM_PROMPT` in
+`ops/elaborator/setup_elaborator.py`: new data shapes others build on,
+external services, security/privacy/auth, ongoing per-use cost, or a real
+choice between approaches the existing code does not already settle. CRUD
+following an existing pattern does not qualify. It must say in its comment
+which sub-issues it flagged and why, so the call is reviewable.
+
+`build` stays yours deliberately: Copilot credits are the scarce resource
+(~20–28 per month), so that is the one place worth a human deciding what is
+worth spending them on.
 
 **Never label an epic `build`.** The workflow refuses and says so, but the
 rule is: build the sub-issues, not the parent.
