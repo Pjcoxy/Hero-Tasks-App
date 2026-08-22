@@ -82,6 +82,22 @@ TOOLS = [
 MCP_SERVERS = [{"type": "url", "name": "github", "url": GITHUB_MCP_URL}]
 
 
+RESOURCE_NAME = "herotasks-agents"
+AGENT_NAME = "HeroTasks Elaborator"
+
+
+def find_by(pager, attr, value):
+    """Return the first resource whose `attr` matches `value`, else None.
+
+    Lets the script recover if a previous run created a resource but failed
+    before its ID was written to agent_config.json - avoiding orphans.
+    """
+    for item in pager:
+        if getattr(item, attr, None) == value:
+            return item
+    return None
+
+
 def main():
     client = anthropic.Anthropic()
 
@@ -91,32 +107,46 @@ def main():
             cfg = json.load(f)
 
     if "environment_id" not in cfg:
-        env = client.beta.environments.create(
-            name="herotasks-agents",
-            config={"type": "cloud", "networking": {"type": "unrestricted"}},
-        )
+        env = find_by(client.beta.environments.list(), "name", RESOURCE_NAME)
+        if env:
+            print(f"Reusing existing environment {env.id}")
+        else:
+            env = client.beta.environments.create(
+                name=RESOURCE_NAME,
+                config={"type": "cloud", "networking": {"type": "unrestricted"}},
+            )
+            print(f"Created environment {env.id}")
         cfg["environment_id"] = env.id
-        print(f"Created environment {env.id}")
 
     if "vault_id" not in cfg:
         gh_token = os.environ.get("HEROTASK_GITHUB_TOKEN")
         if not gh_token:
             sys.exit("HEROTASK_GITHUB_TOKEN is not set - cannot create the vault credential.")
-        vault = client.beta.vaults.create(name="herotasks-agents")
+        vault = find_by(client.beta.vaults.list(), "display_name", RESOURCE_NAME)
+        if vault:
+            print(f"Reusing existing vault {vault.id}")
+        else:
+            vault = client.beta.vaults.create(display_name=RESOURCE_NAME)
+            client.beta.vaults.credentials.create(
+                vault_id=vault.id,
+                display_name="GitHub MCP (Hero-Tasks-App)",
+                auth={
+                    "type": "static_bearer",
+                    "mcp_server_url": GITHUB_MCP_URL,
+                    "token": gh_token,
+                },
+            )
+            print(f"Created vault {vault.id} with GitHub MCP credential")
         cfg["vault_id"] = vault.id
-        client.beta.vaults.credentials.create(
-            vault_id=vault.id,
-            display_name="GitHub MCP (Hero-Tasks-App)",
-            auth={
-                "type": "static_bearer",
-                "mcp_server_url": GITHUB_MCP_URL,
-                "token": gh_token,
-            },
-        )
-        print(f"Created vault {vault.id} with GitHub MCP credential")
+
+    if "agent_id" not in cfg:
+        existing = find_by(client.beta.agents.list(), "name", AGENT_NAME)
+        if existing:
+            cfg["agent_id"] = existing.id
+            print(f"Reusing existing agent {existing.id}")
 
     agent_kwargs = dict(
-        name="HeroTasks Elaborator",
+        name=AGENT_NAME,
         description=(
             "Business-analyst agent: audits the Hero Tasks codebase, then breaks one "
             "backlog issue into small sub-issues with checkable acceptance criteria. "
