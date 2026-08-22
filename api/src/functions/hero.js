@@ -655,6 +655,25 @@ async function sendDueReminders(now = new Date()) {
   }
 }
 
+async function saveVoiceReminder(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
+  const title = String(req.title || '').trim();
+  if (!title) return { ok: false, error: 'title is required' };
+  await container('planningItems').items.create({
+    id: randomUUID(),
+    householdId: HOUSEHOLD_ID,
+    type: 'reminder',
+    source: 'voice',
+    kidId: req.kidId,
+    title,
+    when: req.when || null,
+    transcript: req.transcript || '',
+    status: 'confirmed',
+    createdAt: new Date().toISOString(),
+  });
+  return getState();
+}
+
 const ROUTES = {
   state: () => getState(),
   login,
@@ -677,6 +696,7 @@ const ROUTES = {
   approveRedemption,
   rejectRedemption,
   cancelRedemption,
+  saveVoiceReminder,
 };
 
 app.http('hero', {
