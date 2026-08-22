@@ -358,6 +358,47 @@ bar before merging it, and it cleared that. Adding `smoke` to the gate is the
 next step, and should not be left forever: a test nothing is obliged to pass is
 decoration, which is exactly the position `ci.yml` was in before #63.
 
+### A guard must know the difference between a bad issue and a dead agent
+
+Every build guard asks "did this get built?" and treats no as the issue's fault.
+That is only sound while the agent can build anything at all.
+
+When the Copilot allowance runs out the agent is still assigned, still produces
+nothing, and looks **exactly** like an issue too hard to build. So the guards do
+not stop waste — they quietly disqualify the backlog one issue at a time, and
+report success while doing it.
+
+This is not hypothetical. On 22 August the last Copilot pull request containing
+any files was #151 at 14:24. #135 was assigned at 19:06, produced nothing
+because there were no credits, and was marked `needs-human` as though it had
+been tried and found too hard. It had never been tried.
+
+`build-queue.yml` now establishes agent health once per run, before any guard
+fires: has **any** Copilot pull request contained a file in the last six hours?
+
+| Verdict | Meaning | Guards |
+|---|---|---|
+| `yes` | the agent is working | behave normally |
+| `no` | pull requests opened, none with files | **stand down** — the issue keeps its label, and the run warns to check billing |
+| `unknown` | no agent pull requests at all in the window | behave normally |
+
+`unknown` deliberately does **not** count as ill. A quiet queue and a dead agent
+look identical from a count of zero; only an agent that opened pull requests and
+put nothing in them is evidence.
+
+The general rule, which this pipeline has now learned three times in different
+clothes: **before blaming the work, check the thing that was supposed to do it.**
+
+### In flight means any open pull request, not just the agent's
+
+The in-flight cap counted only Copilot's pull requests. A human — or Claude in a
+session — can build a queued issue directly, and while that pull request is open
+the work is plainly in flight; the queue simply could not see it.
+
+#161 was handed to Copilot while #167, which closed it, was already open and
+green. Nothing was lost only because there were no credits to spend. Any open
+pull request whose body closes a queued issue now counts.
+
 ### The pipeline enforces the budget Copilot will not
 
 A Claude agent session carries a hard dollar cap - `budget: {type: "limit",
