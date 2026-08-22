@@ -19,11 +19,11 @@ name: Build queue
 #   - a pull request closed/merged -> whatever depended on it may be unblocked
 #   - an issue closed              -> same
 #
-# The schedule is NOT just a safety net. When auto-merge.yml merges a PR it acts
-# as github-actions[bot] via GITHUB_TOKEN, and GitHub raises no workflow events
-# for that token - so an auto-merged PR fires no 'pull_request: closed' here at
-# all. On an unattended pipeline the sweep is what actually advances the queue,
-# which is why it is every 10 minutes rather than hourly.
+# There is no schedule. There used to be, because auto-merge.yml merged via the
+# built-in GITHUB_TOKEN and GitHub raises no workflow events for that token - an
+# auto-merged PR fired no 'pull_request: closed' here, so only a clock could
+# advance the queue. The merge job now uses a real token, the events fire, and
+# the queue moves the moment something unblocks.
 #
 # MAX_PER_RUN caps how many start at once. For the initial build-out it is 6;
 # drop it to 1 for ongoing feature work.
@@ -33,8 +33,6 @@ on:
     types: [labeled, closed]
   pull_request:
     types: [closed]
-  schedule:
-    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 permissions:

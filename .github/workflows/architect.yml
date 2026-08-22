@@ -8,7 +8,7 @@ name: Architect an issue
 # Drains one issue at a time, oldest first, posting a technical approach as a
 # comment. Writes no code. On success it swaps 'architect' for 'architected'.
 #
-# Wakes on: a label being added, every 30 minutes, and manual dispatch. Dispatch
+# Wakes on: a label being added, and manual dispatch. Dispatch
 # with an issue number to jump the queue; leave it blank to just drain.
 #
 # What bounds the spend:
@@ -20,12 +20,11 @@ name: Architect an issue
 #      loop is a failed label removal, and that closes it.
 #   4. A runaway ceiling of 80 runs per rolling 24h, below.
 #
-# The ceiling counts RUNS, and a sweep is a run. At */5 that is 288 a day, so a
-# ceiling of 20 was crossed within two hours - after which nothing would ever
-# run again, the exact silent stall this workflow exists to prevent. Hence a
-# 30-minute sweep (48/day, well under 80). The sweep is only a backstop anyway:
-# adding the label fires this immediately, and each finished run dispatches the
-# next itself.
+# The ceiling counts RUNS, so keep it well clear of however often this fires.
+# A ceiling of 20 against a 5-minute sweep was crossed within two hours and then
+# held forever, after which nothing would ever run again - a guard that becomes
+# the outage. There is no sweep now: the label event starts this, and each
+# finished run dispatches the next itself.
 
 on:
   workflow_dispatch:
@@ -35,8 +34,6 @@ on:
         required: false
   issues:
     types: [labeled]
-  schedule:
-    - cron: "*/30 * * * *"
 
 permissions:
   actions: read
@@ -51,7 +48,6 @@ jobs:
   architect:
     if: >-
       github.event_name == 'workflow_dispatch'
-      || github.event_name == 'schedule'
       || github.event.label.name == 'architect'
     runs-on: ubuntu-latest
     timeout-minutes: 30
