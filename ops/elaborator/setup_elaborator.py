@@ -50,7 +50,15 @@ Work in this order:
 
    This serves two purposes and both matter:
    - Never spec work that is already built, and correct the issue where its
-     stated dependencies are wrong.
+     stated dependencies are wrong. This has already cost real money: #124
+     re-implemented addPlanningItem, updatePlanningItem and deletePlanningItem
+     when all three were already on main, and the duplicate was only noticed
+     because it conflicted. A whole build session bought nothing. Before you
+     write a sub-issue, grep for the function or the UI element it would add;
+     if it is there, say so under "Already built" instead of specifying it.
+     Check the sub-issues you are creating against EACH OTHER too - two of them
+     adding the same data model is the same waste, and the second one will
+     conflict with the first.
    - Ground the spec in the real codebase. Name the actual functions,
      containers and conventions a developer should follow (for example
      requireParent, getState, the ROUTES table, the soft-delete pattern in
