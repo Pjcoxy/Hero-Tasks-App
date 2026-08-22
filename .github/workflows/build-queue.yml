@@ -163,7 +163,26 @@ jobs:
                 continue
               fi
 
-              echo "    ::warning::#${NUM} has been assigned to Copilot for ${AGE_MIN}m with no open pull request - stale, re-queueing it"
+              # Cap the retries. Re-assigning forever is what an exhausted
+              # Copilot allowance looks like from in here: every attempt times
+              # out, every attempt costs a request the moment credits return,
+              # and the queue reports success throughout. After two goes, stop
+              # and say so.
+              MAX_ASSIGN_ATTEMPTS=2
+              ASSIGN_COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${NUM}/events?per_page=100" \
+                --jq '[.[] | select(.event == "assigned") | select(.assignee.login // "" | ascii_downcase | contains("copilot"))] | length' \
+                2>/dev/null || echo 0)
+              case "$ASSIGN_COUNT" in ''|*[!0-9]*) ASSIGN_COUNT=0 ;; esac
+
+              if [ "$ASSIGN_COUNT" -ge "$MAX_ASSIGN_ATTEMPTS" ]; then
+                echo "    ::warning::#${NUM} has been handed to Copilot ${ASSIGN_COUNT} times and never produced a pull request. Marking needs-human and taking it out of the queue."
+                gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${NUM}/labels" \
+                  -f "labels[]=needs-human" >/dev/null 2>&1 || true
+                gh api -X DELETE "repos/${GITHUB_REPOSITORY}/issues/${NUM}/labels/build" >/dev/null 2>&1 || true
+                continue
+              fi
+
+              echo "    ::warning::#${NUM} has been assigned to Copilot for ${AGE_MIN}m with no open pull request (attempt ${ASSIGN_COUNT}) - stale, re-queueing it"
               gh api -X DELETE "repos/${GITHUB_REPOSITORY}/issues/${NUM}/assignees" \
                 -f "assignees[]=Copilot" >/dev/null 2>&1 \
                 || echo "    ::warning::could not clear the stale assignee on #${NUM}; it will be retried next run"

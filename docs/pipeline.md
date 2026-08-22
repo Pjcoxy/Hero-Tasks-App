@@ -47,8 +47,10 @@ Four labels drive everything. You add a label; agents do the rest.
 | `build` | Copilot writes the code and opens a PR | ~40–55 Copilot credits |
 | `elaborated` / `architected` | Applied *by* the agents — markers, not triggers | — |
 
-The tester needs no label: Copilot's review is requested automatically on every
-agent-authored PR (`request-review.yml`).
+There is no automatic Copilot review any more — it cost two premium requests
+per pull request, gated nothing, and half of those reviews read an empty draft.
+What actually checks an agent's work is `ci.yml`: the API tests, the frontend
+and design checks, and the browser smoke test in `tests/smoke/`.
 
 **`architect` is applied for you** by the Elaborator where a genuine technical
 choice exists. CRUD-shaped work goes straight from `elaborate` to `build`. You
@@ -262,9 +264,9 @@ disabled, so it hard-stops rather than billing you.
     so it merged immediately regardless. `auto-merge.yml` now enforces the gate
     itself: it merges only when a check run named `test` has actually concluded
     `success` on the pull request's head commit. Red CI leaves the PR open.
-- **Copilot's review** (`request-review.yml`) is advisory. It does not block
-  anything — read it after the fact, or turn on branch protection if you want
-  it to gate.
+- **Copilot's review** was deleted. It was advisory, blocked nothing, and cost
+  two premium requests per pull request — see the spend section below. Turn on
+  branch protection if you want a review that actually gates.
 - **Deployment** (`deploy.yml`) deploys only what changed — API to
   `herotasks-func-dev`, frontend to `herotasks-swa-dev` — on push to `main`.
 
@@ -355,6 +357,27 @@ false reds bouncing work back to Copilot. Ten consecutive green runs were the
 bar before merging it, and it cleared that. Adding `smoke` to the gate is the
 next step, and should not be left forever: a test nothing is obliged to pass is
 decoration, which is exactly the position `ci.yml` was in before #63.
+
+### Three things spend Copilot credits, not one
+
+Worth knowing before wondering where an allowance went. In one day this project
+spent its entire monthly budget, and builds were not the largest share.
+
+| Consumer | What it cost |
+|---|---|
+| **Reviews** — `request-review.yml` | 112 runs. It fired on `opened` **and** `ready_for_review`, so every agent pull request was reviewed twice: once on a draft whose only commit was "Initial plan" and contained no files, then again when finished. Roughly half of all reviews examined an empty pull request. It gated nothing — `docs/pipeline.md` said so itself. **Deleted.** |
+| **Red-CI retries** — `fix-red-ci.yml` | Up to three hand-backs per failure, each a full Copilot session. If the agent cannot fix its own build first time it does not fix it on the third either, so this paid triple to reach the same human. **Now one attempt.** |
+| **Builds** — `build-queue.yml` | The legitimate spend. Unchanged. |
+
+A stale assignment is also capped now. Re-assigning forever is what an exhausted
+allowance looks like from inside the pipeline: every attempt times out, every
+attempt costs a request the moment credits return, and every run reports
+success. After two attempts the issue is labelled `needs-human` and drops out of
+the queue.
+
+**The general point:** an agent that reviews, retries and builds is spending on
+three lines, and only one of them is visible as "work". Before topping up an
+allowance, check what is being paid for that nobody reads.
 
 ### Cap what is IN FLIGHT, not what one run hands out
 
