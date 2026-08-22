@@ -14,12 +14,24 @@ name: Elaborate backlog issue
 #   costs nothing - the work is still sitting there labelled, and the next wake
 #   finds it.
 #
-# Wakes on: a label being added, every 5 minutes, and manual dispatch. Dispatch
+# Wakes on: a label being added, every 30 minutes, and manual dispatch. Dispatch
 # with an issue number to jump the queue; leave it blank to just drain.
 #
-# Guard: at most 20 runs per rolling 24h, so with the $2/session cap the worst
-# case is ~$40/day. Raised for the initial build-out; drop back to ~10 for
-# ongoing feature work.
+# What bounds the spend:
+#   1. The queue itself. Only labelled issues run, each runs once, and the
+#      label comes off afterwards - so the ceiling is (issues you label) x
+#      ~$0.35. Labelling is the budget.
+#   2. A $2 hard cap per session, set in the runner.
+#   3. Skipping anything already marked 'elaborated' - the one way this could loop is
+#      a failed label removal, and that closes it.
+#   4. A runaway ceiling of 80 runs per rolling 24h, below.
+#
+# The ceiling counts RUNS, and a sweep is a run. At */5 that is 288 a day, so a
+# ceiling of 20 was crossed within two hours - after which nothing would ever
+# run again, the exact silent stall this workflow exists to prevent. Hence a
+# 30-minute sweep (48/day, well under 80). The sweep is only a backstop anyway:
+# adding the label fires this immediately, and each finished run dispatches the
+# next itself.
 
 on:
   workflow_dispatch:
@@ -30,7 +42,7 @@ on:
   issues:
     types: [labeled]
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/30 * * * *"
 
 permissions:
   actions: read
@@ -50,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Daily run guard (max 20 per rolling 24h)
+      - name: Runaway guard (max 80 runs per rolling 24h)
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
@@ -58,8 +70,8 @@ jobs:
           SINCE=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
           COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/elaborate.yml/runs?created=%3E%3D${SINCE}" --jq '.total_count')
           echo "Elaborator runs in last 24h (including this one): ${COUNT}"
-          if [ "${COUNT}" -gt 20 ]; then
-            echo "::notice::Daily limit of 20 elaborator runs reached. Labelled issues stay queued and resume once the window clears."
+          if [ "${COUNT}" -gt 80 ]; then
+            echo "::notice::Runaway ceiling of 80 elaborator runs reached. Labelled issues stay queued and resume once the window clears."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
@@ -94,6 +106,17 @@ jobs:
           echo "$QUEUE" | jq -r '.[] | "  #\(.number)  \(.title)"'
 
           NEXT=$(echo "$QUEUE" | jq -r '.[0].number')
+
+          # Already done? Then 'elaborate' was left behind by a failed label
+          # removal. Clear it rather than paying to redo the work - this is the
+          # only way the queue could loop.
+          if gh api "repos/${GITHUB_REPOSITORY}/issues/${NEXT}/labels" --jq '.[].name' 2>/dev/null | grep -qx 'elaborated'; then
+            echo "#${NEXT} is already elaborated - clearing the stale label instead of rerunning."
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/issues/${NEXT}/labels/elaborate" >/dev/null 2>&1 || true
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           echo "Taking #${NEXT}."
           echo "number=${NEXT}" >> "$GITHUB_OUTPUT"
           echo "remaining=$((DEPTH - 1))" >> "$GITHUB_OUTPUT"

@@ -83,6 +83,17 @@ the whole backlog `elaborate` in one go and walk away — they drain one at a
 time, oldest first, and the label is removed as each is finished. So the labels
 on the board are always the work still outstanding.
 
+### What actually bounds the Anthropic spend
+
+Not the run ceiling — **the labels**. An issue runs once and loses its label, so
+the total is (issues you label) × ~$0.35, with a $2 hard cap per session on top.
+Labelling is the budget.
+
+The 80-runs ceiling is only there to stop a loop, and it counts *runs* — a sweep
+is a run. That is a trap: at a 5-minute sweep the old ceiling of 20 was crossed
+within two hours, after which nothing would ever run again. Keep any ceiling
+comfortably above the sweep rate, or the guard becomes the outage.
+
 ### Why every trigger has to be a queue
 
 Two GitHub behaviours quietly destroy work, and both bit this repo:
@@ -142,8 +153,10 @@ Deliberate for the initial build-out: the Copilot credit budget is the real
 limit, it fails safe, and a second ceiling underneath it only stalls the run.
 
 **Afterwards, restore the guards:** `MAX_PER_RUN=1`, the daily guard in
-`build.yml` back to ~8, the guards in `elaborate.yml` / `architect.yml` back to
-~10, and disable the auto-approve workflow.
+`build.yml` back to ~8, and disable the auto-approve workflow. Leave the
+`elaborate.yml` / `architect.yml` ceilings alone — they are runaway protection,
+not a budget, and lowering them below the sweep rate stalls the queue for good
+(see below).
 
 **The dependency check is not a pacing device** and stays whatever the speed:
 it stops Copilot writing against code that does not exist yet.
@@ -172,8 +185,8 @@ rule is: build the sub-issues, not the parent.
 
 | Guard | Limit | Why |
 |---|---|---|
-| Elaborator runs | 20 / rolling 24h | Anthropic spend |
-| Architect runs | 20 / rolling 24h | Anthropic spend |
+| Elaborator runs | 80 / rolling 24h | Runaway protection, **not** a budget |
+| Architect runs | 80 / rolling 24h | Runaway protection, **not** a budget |
 | Copilot builds | 6 at a time via the queue; **no daily cap during the build-out** | The Copilot credit budget is the real limit and fails safe on its own |
 
 > Those numbers are raised for the initial build-out. See *The build queue*
