@@ -98,6 +98,24 @@ run on it.
   in `.github/workflows/elaborate.yml`.
 - **Agent behaves oddly** — its persona is the `SYSTEM_PROMPT` in
   `ops/elaborator/setup_elaborator.py`; edit, then re-run the setup workflow.
+- **Session sits `Idle` doing nothing** — open the Console session link and
+  scroll to the end of the transcript. Unanswered **Approve / Deny** buttons
+  mean it is parked waiting for a human; the **Tools** panel shows which tool
+  is set to *Ask*. Tools are configured `always_allow` so this should not
+  happen — if it does, the tool policy in `setup_elaborator.py` has drifted.
+  The run itself now reports this and exits rather than hanging.
+
+### Reading a session in the Console
+
+1. The status pill beside the session title: **Running** (working), **Idle**
+   (stopped — finished *or* blocked), **Terminated** (ended).
+2. End of the transcript: buttons = blocked on you; plain text = finished.
+3. **Tools** panel: per-tool permission, call counts, failures. The Overview
+   box at the bottom (`Completed` vs `In flight`) tells you whether work is
+   actually progressing.
+4. **Events** tab: the raw event stream, when the transcript is ambiguous.
+5. The cost figure beside the title (`US$0.17 / US$5.00`) is spend against the
+   session budget.
 
 ## Phase 2+ (not built yet)
 

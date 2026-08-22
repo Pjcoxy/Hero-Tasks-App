@@ -70,13 +70,23 @@ Be decisive and finish in a single pass. Keep sub-issue count and wording lean:
 quality of acceptance criteria over volume of prose.
 """
 
+# Filesystem tools: read-only. No bash, write, edit, web_fetch or web_search -
+# the Elaborator reads code and writes GitHub issues, nothing else.
+# GitHub tools: always_allow, so runs are unattended. Without this they default
+# to always_ask and the session parks waiting for a human to click Approve on
+# every call. The confirmation gate is the `elaborate` label, not per-call
+# clicks; the agent's token is scoped to this repo with issues-only write.
 TOOLS = [
     {
         "type": "agent_toolset_20260401",
         "default_config": {"enabled": False},
         "configs": [{"name": n, "enabled": True} for n in ("read", "glob", "grep")],
     },
-    {"type": "mcp_toolset", "mcp_server_name": "github"},
+    {
+        "type": "mcp_toolset",
+        "mcp_server_name": "github",
+        "default_config": {"enabled": True, "permission_policy": {"type": "always_allow"}},
+    },
 ]
 
 MCP_SERVERS = [{"type": "url", "name": "github", "url": GITHUB_MCP_URL}]

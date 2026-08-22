@@ -90,7 +90,18 @@ def main():
             elif etype == "session.status_idle":
                 sr = stop_reason_type(event)
                 if sr == "requires_action":
-                    continue  # not expected for this agent (no custom tools / always_allow)
+                    # Should not happen: the agent has no custom tools and its
+                    # tools are always_allow. If it does, the session is parked
+                    # waiting for a human - say so rather than hanging until the
+                    # wall-clock limit.
+                    outcome = "requires_action"
+                    print(
+                        "\n!! The agent is waiting for tool approval and this run cannot answer it.\n"
+                        "   Approve it in the Console link above, or check the agent's tool "
+                        "permission policy.",
+                        flush=True,
+                    )
+                    break
                 outcome = "budget_reached" if sr == "budget_reached" else "done"
                 break
             elif etype == "session.status_terminated":
@@ -106,7 +117,7 @@ def main():
             "Session paused at its $5 budget cap before finishing. "
             "Raise the budget in the Console session view to let it finish, or review what it produced."
         )
-    if outcome in ("timeout", "unknown"):
+    if outcome in ("timeout", "unknown", "requires_action"):
         sys.exit(1)
 
 
