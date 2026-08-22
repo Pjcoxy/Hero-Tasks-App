@@ -83,6 +83,17 @@ the whole backlog `elaborate` in one go and walk away — they drain one at a
 time, oldest first, and the label is removed as each is finished. So the labels
 on the board are always the work still outstanding.
 
+### What actually bounds the Anthropic spend
+
+Not the run ceiling — **the labels**. An issue runs once and loses its label, so
+the total is (issues you label) × ~$0.35, with a $2 hard cap per session on top.
+Labelling is the budget.
+
+The 80-runs ceiling is only there to stop a loop, and it counts *runs*. Keep any
+ceiling comfortably clear of however often the workflow fires: a ceiling of 20
+against a 5-minute sweep was crossed within two hours and then held forever,
+turning the guard itself into the outage.
+
 ### Why every trigger has to be a queue
 
 Two GitHub behaviours quietly destroy work, and both bit this repo:
@@ -102,8 +113,8 @@ labels are the truth.
 ### The build queue
 
 `build` means **queued**, not "build now". `build-queue.yml` picks the next
-queued issues and hands them to Copilot, oldest first, sweeping every 10
-minutes and on any event that could change what is buildable.
+queued issues and hands them to Copilot, oldest first, waking on any event that
+could change what is buildable.
 
 Two reasons it is a queue rather than a direct trigger, both learned the hard
 way:
@@ -125,25 +136,22 @@ have changed what is buildable:
 | A `build` label is added | That issue may be ready to start immediately |
 | A pull request is merged or closed | Whatever depended on it may now be unblocked |
 | An issue is closed | Same |
-| 10-minute sweep | **Load-bearing, not a safety net** — see below |
 
-The sweep is not optional. When `auto-merge.yml` merges a PR it acts as
-`github-actions[bot]` via `GITHUB_TOKEN`, and GitHub raises **no workflow
-events** for that token — so an auto-merged PR fires no `pull_request: closed`
-here at all. On an unattended pipeline the sweep is what actually advances the
-queue.
-
-So a chain like #33 → #34 → #35 flows straight through, but on the sweep's
-cadence: #33's PR auto-merges, #33 closes, and #34 and #35 start within about
-10 minutes.
+There is no schedule here any more — see **the bot-token trap** above. With
+merges made by a real token the events fire, so a chain like #33 → #34 → #35
+flows straight through: #33's PR auto-merges, #33 closes, and the queue wakes
+within seconds to start #34 and #35.
 
 **Up to 6 start at once** (`MAX_PER_RUN` in the workflow), with no daily cap.
 Deliberate for the initial build-out: the Copilot credit budget is the real
 limit, it fails safe, and a second ceiling underneath it only stalls the run.
 
 **Afterwards, restore the guards:** `MAX_PER_RUN=1`, the daily guard in
-`build.yml` back to ~8, the guards in `elaborate.yml` / `architect.yml` back to
-~10, and disable the auto-approve workflow.
+`build.yml` back to ~8, and delete `approve-agent-workflows.yml` (which also
+removes one of the two remaining timers). Leave the
+`elaborate.yml` / `architect.yml` ceilings alone — they are runaway protection,
+not a budget, and lowering them below the sweep rate stalls the queue for good
+(see below).
 
 **The dependency check is not a pacing device** and stays whatever the speed:
 it stops Copilot writing against code that does not exist yet.
@@ -172,8 +180,8 @@ rule is: build the sub-issues, not the parent.
 
 | Guard | Limit | Why |
 |---|---|---|
-| Elaborator runs | 20 / rolling 24h | Anthropic spend |
-| Architect runs | 20 / rolling 24h | Anthropic spend |
+| Elaborator runs | 80 / rolling 24h | Runaway protection, **not** a budget |
+| Architect runs | 80 / rolling 24h | Runaway protection, **not** a budget |
 | Copilot builds | 6 at a time via the queue; **no daily cap during the build-out** | The Copilot credit budget is the real limit and fails safe on its own |
 
 > Those numbers are raised for the initial build-out. See *The build queue*
@@ -204,37 +212,46 @@ disabled, so it hard-stops rather than billing you.
   anything — read it after the fact, or turn on branch protection if you want
   it to gate.
 - **Deployment** (`deploy.yml`) deploys only what changed — API to
-  `herotasks-func-dev`, frontend to `herotasks-swa-dev`. It runs on push to
-  `main`, **and sweeps every 5 minutes** for anything merged that the push
-  event missed. See below for why that sweep is not optional.
+  `herotasks-func-dev`, frontend to `herotasks-swa-dev` — on push to `main`.
 
-### Why deployment needs a sweep as well as a push trigger
+### The bot-token trap, and why the pipeline has almost no polling
 
-When `auto-merge.yml` merges a Copilot PR it acts as `github-actions[bot]`,
-using the built-in `GITHUB_TOKEN`. GitHub deliberately raises **no workflow
-events** for anything that token does — otherwise a workflow could trigger
-itself in a loop. So an auto-merged PR lands on `main` and **no deploy run
-fires at all**.
+Worth understanding, because it caused the worst bug in this project so far and
+it dictates the shape of everything else.
 
-This bit us for real: #48 and #49 (the Rewards UI) merged cleanly, sat on
-`main`, and never reached Azure. The dashboard looked correct on GitHub and the
-live app had no Rewards section.
+**GitHub raises no workflow events for anything the built-in `GITHUB_TOKEN`
+does.** It has to work that way, or a workflow could trigger itself in a loop.
 
-So `deploy.yml` keeps its own record of what is live — a git tag called
-**`deployed`** — and each run deploys everything changed *since that tag*,
-moving it forward only after a successful deploy. That means:
+While `auto-merge.yml` merged with that token, an auto-merged PR therefore fired
+*nothing*: no `push` (so no deploy), no `pull_request: closed` (so the build
+queue never woke), no issue auto-close. #48 and #49 — the Rewards UI — merged
+cleanly, sat on `main`, and never reached Azure. GitHub looked perfectly
+healthy; the live app just had no Rewards section.
 
-- a failed deploy leaves the tag behind and the next sweep retries it;
-- a merge that fired no push event is picked up within 5 minutes;
-- the diff is against what is actually on Azure, not against `HEAD^`, so
-  nothing gets skipped when several commits land together.
+The first fix was polling: every workflow swept on a timer to catch what the
+events missed. That worked, but it put GitHub's cron scheduler on the critical
+path of everything — the same scheduler the fermenter project deliberately
+avoids as unreliable — and it introduced a second bug, where a run-counting
+guard counted its own sweeps and stalled the queue permanently.
 
-Worst-case lag between an auto-merge and the live app is about 10 minutes
-(5 for the merge poll, 5 for the deploy sweep). If you ever want it instant,
-give `HEROTASK_GITHUB_TOKEN` **Contents: Read and write** and **Pull requests:
-Read and write** and use it in `auto-merge.yml` — merges by a real token do
-raise events. The sweep exists so that is a nice-to-have rather than a
-requirement.
+**The real fix is to merge with a real token.** `auto-merge.yml` uses
+`HEROTASK_GITHUB_TOKEN` (Contents: Read and write, Pull requests: Read and
+write), so its merges raise events like anyone else's, and every sweep on
+`deploy.yml`, `build-queue.yml`, `elaborate.yml` and `architect.yml` was
+deleted. Work now moves the instant something unblocks it.
+
+**Two timers remain, both irreducible:**
+
+| Workflow | Why it cannot be an event |
+|---|---|
+| `auto-merge.yml` (5 min) | Copilot never signals "finished" — it opens a draft and later just renames the title from `[WIP] …`. There is no event meaning done |
+| `approve-agent-workflows.yml` (5 min) | Temporary build-out only; there is no event for "a run is waiting for approval". Delete it when the backlog is built |
+
+`deploy.yml` still keeps its own record of what is live — a git tag called
+**`deployed`** — and deploys everything changed *since that tag* rather than
+since `HEAD^`, moving it only after a successful deploy. So a failed deploy
+retries on the next push, and several commits landing together cannot hide each
+other.
 
 ### Deployment secrets (add these once)
 

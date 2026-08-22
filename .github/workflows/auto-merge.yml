@@ -44,7 +44,14 @@ jobs:
     steps:
       - name: Ready and auto-merge finished Copilot pull requests
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Deliberately the personal token, not the built-in GITHUB_TOKEN.
+          # GitHub raises no workflow events for anything GITHUB_TOKEN does, so
+          # a merge made with it fires no 'push' (deploy never runs), no
+          # 'pull_request: closed' and no issue auto-close (the build queue
+          # never wakes). That is what left the Rewards UI merged but
+          # undeployed. A merge made with a real token raises events normally,
+          # which is what lets every polling sweep in this pipeline be deleted.
+          GH_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
         run: |
           set -uo pipefail
 

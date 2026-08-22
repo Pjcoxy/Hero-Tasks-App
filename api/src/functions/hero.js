@@ -7,6 +7,8 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
+const HHMM_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+
 async function queryHousehold(containerName) {
   const { resources } = await container(containerName)
     .items.query({
@@ -36,6 +38,10 @@ function calcStreak(completions) {
 }
 
 async function getState() {
+  const { resource: household } = await container('households')
+    .item(HOUSEHOLD_ID, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
   const people = await queryHousehold('people');
   const chores = (await queryHousehold('chores')).filter((t) => t.active !== false);
   const completions = await queryHousehold('completions');
@@ -92,6 +98,7 @@ async function getState() {
       createdAt: c.createdAt,
     })),
     stats,
+    quietHours: household && household.quietHours ? household.quietHours : null,
     today: todayStr(),
   };
 }
@@ -349,6 +356,28 @@ async function updateReward(req) {
   return getState();
 }
 
+async function updateQuietHours(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const start = req.start;
+  const end = req.end;
+  const clearQuietHours = start === null && end === null;
+  const validQuietHours = typeof start === 'string' && typeof end === 'string'
+    && HHMM_RE.test(start) && HHMM_RE.test(end);
+  if (!clearQuietHours && !validQuietHours) {
+    return { ok: false, error: 'start and end must both be HH:MM strings or both null' };
+  }
+
+  const households = container('households');
+  const { resource: household } = await households
+    .item(HOUSEHOLD_ID, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!household) return { ok: false, error: 'Household not found' };
+  household.quietHours = clearQuietHours ? null : { start, end };
+  await households.item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(household);
+  return getState();
+}
+
 async function redeemReward(req) {
   const rewards = container('rewards');
   const { resource: reward } = await rewards
@@ -464,6 +493,7 @@ const ROUTES = {
   addReward,
   deleteReward,
   updateReward,
+  updateQuietHours,
   redeemReward,
   approveRedemption,
   rejectRedemption,
@@ -495,4 +525,4 @@ app.http('hero', {
   },
 });
 
-module.exports = { getState, calcStreak, ROUTES };
+module.exports = { getState, calcStreak, ROUTES, updateQuietHours };
