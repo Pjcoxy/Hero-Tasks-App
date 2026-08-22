@@ -1424,6 +1424,7 @@ function renderParent(person) {
                 + '<span class="parent-list-title">' + esc(t.title) + '</span>'
                 + '<div class="sub">' + (cycleLabel[t.cycle] || t.cycle) + ' · ' + t.points + ' pts' + (t.dueBy ? ' · due ' + formatDue(t.dueBy) : '') + '</div>'
                 + '</div>'
+                + '<button class="btn ghost small" onclick="parentEditTask(\'' + t.id + '\')">Edit</button>'
                 + '<button class="btn red-ghost small" onclick="parentDeleteTask(\'' + t.id + '\')">Remove</button>'
                 + '</div>';
             }).join('') + '</div>')
@@ -1767,6 +1768,59 @@ function toastApiError(result) {
     return true;
   }
   return false;
+}
+
+async function parentEditTask(taskId) {
+  var task = (state.tasks || []).find(function(t) { return t.id === taskId; });
+  if (!task) { toast('Task not found.'); return; }
+  var title = prompt('Task title?', task.title);
+  if (title === null) return;
+  var trimmed = title.trim();
+  if (!trimmed) { toast('Type or speak a task first!'); return; }
+  var pointsInput = prompt('Points in this task?', String(task.points));
+  if (pointsInput === null) return;
+  var points = Number(pointsInput);
+  if (!Number.isInteger(points) || points < 1) { toast('Points must be a positive integer.'); return; }
+  var cycleOptions = ['daily', 'weekly', 'oneoff'];
+  var cyclePrompt = 'How often?\n1) Every day  2) Once a week  3) One-off';
+  var cycleInput = prompt(cyclePrompt, String(cycleOptions.indexOf(task.cycle) + 1));
+  if (cycleInput === null) return;
+  var cycleIndex = Number(cycleInput.trim()) - 1;
+  var cycle = cycleOptions[cycleIndex];
+  if (!cycle) { toast('Choose 1, 2, or 3 for how often.'); return; }
+  var kids = kidsOnly();
+  var kidPrompt = 'Reassign kid\n' + kids.map(function(k, index) {
+    return (index + 1) + ') ' + k.emoji + ' ' + k.name;
+  }).join('  ');
+  var kidInput = prompt(kidPrompt, String(kids.findIndex(function(k) { return k.id === task.kidId; }) + 1));
+  if (kidInput === null) return;
+  var kidIndex = Number(kidInput.trim()) - 1;
+  var kid = kids[kidIndex];
+  if (!kid) { toast('Choose a valid kid number.'); return; }
+  var dueBy = null;
+  if (cycle === 'oneoff') {
+    var dueInput = prompt('Due date and time? Leave blank to clear it.', task.cycle === 'oneoff' && task.dueBy ? task.dueBy : '');
+    if (dueInput === null) return;
+    dueInput = dueInput.trim();
+    if (dueInput) {
+      var dueDate = new Date(dueInput);
+      if (Number.isNaN(dueDate.getTime())) { toast('Choose a valid due date and time.'); return; }
+      dueBy = dueDate.toISOString();
+    }
+  }
+  var result = await api({
+    action: 'updateTask',
+    parentId: session.personId,
+    parentPin: session.pin,
+    taskId,
+    title: trimmed,
+    points,
+    cycle,
+    kidId: kid.id,
+    dueBy,
+  });
+  if (toastApiError(result)) return;
+  toast('Task updated! ✏️');
 }
 
 async function parentAddReward() {
