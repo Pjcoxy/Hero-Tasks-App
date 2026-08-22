@@ -1473,6 +1473,13 @@ let pinTarget = null;
 let pushSetupPersonId = null;
 let kidTab = 'home';
 let kidCalendarView = 'week';
+// The kid Calendar tab used to build its grid from state.completions alone, so
+// it could only ever show chores already DONE - no upcoming chores, no events,
+// no reminders. The 'calendar' action has accepted kid credentials since it was
+// written (requireSelf, filtered to that kid, adultActions stripped); the
+// frontend simply never called it. These hold what it returns.
+let kidCalendarItems = [];
+let kidCalendarLoading = false;
 let parentTab = 'approvals';
 const VOICE_REMINDER_CONFIRMATION_THRESHOLD = 0.6;
 const VOICE_REMINDER_WHEN_CHOICES = {
@@ -1687,7 +1694,7 @@ function switchTab(tab) {
   });
   if (tab === 'calendar' && state && session && session.role === 'kid') {
     var kid = state.people.find(function(person) { return person.id === session.personId && person.role === 'kid'; });
-    if (kid) renderKidCalendar(kid);
+    if (kid) loadKidCalendar(kid);
   }
 }
 
@@ -1848,7 +1855,8 @@ function switchCalendarView(view) {
   });
   if (state && session && session.role === 'kid') {
     var kid = state.people.find(function(person) { return person.id === session.personId && person.role === 'kid'; });
-    if (kid) renderKidCalendar(kid);
+    // Refetch, not just re-render: each view spans a different date range.
+    if (kid) loadKidCalendar(kid);
   }
 }
 
@@ -1858,14 +1866,37 @@ function renderKidCalendar(kid) {
   if (!container || !range) return;
 
   var eventsByDate = {};
+  function addToDay(key, entry) {
+    if (!key) return;
+    if (!eventsByDate[key]) eventsByDate[key] = [];
+    eventsByDate[key].push(entry);
+  }
+
+  // What is already done.
   (state.completions || []).forEach(function(completion) {
     if (completion.kidId !== kid.id) return;
     if (!completion.date || completion.status === 'deleted') return;
-    if (!eventsByDate[completion.date]) eventsByDate[completion.date] = [];
-    eventsByDate[completion.date].push({
+    addToDay(completion.date, {
       title: completion.title,
       status: completion.status || 'pending',
     });
+  });
+
+  // What is coming up - chores due, events and reminders. Same day-key rule as
+  // the parent calendar, so the two views agree about which day a thing is on.
+  var done = {};
+  (state.completions || []).forEach(function(c) {
+    if (c.kidId === kid.id && c.date && c.status !== 'deleted') done[c.taskId + '|' + c.date] = true;
+  });
+  (kidCalendarItems || []).forEach(function(item) {
+    var key = parentCalendarDayKey(item);
+    if (!key) return;
+    if (item.kind === 'chore' || item.taskId) {
+      if (done[(item.taskId || item.id) + '|' + key]) return;   // already shown as complete
+      addToDay(key, { title: item.title, status: 'due' });
+    } else {
+      addToDay(key, { title: item.title, status: item.kind === 'reminder' ? 'reminder' : 'event' });
+    }
   });
 
   var now = new Date();
@@ -2258,6 +2289,53 @@ async function loadParentCalendar() {
   parentCalendarItems = Array.isArray(result && result.items) ? result.items : [];
   parentCalendarLoading = false;
   renderParentCalendar();
+}
+
+function kidCalendarBounds() {
+  var now = new Date();
+  now.setHours(0, 0, 0, 0);
+  if (kidCalendarView === 'day') {
+    var dayEnd = new Date(now);
+    dayEnd.setHours(23, 59, 59, 999);
+    return { start: now, end: dayEnd };
+  }
+  if (kidCalendarView === 'week') {
+    var wkStart = startOfWeek(now);
+    var wkEnd = addDays(wkStart, 6);
+    wkEnd.setHours(23, 59, 59, 999);
+    return { start: wkStart, end: wkEnd };
+  }
+  var monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  var monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  var gridStart = startOfWeek(monthStart);
+  var gridEnd = addDays(startOfWeek(addDays(monthEnd, 1)), 6);
+  gridEnd.setHours(23, 59, 59, 999);
+  return { start: gridStart, end: gridEnd };
+}
+
+async function loadKidCalendar(kid) {
+  if (!session || session.role !== 'kid' || !kid) return;
+  kidCalendarLoading = true;
+  renderKidCalendar(kid);
+  var bounds = kidCalendarBounds();
+  var result;
+  try {
+    result = await api({
+      action: 'calendar',
+      personId: session.personId,
+      pin: session.pin,
+      start: bounds.start.toISOString(),
+      end: bounds.end.toISOString(),
+    });
+  } catch (e) {
+    kidCalendarLoading = false;
+    kidCalendarItems = [];
+    renderKidCalendar(kid);
+    return;
+  }
+  kidCalendarItems = (result && result.ok !== false && Array.isArray(result.items)) ? result.items : [];
+  kidCalendarLoading = false;
+  renderKidCalendar(kid);
 }
 
 function parentApprovalsGlanceBounds() {
