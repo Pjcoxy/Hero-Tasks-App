@@ -14,9 +14,18 @@ name: Auto-merge agent PRs
 # The finished signal used here: authored by Copilot, still a draft, and the
 # title no longer starts with "[WIP]".
 #
-# Auto-merge only completes when required checks pass; red CI leaves the pull
-# request open. To stop one merging, put it back to draft or turn auto-merge
-# off on the pull request itself.
+# This does NOT use GitHub's --auto. That merges as soon as the *required*
+# checks pass, and this repository has no branch protection, so nothing is
+# required and --auto merged immediately - CI was reporting, not gating. The
+# gate is enforced here instead: a pull request is merged only once a check run
+# named 'test' has actually concluded successfully on its head commit.
+#
+# It also brings a pull request up to date with main before merging. Building
+# one issue at a time makes conflicts rare, but main still moves underneath a
+# pull request that is waiting, and updating first is what keeps that from
+# needing a human.
+#
+# To stop one merging, put it back to draft.
 
 on:
   schedule:
@@ -81,13 +90,42 @@ jobs:
 
           for NUM in $(echo "$CANDIDATES" | jq -r '.[].number'); do
             echo "--- #${NUM}"
-            gh pr ready "$NUM" --repo "$GITHUB_REPOSITORY" 2>/dev/null \
+
+            gh pr ready "$NUM" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
               && echo "    marked ready for review" \
               || echo "    already ready"
 
-            if gh pr merge "$NUM" --repo "$GITHUB_REPOSITORY" --squash --auto 2>&1; then
-              echo "    auto-merge enabled - it will merge when CI passes"
+            HEAD_REF=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${NUM}" --jq '.head.ref')
+            HEAD_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${NUM}" --jq '.head.sha')
+
+            # Behind main? Bring it up to date and let CI re-run against the
+            # merged result. Next cycle merges it. This is what stops a waiting
+            # pull request drifting into a conflict nobody can auto-resolve.
+            BEHIND=$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${HEAD_REF}" --jq '.behind_by' 2>/dev/null || echo 0)
+            if [ "${BEHIND:-0}" -gt 0 ]; then
+              if ERR=$(gh api -X PUT "repos/${GITHUB_REPOSITORY}/pulls/${NUM}/update-branch" 2>&1); then
+                echo "    was ${BEHIND} commits behind main - updated, will merge once CI re-runs"
+              else
+                echo "    ::warning::#${NUM} is ${BEHIND} behind main and could not be updated - likely a real conflict needing a human: ${ERR}"
+              fi
+              continue
+            fi
+
+            # The gate. Merge only on a check run named 'test' that actually
+            # concluded successfully on this exact commit.
+            CHECKS=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs" \
+              --jq '[.check_runs[] | select(.name == "test") | .conclusion]' 2>/dev/null || echo '[]')
+            echo "    test checks on ${HEAD_SHA:0:7}: $(echo "$CHECKS" | jq -c '.')"
+
+            if echo "$CHECKS" | jq -e 'any(. == "success")' >/dev/null; then
+              if ERR=$(gh pr merge "$NUM" --repo "$GITHUB_REPOSITORY" --squash 2>&1); then
+                echo "    CI green - merged"
+              else
+                echo "    ::warning::CI is green on #${NUM} but the merge failed: ${ERR}"
+              fi
+            elif echo "$CHECKS" | jq -e 'any(. == "failure" or . == "timed_out" or . == "cancelled")' >/dev/null; then
+              echo "    ::warning::CI is red on #${NUM} - leaving it open. This one needs looking at."
             else
-              echo "    ::warning::could not enable auto-merge on #${NUM}. If the error mentions auto-merge not being allowed, turn it on at Settings -> General -> Pull Requests -> Allow auto-merge."
+              echo "    CI has not concluded yet - leaving it for the next pass"
             fi
           done

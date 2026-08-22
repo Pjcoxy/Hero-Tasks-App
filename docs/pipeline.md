@@ -128,6 +128,13 @@ way:
 The queue skips anything that is an epic, already assigned to Copilot, or has
 an open issue named in a `Depends on #N` line in its body.
 
+**Staying merge-able.** Before merging, `auto-merge.yml` checks whether the
+branch is behind `main` and, if so, updates it and waits for CI to re-run
+against the merged result. Between that and building one at a time, a conflict
+needing a human should be rare — but if one does appear, GitHub says "This
+branch has conflicts that must be resolved" and it will sit there, because
+nothing in this pipeline can resolve a conflict.
+
 **It runs on events, not a clock.** The queue wakes whenever something could
 have changed what is buildable:
 
@@ -214,9 +221,24 @@ disabled, so it hard-stops rather than billing you.
   `auto-merge.yml` therefore polls every 5 minutes for Copilot drafts whose
   title has lost its `[WIP]` prefix, marks those ready and enables auto-merge.
   Acting on `opened` instead would mark half-written work ready and merge it.
-- **CI** (`ci.yml`) runs `node api/test-logic.js` plus a frontend parse check
-  on every PR. Red CI blocks the auto-merge; the PR just waits. **This is the
-  only automatic check that can stop a change reaching the app.**
+- **CI** (`ci.yml`) runs `node api/test-logic.js`, a frontend parse check and a
+  workflow-YAML check on every PR. **This is the only automatic check that can
+  stop a change reaching the app** — and making that actually true took two
+  fixes, both worth knowing about:
+
+  - **CI could not run on agent PRs.** GitHub holds workflow runs on Copilot's
+    branches at `action_required` until a maintainer approves, and the approve
+    API refuses. So CI only ran on `main` *after* the merge — reporting, not
+    gating. Fixed by also triggering on `pull_request_target`, which is not
+    subject to that gate. That trigger runs with secrets, so checking out PR
+    code under it is normally unsafe; the job is fenced to **same-repo
+    branches**, which only someone with write access can push. Fork PRs never
+    reach it.
+  - **Nothing required the check.** `gh pr merge --auto` merges once the
+    *required* checks pass, and with no branch protection nothing is required —
+    so it merged immediately regardless. `auto-merge.yml` now enforces the gate
+    itself: it merges only when a check run named `test` has actually concluded
+    `success` on the pull request's head commit. Red CI leaves the PR open.
 - **Copilot's review** (`request-review.yml`) is advisory. It does not block
   anything — read it after the fact, or turn on branch protection if you want
   it to gate.
