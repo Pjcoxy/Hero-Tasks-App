@@ -58,6 +58,24 @@ async function queryHousehold(containerName) {
   return resources;
 }
 
+const BADGES = [
+  { id: 'first-steps',     emoji: '🌱', label: 'First Steps',      test: (count, _streak) => count >= 1  },
+  { id: 'getting-started', emoji: '💪', label: 'Getting Started',   test: (count, _streak) => count >= 10 },
+  { id: 'chore-champion',  emoji: '🏅', label: 'Chore Champion',    test: (count, _streak) => count >= 25 },
+  { id: 'on-a-roll',       emoji: '🔥', label: 'On a Roll',         test: (_count, streak) => streak >= 3  },
+  { id: 'week-warrior',    emoji: '⚡', label: 'Week Warrior',       test: (_count, streak) => streak >= 7  },
+  { id: 'unstoppable',     emoji: '👑', label: 'Unstoppable',        test: (_count, streak) => streak >= 14 },
+];
+
+function calcBadges(approvedCount, streak) {
+  return BADGES.map((b) => ({
+    id: b.id,
+    emoji: b.emoji,
+    label: b.label,
+    earned: b.test(approvedCount, streak),
+  }));
+}
+
 // Streak = consecutive days with >=1 pending/approved completion, not counting
 // today against you if nothing's been done yet today.
 function calcStreak(completions) {
@@ -97,7 +115,9 @@ async function getState() {
       const spent = redemptionDocs
         .filter((r) => r.kidId === p.id && (r.status === 'pending' || r.status === 'approved'))
         .reduce((s, r) => s + (r.cost || 0), 0);
-      stats[p.id] = { points, streak: calcStreak(mine), spent, balance: points - spent };
+      const approvedCount = mine.filter((c) => c.status === 'approved').length;
+      const streak = calcStreak(mine);
+      stats[p.id] = { points, streak, spent, balance: points - spent, badges: calcBadges(approvedCount, streak) };
     });
 
   return {
@@ -686,4 +706,4 @@ app.timer('choreDueReminder', {
   },
 });
 
-module.exports = { getState, calcStreak, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders };
+module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders };
