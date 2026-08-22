@@ -35,20 +35,13 @@ jobs:
         id: issue
         run: echo "number=${{ github.event.inputs.issue_number }}" >> "$GITHUB_OUTPUT"
 
-      - name: Daily build guard (max 30 per rolling 24h)
+      # No daily cap during the initial build-out: the Copilot credit budget is
+      # the real limit and it fails safe on its own, so a second ceiling
+      # underneath it only stalls the run. Restore a cap here (~8/day) once the
+      # backlog is built and work becomes iterative.
+      - name: Daily build guard (disabled for the build-out)
         id: guard
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          SINCE=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
-          COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build.yml/runs?created=%3E%3D${SINCE}" --jq '.total_count')
-          echo "Build runs in last 24h (including this one): ${COUNT}"
-          if [ "${COUNT}" -gt 30 ]; then
-            echo "Daily limit of 30 builds reached - skipping to protect Copilot credits."
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "ok=true" >> "$GITHUB_OUTPUT"
 
       - name: Refuse epics
         if: steps.guard.outputs.ok == 'true'
