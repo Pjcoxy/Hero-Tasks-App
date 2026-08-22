@@ -170,6 +170,23 @@
     <h2>📋 Current tasks</h2>
     <div id="p-tasks"></div>
 
+    <h2>⏳ Reward requests</h2>
+    <div id="p-reward-requests"></div>
+
+    <h2>🎁 Rewards</h2>
+    <div class="card">
+      <div class="field"><label>Reward</label><input id="p-reward-title" type="text" placeholder="e.g. Movie night" autocomplete="off"></div>
+      <div class="field"><label>Cost in points</label><input id="p-reward-cost" type="number" value="20" min="1"></div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:10px;color:var(--ink);margin-bottom:0">
+          <input id="p-reward-approval" type="checkbox" checked style="width:auto;padding:0;border:none;border-radius:0;accent-color:var(--purple)">
+          Needs my approval
+        </label>
+      </div>
+      <button class="btn" onclick="parentAddReward()">Add reward</button>
+    </div>
+    <div id="p-rewards"></div>
+
     <h2>👧 Add a kid</h2>
     <div class="card">
       <div class="field"><label>Name</label><input id="p-kid-name" type="text" autocomplete="off"></div>
@@ -483,11 +500,14 @@ function renderParent(person) {
   if (current) sel.value = current;
 
   const cycleLabel = { daily: 'daily', weekly: 'weekly', oneoff: 'one-off' };
-  document.getElementById('p-tasks').innerHTML = kidsOnly().map(k => {
+  const kids = kidsOnly();
+  document.getElementById('p-tasks').innerHTML = kids.map(k => {
     const mine = state.tasks.filter(t => t.kidId === k.id);
-    if (mine.length === 0) return '';
+    const stats = state.stats[k.id] || {};
     return `<div class="card">
       <strong>${k.emoji} ${esc(k.name)}</strong>
+      <div class="sub" style="font-size:0.75rem;color:var(--muted);margin-top:4px">${stats.balance || 0} balance · ${stats.points || 0} lifetime pts</div>
+      ${mine.length === 0 ? '<div class="empty" style="padding:12px 0 0">No tasks allocated.</div>' : ''}
       ${mine.map(t => `
         <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f1f5f9">
           <div style="flex:1">${esc(t.title)}
@@ -496,7 +516,43 @@ function renderParent(person) {
           <button class="btn red-ghost small" onclick="parentDeleteTask('${t.id}')">Remove</button>
         </div>`).join('')}
     </div>`;
-  }).join('') || '<div class="empty">No tasks allocated yet.</div>';
+  }).join('') || '<div class="empty">Add a kid to start assigning tasks.</div>';
+
+  const pendingRedemptions = (state.redemptions || []).filter(r => r.status === 'pending');
+  document.getElementById('p-reward-requests').innerHTML = pendingRedemptions.length === 0
+    ? '<div class="empty">No reward requests right now</div>'
+    : pendingRedemptions.map(r => {
+      const kid = state.people.find(k => k.id === r.kidId) || { name: '?', emoji: '❓' };
+      return `<div class="card">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:1.4rem">${kid.emoji}</span>
+          <div style="flex:1">
+            <strong>${esc(kid.name)}</strong>: ${esc(r.title)}
+            <div class="sub" style="font-size:0.75rem;color:var(--muted)">${r.cost} pts</div>
+          </div>
+        </div>
+        <div class="approve-row">
+          <button class="btn green small" onclick="parentApproveRedemption('${r.id}')">✓ Approve</button>
+          <button class="btn red-ghost small" onclick="parentRejectRedemption('${r.id}')">✗ Nope</button>
+        </div>
+      </div>`;
+    }).join('');
+
+  const rewards = (state.rewards || []).filter(r => r.active !== false);
+  document.getElementById('p-rewards').innerHTML = rewards.length === 0
+    ? '<div class="empty">No rewards yet.</div>'
+    : rewards.map(r => `<div class="card">
+      <div style="display:flex;align-items:flex-start;gap:12px;justify-content:space-between">
+        <div style="flex:1;min-width:0">
+          <strong>${esc(r.title)}</strong>
+          <div class="sub" style="font-size:0.75rem;color:var(--muted);margin-top:4px">${r.cost} pts · ${r.needsApproval ? 'needs approval' : 'auto-approved'}</div>
+        </div>
+      </div>
+      <div class="approve-row">
+        <button class="btn ghost small" onclick="parentEditReward('${r.id}')">Edit</button>
+        <button class="btn red-ghost small" onclick="parentDeleteReward('${r.id}')">Remove</button>
+      </div>
+    </div>`).join('');
 }
 
 function esc(s) {
@@ -648,6 +704,85 @@ async function parentReject(completionId) {
 async function parentDeleteTask(taskId) {
   if (!confirm('Remove this task?')) return;
   await api({ action: 'deleteTask', parentId: session.personId, parentPin: session.pin, taskId });
+}
+
+function toastApiError(result) {
+  if (result && result.ok === false) {
+    toast(result.error || 'Something went wrong.');
+    return true;
+  }
+  return false;
+}
+
+async function parentAddReward() {
+  const title = document.getElementById('p-reward-title').value.trim();
+  if (!title) { toast('Enter a reward title first!'); return; }
+  const cost = Number(document.getElementById('p-reward-cost').value);
+  if (!Number.isInteger(cost) || cost < 1) { toast('Cost must be at least 1 point.'); return; }
+  const result = await api({
+    action: 'addReward',
+    parentId: session.personId,
+    parentPin: session.pin,
+    title,
+    cost,
+    needsApproval: document.getElementById('p-reward-approval').checked,
+  });
+  if (toastApiError(result)) return;
+  document.getElementById('p-reward-title').value = '';
+  document.getElementById('p-reward-cost').value = '20';
+  document.getElementById('p-reward-approval').checked = true;
+  toast('Reward added! 🎁');
+}
+
+async function parentEditReward(rewardId) {
+  const reward = (state.rewards || []).find(r => r.id === rewardId);
+  if (!reward) { toast('Reward not found.'); return; }
+  const title = prompt('Reward title?', reward.title);
+  if (title === null) return;
+  const trimmed = title.trim();
+  if (!trimmed) { toast('Enter a reward title first!'); return; }
+  const costInput = prompt('Cost in points?', String(reward.cost));
+  if (costInput === null) return;
+  const cost = Number(costInput);
+  if (!Number.isInteger(cost) || cost < 1) { toast('Cost must be at least 1 point.'); return; }
+  const approvalInput = prompt('Needs your approval? Type yes or no.', reward.needsApproval ? 'yes' : 'no');
+  if (approvalInput === null) return;
+  const normalized = approvalInput.trim().toLowerCase();
+  if (!['y', 'yes', 'n', 'no'].includes(normalized)) {
+    toast('Type yes or no for approval.');
+    return;
+  }
+  const result = await api({
+    action: 'updateReward',
+    parentId: session.personId,
+    parentPin: session.pin,
+    rewardId,
+    title: trimmed,
+    cost,
+    needsApproval: normalized === 'y' || normalized === 'yes',
+  });
+  if (toastApiError(result)) return;
+  toast('Reward updated! ✨');
+}
+
+async function parentDeleteReward(rewardId) {
+  if (!confirm('Remove this reward?')) return;
+  const result = await api({ action: 'deleteReward', parentId: session.personId, parentPin: session.pin, rewardId });
+  if (toastApiError(result)) return;
+  toast('Reward removed.');
+}
+
+async function parentApproveRedemption(redemptionId) {
+  celebrate();
+  const result = await api({ action: 'approveRedemption', parentId: session.personId, parentPin: session.pin, redemptionId });
+  if (toastApiError(result)) return;
+  toast('Reward approved! 🎉');
+}
+
+async function parentRejectRedemption(redemptionId) {
+  const result = await api({ action: 'rejectRedemption', parentId: session.personId, parentPin: session.pin, redemptionId });
+  if (toastApiError(result)) return;
+  toast('Reward request declined.');
 }
 
 async function parentAddKid() {
