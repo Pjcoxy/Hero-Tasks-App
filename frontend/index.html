@@ -1078,6 +1078,7 @@ async function ensurePushSubscription() {
     await api({
       action: 'savePushSubscription',
       personId: session.personId,
+      pin: session.pin,
       subscription: subscription.toJSON ? subscription.toJSON() : subscription,
     });
   } catch (_) {}
@@ -1511,7 +1512,7 @@ async function submitPin() {
   try {
     var res = await api({ action: 'login', personId: pinTarget.id, pin });
     if (res.ok) {
-      session = { personId: pinTarget.id, role: res.role, pin: res.role === 'parent' ? pin : '' };
+      session = { personId: pinTarget.id, role: res.role, pin };
       saveSession(); closePin(); render();
     } else {
       err.textContent = 'Hmm, that PIN isn\'t right. Try again!';
@@ -1595,7 +1596,7 @@ async function doTask(taskId) {
 
   var res;
   try {
-    res = await api({ action: 'completeTask', taskId });
+    res = await api({ action: 'completeTask', taskId, personId: session.personId, pin: session.pin });
   } catch (e) {
     state.completions = prev; render(); toast('Connection problem — try again.'); return;
   }
@@ -1613,7 +1614,7 @@ async function undoTask(completionId) {
   render();
   var res;
   try {
-    res = await api({ action: 'uncomplete', completionId });
+    res = await api({ action: 'uncomplete', completionId, personId: session.personId, pin: session.pin });
   } catch (e) {
     state.completions = prev; render(); toast('Connection problem — try again.'); return;
   }
@@ -1626,7 +1627,7 @@ async function addExtraPrompt() {
   var title = prompt('What did you do? 🌟');
   if (!title || !title.trim()) return;
   toast('Sent to your grown-up! ⏳');
-  await api({ action: 'addExtra', kidId: session.personId, title: title.trim() });
+  await api({ action: 'addExtra', kidId: session.personId, personId: session.personId, pin: session.pin, title: title.trim() });
 }
 
 async function redeemKidReward(rewardId, cost) {
@@ -1651,7 +1652,7 @@ async function redeemKidReward(rewardId, cost) {
 
   var res;
   try {
-    res = await api({ action: 'redeemReward', kidId: session.personId, rewardId });
+    res = await api({ action: 'redeemReward', kidId: session.personId, personId: session.personId, pin: session.pin, rewardId });
   } catch (e) {
     state.redemptions = prevRedemptions; state.stats = prevStats; render();
     toast('Connection problem — try again.'); return;
@@ -1684,7 +1685,7 @@ async function cancelKidRedemption(redemptionId) {
 
   var res;
   try {
-    res = await api({ action: 'cancelRedemption', kidId: session.personId, redemptionId });
+    res = await api({ action: 'cancelRedemption', kidId: session.personId, personId: session.personId, pin: session.pin, redemptionId });
   } catch (e) {
     state.redemptions = prevRedemptions; state.stats = prevStats; render();
     toast('Connection problem — try again.'); return;

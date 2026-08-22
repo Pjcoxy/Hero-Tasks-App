@@ -142,6 +142,7 @@ async function main() {
 
   await ROUTES.savePushSubscription({
     personId: 'toby',
+    pin: '1234',
     subscription: {
       endpoint: 'https://push.example/subscription-1',
       keys: { p256dh: 'p256dh-a', auth: 'auth-a' },
@@ -149,6 +150,7 @@ async function main() {
   });
   await ROUTES.savePushSubscription({
     personId: 'toby',
+    pin: '1234',
     subscription: {
       endpoint: 'https://push.example/subscription-1',
       keys: { p256dh: 'p256dh-b', auth: 'auth-b' },
@@ -162,6 +164,7 @@ async function main() {
 
   await ROUTES.removePushSubscription({
     personId: 'toby',
+    pin: '1234',
     endpoint: 'https://push.example/subscription-1',
   });
   pushSubscriptions = (await mockContainer('pushSubscriptions').items.query({}).fetchAll()).resources
@@ -285,7 +288,7 @@ async function main() {
   });
 
   pushCalls.length = 0;
-  await ROUTES.completeTask({ taskId: 'chore3' });
+  await ROUTES.completeTask({ taskId: 'chore3', personId: 'ollie', pin: '1234' });
   const approvalNeededPushes = pushCalls
     .filter((call) => call.type === 'send')
     .map((call) => ({ endpoint: call.subscription.endpoint, payload: JSON.parse(call.payload) }))
@@ -350,7 +353,7 @@ async function main() {
   });
 
   pushCalls.length = 0;
-  await ROUTES.completeTask({ taskId: 'chore4' });
+  await ROUTES.completeTask({ taskId: 'chore4', personId: 'ollie', pin: '1234' });
   const quietApprovalPushes = pushCalls
     .filter((call) => call.type === 'send')
     .map((call) => JSON.parse(call.payload))
@@ -810,6 +813,36 @@ async function main() {
   savedHousehold = (await households.item(HOUSEHOLD_ID).read()).resource;
   assert.strictEqual(savedHousehold.quietHours, null, 'non-parent auth failure should not write');
   console.log('✓ quiet hours updates require parent credentials');
+
+  await chores.items.create({
+    id: 'chore-auth',
+    householdId: HOUSEHOLD_ID,
+    kidId: 'toby',
+    title: 'Auth check chore',
+    points: 2,
+    cycle: 'daily',
+    createdAt: '2026-01-01',
+    active: true,
+  });
+  const completionsBeforeAuth = (await completions.items.query({}).fetchAll()).resources.length;
+  await ROUTES.completeTask({ taskId: 'chore-auth', personId: 'toby', pin: '1234' });
+  const authCompletion = (await completions.items.query({}).fetchAll()).resources.find(
+    (c) => c.taskId === 'chore-auth' && c.kidId === 'toby'
+  );
+  assert.ok(authCompletion, 'owning kid can complete their task with personId + pin');
+  console.log('✓ completeTask succeeds for owning kid credentials');
+
+  await assert.rejects(
+    () => ROUTES.completeTask({ taskId: 'chore-auth', personId: 'ollie', pin: '1234' }),
+    (err) => err && err.status === 401
+  );
+  const completionsAfterReject = (await completions.items.query({}).fetchAll()).resources.length;
+  assert.strictEqual(
+    completionsAfterReject,
+    completionsBeforeAuth + 1,
+    'cross-kid completeTask should be rejected without writing a new completion'
+  );
+  console.log('✓ completeTask rejects acting as another kid and writes nothing');
 
   console.log('\nALL LOGIC TESTS PASSED');
 }
