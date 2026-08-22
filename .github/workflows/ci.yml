@@ -62,6 +62,9 @@ jobs:
       - name: Check the frontend still parses
         run: node scripts/check-frontend.js
 
+      - name: Check the design system is respected
+        run: node scripts/check-design.js
+
       - name: Check every workflow file parses
         # The pipeline is unattended, so a malformed workflow would merge and
         # quietly stop something running. Two have been broken by hand already:
