@@ -490,7 +490,7 @@ test('a Waiting on you row leads to its approval card', async ({ page }) => {
   await expect(highlighted).toHaveCount(1);
   await expect(highlighted).toContainText('Feed the dog');
   await expect(highlighted).toBeInViewport();
-  await expect(highlighted.getByRole('button', { name: /Approve/ })).toBeVisible();
+  await expect(highlighted.getByRole('button', { name: '✓ Approve', exact: true })).toBeVisible();
 });
 
 // Rows with nothing to go to must stay inert rather than looking tappable.
@@ -501,4 +501,83 @@ test('rows that are not waiting on the parent are not links', async ({ page }) =
   for (let i = 0; i < count; i += 1) {
     await expect(notStarted.nth(i)).not.toHaveClass(/parent-list-row-link/);
   }
+});
+
+// Approve/decline notes. Declining without a reason leaves a kid with a red
+// cross and nothing to act on, so the reason is mandatory - and the note has to
+// actually reach the kid's own screen, which is the part source checks can't see.
+async function seedPendingChore(page, title) {
+  return page.evaluate(async (choreTitle) => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    await post({
+      action: 'addTask', parentId: 'peter', parentPin: '1234',
+      kidId: 'toby', title: choreTitle, points: 2, cycle: 'oneoff',
+    });
+    const state = await post({ action: 'state' });
+    const task = state.tasks.find((t) => t.title === choreTitle);
+    await post({ action: 'completeTask', personId: 'toby', pin: '1234', taskId: task.id });
+    return true;
+  }, title);
+}
+
+test('declining asks why, and the reason reaches the kid', async ({ page }) => {
+  await seedPendingChore(page, 'Sweep the porch');
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const card = page.locator('#p-pending .parent-card').filter({ hasText: 'Sweep the porch' });
+  await card.getByRole('button', { name: /Nope/ }).click();
+
+  // The dialog must be the in-app one, and it must ask for the fix.
+  await expect(page.locator('#ask-modal')).toBeVisible();
+  await expect(page.locator('#ask-title')).toContainText('get this approved');
+
+  // Sending it back empty must not go through.
+  await page.locator('#ask-ok').click();
+  await expect(page.locator('#toast')).toContainText('Tell them what to fix');
+  await expect(card).toBeVisible();
+
+  await card.getByRole('button', { name: /Nope/ }).click();
+  await page.locator('#ask-input').fill('The step by the door is still dusty.');
+  await page.locator('#ask-ok').click();
+  await expect(card).toBeHidden();
+
+  // Now the part that matters: the kid can read it on their own screen.
+  await page.getByRole('button', { name: /Switch user/ }).click();
+  await pickPerson(page, 'Toby');
+  const activity = page.locator('#k-activity').filter({ hasText: 'Sweep the porch' });
+  await expect(activity).toContainText('The step by the door is still dusty.');
+});
+
+test('approving can carry a note, and the fast path still needs one tap', async ({ page }) => {
+  await seedPendingChore(page, 'Water the plants');
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const card = page.locator('#p-pending .parent-card').filter({ hasText: 'Water the plants' });
+  // The aria-label is the accessible name, so match on that rather than the
+  // visible "💬 With note" - they deliberately differ.
+  await card.getByRole('button', { name: /approve with a note/i }).click();
+  await page.locator('#ask-input').fill('Great job, the pots look happy.');
+  await page.locator('#ask-ok').click();
+  await expect(card).toBeHidden();
+
+  await page.getByRole('button', { name: /Switch user/ }).click();
+  await pickPerson(page, 'Toby');
+  await expect(page.locator('#k-activity')).toContainText('Great job, the pots look happy.');
+});
+
+test('a plain approve goes straight through with no dialog', async ({ page }) => {
+  await seedPendingChore(page, 'Fold the towels');
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const card = page.locator('#p-pending .parent-card').filter({ hasText: 'Fold the towels' });
+  await card.getByRole('button', { name: /^✓ Approve$/ }).click();
+  await expect(page.locator('#ask-modal')).toBeHidden();
+  await expect(card).toBeHidden();
 });

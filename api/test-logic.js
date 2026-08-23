@@ -1698,6 +1698,74 @@ async function main() {
   assert.strictEqual(crossChores.ok, false, 'another kid cannot reorder these tasks');
   console.log('\u2713 reorderTasks refuses another kid\u2019s task ids');
 
+  // -------------------------------------------------------------------------
+  // Decision comments on approve / reject
+  // -------------------------------------------------------------------------
+  const commentTask = await ROUTES.addTask({
+    parentId: 'peter', parentPin: '1234',
+    kidId: 'toby', title: 'Tidy the shed', points: 4, cycle: 'oneoff',
+  });
+  const shedTask = commentTask.tasks.find((t) => t.title === 'Tidy the shed');
+  await ROUTES.completeTask({ personId: 'toby', pin: '1234', taskId: shedTask.id });
+  const pendingShed = (await ROUTES.state()).completions
+    .find((c) => c.taskId === shedTask.id && c.status === 'pending');
+
+  // A decline with no reason must be refused - by the API, not only the UI.
+  const bareReject = await ROUTES.reject({
+    parentId: 'peter', parentPin: '1234', completionId: pendingShed.id,
+  });
+  assert.strictEqual(bareReject.ok, false, 'reject without a comment is refused');
+  const stillPending = (await ROUTES.state()).completions.find((c) => c.id === pendingShed.id);
+  assert.strictEqual(stillPending.status, 'pending', 'a refused reject must not change the status');
+  console.log('\u2713 reject requires a comment and leaves the record untouched without one');
+
+  const blankReject = await ROUTES.reject({
+    parentId: 'peter', parentPin: '1234', completionId: pendingShed.id, comment: '   ',
+  });
+  assert.strictEqual(blankReject.ok, false, 'whitespace is not a reason');
+  console.log('\u2713 reject treats a whitespace-only comment as missing');
+
+  await ROUTES.reject({
+    parentId: 'peter', parentPin: '1234', completionId: pendingShed.id,
+    comment: 'The rake is still out — put it away and re-tick it.',
+  });
+  const rejected = (await ROUTES.state()).completions.find((c) => c.id === pendingShed.id);
+  assert.strictEqual(rejected.status, 'rejected', 'status flips to rejected');
+  assert.strictEqual(
+    rejected.comment, 'The rake is still out — put it away and re-tick it.',
+    'the reason reaches the kid through getState',
+  );
+  console.log('\u2713 reject stores the reason and getState exposes it');
+
+  // Approve: the comment is optional, and absence is null rather than missing.
+  await ROUTES.completeTask({ personId: 'toby', pin: '1234', taskId: shedTask.id });
+  const secondTry = (await ROUTES.state()).completions
+    .find((c) => c.taskId === shedTask.id && c.status === 'pending');
+  await ROUTES.approve({
+    parentId: 'peter', parentPin: '1234', completionId: secondTry.id,
+    comment: 'Much better, thank you!',
+  });
+  const approved = (await ROUTES.state()).completions.find((c) => c.id === secondTry.id);
+  assert.strictEqual(approved.status, 'approved', 'status flips to approved');
+  assert.strictEqual(approved.comment, 'Much better, thank you!', 'approve keeps its note');
+  console.log('\u2713 approve stores an optional note');
+
+  const longTask = await ROUTES.addTask({
+    parentId: 'peter', parentPin: '1234',
+    kidId: 'toby', title: 'Long note check', points: 1, cycle: 'oneoff',
+  });
+  const longId = longTask.tasks.find((t) => t.title === 'Long note check').id;
+  await ROUTES.completeTask({ personId: 'toby', pin: '1234', taskId: longId });
+  const longPending = (await ROUTES.state()).completions
+    .find((c) => c.taskId === longId && c.status === 'pending');
+  await ROUTES.approve({
+    parentId: 'peter', parentPin: '1234', completionId: longPending.id,
+    comment: 'x'.repeat(500),
+  });
+  const capped = (await ROUTES.state()).completions.find((c) => c.id === longPending.id);
+  assert.strictEqual(capped.comment.length, 280, 'a long note is capped, not stored whole');
+  console.log('\u2713 a decision comment is capped at 280 characters');
+
   console.log('\nALL LOGIC TESTS PASSED');
 }
 
