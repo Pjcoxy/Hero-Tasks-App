@@ -30,10 +30,6 @@ test.beforeEach(async ({ page }) => {
     });
   });
   await page.goto('/index.html');
-  // The splash holds for a beat on launch. Every test below wants the app
-  // behind it, so skip it rather than waiting the beat out 40-odd times.
-  await page.locator('#screen-splash').click({ timeout: 3000 }).catch(() => {});
-  await expect(page.locator('#screen-splash')).toBeHidden();
 });
 
 // Everyone in the seeded household has a PIN, so picking a person opens the PIN
@@ -692,18 +688,14 @@ test('the kid header carries the photo through after signing in', async ({ page 
 // was the mistake: it made the picker's tiles the bottom half of what should be
 // a screen of its own. The artwork belongs to #screen-splash and the picker
 // keeps its own gradient band.
-test('the artwork is on the splash screen, not the picker band', async ({ page }) => {
-  const splashBg = await page.locator('#screen-splash')
-    .evaluate((el) => getComputedStyle(el).backgroundImage);
-  expect(splashBg).toContain('hero-splash.webp');
-
-  const bandBg = await page.locator('.who-band')
-    .evaluate((el) => getComputedStyle(el).backgroundImage);
-  expect(bandBg).not.toContain('hero-splash.webp');
-
-  // A 404 would leave the fallback colour and look deliberate, so fetch it.
+test('the artwork actually loads rather than falling back to flat brand colour', async ({ page }) => {
+  // A 404 leaves the brand-colour fallback, which looks deliberate rather than
+  // broken - so the only way to catch it is to fetch the file.
   const status = await page.evaluate(async () => (await fetch('img/hero-splash.webp')).status);
   expect(status).toBe(200);
+
+  // And the old header band is gone, not merely restyled.
+  await expect(page.locator('.who-band')).toHaveCount(0);
 });
 
 // Existing households were created before the artwork existed. ensureSeeded()
@@ -764,48 +756,57 @@ test('the apple touch icon exists and is the size iOS expects', async ({ page })
   expect(size).toEqual([180, 180]);
 });
 
-// The splash is the artwork on its own screen and nothing else. It was briefly
-// merged into the top of the person picker, which put the four sign-in tiles
-// on the bottom half of what should be a held frame.
-test('the splash is its own screen, with the picker behind it', async ({ page }) => {
-  // beforeEach already dismissed it, so this drives a fresh load.
-  await page.goto('/index.html');
+// The artwork is the sign-in screen itself. It was, in order: a band at the top
+// of the picker (which cut the picture in half), then a separate splash that
+// held for two seconds and vanished. Now it is the screen you sign in on, so it
+// stays up for as long as it takes someone to choose.
+test('the sign-in screen is the artwork, with the faces on it', async ({ page }) => {
+  const screen = page.locator('#screen-who');
+  await expect(screen).toBeVisible();
 
-  const splash = page.locator('#screen-splash');
-  await expect(splash).toBeVisible();
+  const bg = await screen.evaluate((el) => getComputedStyle(el).backgroundImage);
+  expect(bg).toContain('hero-splash.webp');
 
-  // Nothing else is on it. In particular, not the person picker.
-  await expect(page.locator('#screen-who')).toBeHidden();
-  await expect(splash.locator('.who-tile')).toHaveCount(0);
-  await expect(splash).toHaveText('');
+  // Four faces, in one row, at the foot of the screen - not a grid of cards
+  // over the middle of the picture.
+  const tiles = page.locator('.who-tile');
+  await expect(tiles).toHaveCount(4);
+  const boxes = [];
+  for (let i = 0; i < 4; i += 1) boxes.push(await tiles.nth(i).boundingBox());
+  // Within a couple of pixels, not identical: flex sizing lands on fractional
+  // positions and rounding alone can split one row into two apparent values.
+  const tops = boxes.map((b) => b.y);
+  expect(Math.max(...tops) - Math.min(...tops), 'the faces should share one row')
+    .toBeLessThanOrEqual(2);
 
-  // It fills the screen rather than being a band at the top of another screen.
-  const box = await splash.boundingBox();
   const view = page.viewportSize();
-  expect(Math.round(box.width)).toBe(view.width);
-  expect(Math.round(box.height)).toBe(view.height);
-
-  // A tap moves on, and the picker is a separate screen underneath.
-  await splash.click();
-  await expect(splash).toBeHidden();
-  await expect(page.locator('#screen-who')).toBeVisible();
-  await expect(page.locator('.who-tile')).toHaveCount(4);
+  expect(Math.min(...tops), 'the row should sit low, leaving the artwork visible')
+    .toBeGreaterThan(view.height * 0.6);
 });
 
-test('the splash clears itself without a tap', async ({ page }) => {
-  await page.goto('/index.html');
-  await expect(page.locator('#screen-splash')).toBeVisible();
-  // Generous: the point is that it goes on its own, not exactly when.
-  await expect(page.locator('#screen-who')).toBeVisible({ timeout: 8000 });
+test('there is no separate splash screen to sit through', async ({ page }) => {
+  await expect(page.locator('#screen-splash')).toHaveCount(0);
+  // Signing in is reachable immediately, not after a timed hold.
+  await expect(page.locator('.who-tile').first()).toBeVisible({ timeout: 3000 });
+});
+
+test('the artwork survives a landscape window instead of zooming into the logo', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const size = await page.locator('#screen-who').evaluate((el) => getComputedStyle(el).backgroundSize);
+  expect(size).toBe('contain');
+
+  await page.setViewportSize({ width: 412, height: 915 });
+  const phone = await page.locator('#screen-who').evaluate((el) => getComputedStyle(el).backgroundSize);
+  expect(phone).toBe('cover');
 });
 
 // #183 capped these with max-width and auto margins. .who-sheet is a flex item
 // in a column container, where auto cross-axis margins override align-self:
 // stretch - so it collapsed to its content width and the picker rendered 273px
 // wide on a 412px phone.
-test('the picker fills the phone screen rather than collapsing to its content', async ({ page }) => {
+test('the sign-in bar spans the phone screen rather than collapsing to its content', async ({ page }) => {
   await page.setViewportSize({ width: 412, height: 915 });
   const sheet = await page.locator('.who-sheet').boundingBox();
-  expect(sheet.width).toBe(412);
-  expect(sheet.x).toBe(0);
+  expect(Math.round(sheet.width)).toBe(412);
+  expect(Math.round(sheet.x)).toBe(0);
 });

@@ -280,59 +280,41 @@ when the household does not exist, so editing `SEED_PEOPLE` changes nothing for
 a household created weeks ago. `AVATAR_MIGRATIONS` is the only thing that moves
 an existing record — this is the #88 trap, and it has now caught us twice.
 
-### The splash screen
+### The sign-in screen
 
-**Its own screen, showing the artwork and nothing else.** `#screen-splash` sits
-alongside `screen-who` / `screen-kid` / `screen-parent` in `show()`.
+**The artwork is the screen.** Signing in happens on top of it; there is no
+separate splash.
 
-It was first built as a background on the picker's header band. That was wrong:
-it turned the four sign-in tiles into the bottom half of what should be a held
-frame, and made one screen do two jobs. Splash is a held frame; the picker is
-where something is chosen. Separate screens.
+It took three goes to get here, and the failures are the useful part:
 
-- `contain`, not `cover`. This is a composed picture with a deliberate edge —
-  cropping the logo off a tall phone to fill the corners is worse than a thin
-  letterbox.
-- Brand colour underneath, so a slow or failed image is a branded screen rather
-  than white.
-- Clears itself once the app has something to show **and** a minimum beat has
-  passed, so it never flashes on a fast connection. A tap skips it. A backstop
-  timer clears it even if the first load never resolves — a splash must never
-  become a dead end.
-- Once dismissed it does not return. `render()` runs on every 60s poll, and a
-  splash reappearing mid-use would be absurd.
+1. Artwork as a band at the top of the picker, tiles on a solid sheet below —
+   cut the picture in half to show four names.
+2. A separate splash screen that held for a beat then vanished — the artwork got
+   about two seconds and was then gone.
+3. This: the artwork fills the screen and the faces dock along the bottom, so it
+   stays up for as long as it takes someone to choose.
 
-Keep it under ~200KB: it is the first paint on a phone. This one is 720px wide
-at WebP q76.
+- **One row of round avatars** at the foot, not a grid of cards. A card needs
+  its own background and that background is a hole punched in the picture. A
+  face plus a name needs neither.
+- The strip they sit on is boots, backpack and map in the artwork. The logo, the
+  kids and the landscape are all above it and stay untouched.
+- The gradient behind the row **fades up** rather than starting hard, so it
+  reads as light falling off the foot of the picture instead of a panel laid on
+  top. `--scrim-strong` → `--scrim-soft` → transparent.
+- Whose face it is comes from the **ring**, not a card outline — kid colour for
+  a kid, brand for a parent.
+- The `Kid` / `Parent 👑` line is dropped here. At this size the face and the
+  name are the whole message, and a third line per person costs more picture.
 
-The picker keeps its own gradient band and wordmark — they are not a fallback
-for the splash, they are that screen's own design.
+**Sizing by aspect ratio, not width.** The artwork is portrait, roughly 0.45
+wide-to-tall. A phone is close enough that `cover` crops almost nothing. Past
+`3/5` it is not: `cover` zooms into the middle of the logo and drops the sign-in
+row on top of the wordmark. Wider than that, the whole picture is fitted with
+`contain` and the brand colour flanks it — a smaller picture, but an intact one.
 
-### The app icon
-
-The shield and star from the Hero Tasks artwork. It is **redrawn, not cropped**:
-in the artwork the shield's bottom point sits behind the wordmark, so there is
-no clean cut-out. Colours are sampled from the artwork so it reads as the same
-mark.
-
-`scripts/make-icons.py` regenerates every PNG and emits the SVG from one
-geometry definition, so the two cannot drift. It is a one-off tool run by hand —
-there is no build step here and this does not add one.
-
-Three platform rules that each fail silently:
-
-- **`purpose: "any"`** (`icon-192`, `icon-512`) — rounded square with
-  **transparent** corners. Filling them leaves black corners on any launcher
-  that does not mask.
-- **`purpose: "maskable"`** — **full-bleed square**, mark inside the middle 80%.
-  The OS crops to its own shape, so transparent corners become holes and a mark
-  near the edge gets clipped.
-- **`apple-touch-icon`** (180px) — **no transparency at all.** iOS composites on
-  black and rounds it itself, so transparent corners come out black.
-
-A broken icon never looks broken from inside the app — the launcher just shows a
-letter. The smoke suite checks every icon the manifest declares exists and is
-the size it claims.
+More people would shrink the row rather than wrap it. That is the right failure:
+a second row starts eating the picture again.
 
 ### Swipeable card row
 

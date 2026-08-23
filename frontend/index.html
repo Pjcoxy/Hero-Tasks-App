@@ -47,6 +47,10 @@
      hold contrast against whatever the picture happens to be, not a known
      surface. */
   --text-scrim:   0 1px 6px rgba(28,24,48,0.7);
+  /* The gradient that lifts the sign-in row off the artwork. Deliberately not
+     opaque: the picture should still read through the foot of the screen. */
+  --scrim-strong: rgba(20,12,52,0.82);
+  --scrim-soft:   rgba(20,12,52,0.45);
   /* Colour — per-kid */
   --kid-1: #0ea5a5;
   --kid-2: #f0873a;
@@ -126,78 +130,112 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 }
 
 /* ─── Who screen ──────────────────────────────────────────────────────── */
-.who-band {
-  background: linear-gradient(155deg, var(--brand) 0%, var(--brand-soft) 100%);
-  padding: calc(env(safe-area-inset-top, 0px) + var(--space-7)) var(--space-5) calc(var(--space-7) + var(--space-4));
+/* ─── Sign-in screen ──────────────────────────────────────────────────────
+   The artwork IS this screen. It was first a band at the top with the tiles on
+   a solid sheet below, which cut the picture in half to show four names.
+
+   So the faces dock along the bottom instead: a row of round avatars over a
+   gradient that fades up from the foot of the screen. That strip is boots,
+   backpack and map in the artwork - the logo, the kids and the landscape are
+   all above it and stay untouched.
+
+   No separate splash screen any more. This one is the splash, and it holds for
+   as long as it takes someone to choose, rather than a timed couple of
+   seconds. */
+#screen-who {
+  background: var(--brand) url('img/hero-splash.webp') center top / cover no-repeat;
+  justify-content: flex-end;
+}
+/* The artwork is portrait, about 0.45 wide-to-tall. A phone is close enough
+   that `cover` crops almost nothing. Anything squarer or landscape is not:
+   `cover` there zooms into the middle of the logo and the sign-in row lands on
+   top of the wordmark. Past 3/5 the whole picture is fitted instead and the
+   brand colour flanks it - a smaller picture, but an intact one. */
+@media (min-aspect-ratio: 3/5) {
+  #screen-who { background-size: contain; }
+}
+.who-sheet {
+  flex: none;
+  padding: var(--space-7) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-5));
+  /* Fades up rather than starting hard, so it reads as light falling off the
+     bottom of the picture and not as a panel laid on top of it. */
+  background: linear-gradient(
+    to top,
+    var(--scrim-strong) 0%,
+    var(--scrim-soft) 55%,
+    transparent 100%);
+}
+.who-prompt {
   text-align: center;
   color: var(--on-brand);
-  flex-shrink: 0;
-}
-.who-band-emoji { font-size: var(--text-3xl); line-height: 1; }
-.who-band h1 { font-size: var(--text-2xl); font-weight: var(--weight-bold); margin-top: var(--space-3); line-height: var(--leading-tight); }
-.who-band p  { font-size: var(--text-base); opacity: 0.9; margin-top: var(--space-2); }
-
-/* ─── Splash ──────────────────────────────────────────────────────────────
-   The artwork on its own screen, edge to edge, with nothing over it. It is a
-   held frame, not a page: the picker that follows is where anything is done.
-
-   The brand colour sits underneath so a slow or failed image is a branded
-   screen rather than white. `contain` rather than `cover` because this is a
-   picture with a composed edge - cropping the logo off a tall phone to fill
-   the corners would be worse than letterboxing it. */
-.screen-splash {
-  background: var(--brand) url('img/hero-splash.webp') center / contain no-repeat;
-  cursor: pointer;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  text-shadow: var(--text-scrim);
+  margin-bottom: var(--space-4);
 }
 
-.who-sheet {
-  flex: 1;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  background: var(--bg);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  margin-top: calc(-1 * var(--space-5));
-  padding: var(--space-5) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-6));
-}
-
-/* Tile grid — person picker */
-.tile-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+/* One row, however many people. Four fits a small phone comfortably; a fifth
+   would shrink rather than wrap, which is the right failure here - a second row
+   would start eating the picture again. */
+#who-grid {
+  display: flex;
+  justify-content: center;
   gap: var(--space-3);
 }
 .who-tile {
-  background: var(--surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-1);
-  padding: var(--space-5) var(--space-3);
+  flex: 1 1 0;
+  max-width: 6rem;
+  background: none;
+  border: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-2);
-  min-height: 5.5rem;
+  cursor: pointer;
   touch-action: manipulation;
   transition: transform var(--dur-fast) var(--ease-out);
-  outline: 3px solid transparent;
-  outline-offset: -3px;
 }
-.who-tile:active { transform: scale(0.97); }
-.who-tile.parent { background: var(--ink); color: var(--surface); }
-.who-tile.kid-tile { outline-color: var(--kid-color, var(--brand)); }
-.who-tile .tile-emoji { font-size: var(--text-2xl); line-height: 1; }
+.who-tile:active { transform: scale(0.94); }
+.who-tile .tile-emoji {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-2xl);
+  background: var(--surface);
+  /* The ring is what carries whose face this is - kid colour for a kid, brand
+     for a parent - now that there is no card behind it. */
+  box-shadow: 0 0 0 3px var(--tile-ring, var(--brand)), var(--shadow-2);
+}
+.who-tile.parent .tile-emoji { background: var(--ink); color: var(--surface); }
+.who-tile .tile-name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--on-brand);
+  text-shadow: var(--text-scrim);
+  line-height: var(--leading-tight);
+}
+/* The 'Kid'/'Parent 👑' line goes: at this size the face and the name are the
+   whole message, and a third line per person would need more of the picture. */
+.who-tile .tile-sub { display: none; }
+
+.skel-row {
+  height: 5.5rem;
+  border-radius: var(--radius-lg);
+  background: var(--on-brand-soft);
+}
+
 /* Photo avatars fill whatever round or rounded slot they are dropped into, so
-   the same markup works at 2.5rem in the header and 4.5rem on a picker tile. */
+   the same markup works at 2.5rem in the header and on a sign-in avatar. */
 .avatar-photo {
   width: 100%; height: 100%;
   object-fit: cover;
   border-radius: inherit;
   display: block;
-}
-.who-tile .tile-emoji:has(.avatar-photo) {
-  width: 4.5rem; height: 4.5rem;
-  border-radius: var(--radius-full);
-  overflow: hidden;
-  box-shadow: var(--shadow-1);
 }
 .kid-avatar-wrap { overflow: hidden; }
 .board-row span:has(.avatar-photo) {
@@ -206,22 +244,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   overflow: hidden;
   display: inline-block;
 }
-.who-tile .tile-name  { font-size: var(--text-lg); font-weight: var(--weight-bold); color: inherit; }
-.who-tile .tile-sub   { font-size: var(--text-sm); color: var(--ink-muted); }
-.who-tile.parent .tile-sub { color: var(--on-brand-muted); }
-
-/* Skeleton tiles */
-.skeleton-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
-}
-.skel-tile {
-  background: var(--surface-sunken);
-  border-radius: var(--radius-lg);
-  height: 5.5rem;
-  animation: skel-pulse 1.4s ease-in-out infinite;
-}
+.skeleton-grid .skel-row { animation: skel-pulse 1.4s ease-in-out infinite; }
 @keyframes skel-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
 
 /* ─── Kid screen — header ─────────────────────────────────────────────── */
@@ -1164,9 +1187,6 @@ button.parent-list-row:active { transform: scale(0.99); }
 /* Tablet and up. */
 @media (min-width: 48rem) {
   html { font-size: 106.25%; }
-  /* Four across instead of two: at this width a 2-column picker gives each
-     person a tile wider than it is tall. */
-  .tile-grid { grid-template-columns: repeat(4, 1fr); }
 }
 
 /* Laptop and up: use the width rather than padding it out. */
@@ -1271,24 +1291,15 @@ button.parent-list-row:active { transform: scale(0.99); }
 <!-- ════════════════════════════════════════════════════════════════════ -->
 <!-- WHO SCREEN                                                           -->
 <!-- ════════════════════════════════════════════════════════════════════ -->
-<div id="screen-splash" class="screen screen-splash hidden" onclick="dismissSplash()" role="img" aria-label="Hero Tasks"></div>
-
 <div id="screen-who" class="screen">
-  <div class="who-band">
-    <div class="who-band-emoji">🦸</div>
-    <h1>Hero Tasks</h1>
-    <p>Who are you?</p>
-  </div>
   <div class="who-sheet">
     <div id="loading">
       <div class="skeleton-grid">
-        <div class="skel-tile"></div>
-        <div class="skel-tile"></div>
-        <div class="skel-tile"></div>
-        <div class="skel-tile"></div>
+        <div class="skel-row"></div>
       </div>
     </div>
-    <div class="tile-grid" id="who-grid"></div>
+    <p class="who-prompt">Who are you?</p>
+    <div id="who-grid"></div>
     <div id="setup-warn" class="setup-warn hidden">
       <strong>⚙️ Can't reach the server:</strong> check that <code>API_URL</code> at the top of this
       page's script points at your deployed Function App, and that it's actually running.
@@ -1994,37 +2005,8 @@ function buildEmptyState(emoji, line1, line2) {
     + '</div>';
 }
 
-// The splash is a held frame on launch, not a page. It stays until the app has
-// something to show AND a minimum beat has passed, so it never flashes on a
-// fast connection, and a tap skips it. Once dismissed it does not come back -
-// render() runs on every poll and a splash reappearing mid-use would be absurd.
-var splashPending = true;
-var splashMinElapsed = false;
-
-function dismissSplash() {
-  if (!splashPending) return;
-  splashPending = false;
-  render();
-}
-
-function startSplash() {
-  var el = document.getElementById('screen-splash');
-  if (el) el.classList.remove('hidden');
-  setTimeout(function() {
-    splashMinElapsed = true;
-    if (state) dismissSplash();
-  }, 1400);
-  // A backstop: if the first load never resolves, the splash must not become a
-  // dead end. The picker behind it renders its own error or empty state.
-  setTimeout(dismissSplash, 6000);
-}
-
 function render() {
   if (!state) return;
-  if (splashPending) {
-    if (!splashMinElapsed) { show('screen-splash'); return; }
-    splashPending = false;
-  }
   renderWho();
   const person = session && state.people.find(p => p.id === session.personId);
   if (!person) {
@@ -2042,7 +2024,7 @@ function render() {
 }
 
 function show(id) {
-  ['screen-splash', 'screen-who', 'screen-kid', 'screen-parent'].forEach(function(s) {
+  ['screen-who', 'screen-kid', 'screen-parent'].forEach(function(s) {
     var el = document.getElementById(s);
     var showing = s === id;
     el.classList.toggle('hidden', !showing);
@@ -2105,7 +2087,7 @@ function renderWho() {
     var kidColorAttr = '';
     if (!isParent) {
       var idx = Math.min(kids.findIndex(function(k) { return k.id === p.id; }), 3);
-      kidColorAttr = ' style="--kid-color:var(--kid-' + (idx + 1) + ')"';
+      kidColorAttr = ' style="--kid-color:var(--kid-' + (idx + 1) + ');--tile-ring:var(--kid-' + (idx + 1) + ')"';
     }
     var kidColorVal = isParent ? 'var(--brand)' : 'var(--kid-' + (Math.min(kids.findIndex(function(k) { return k.id === p.id; }), 3) + 1) + ')';
     return '<button class="who-tile ' + (isParent ? 'parent' : 'kid-tile') + '"'
@@ -4947,7 +4929,6 @@ function toast(msg) {
   toastTimer = setTimeout(function() { el.classList.add('hidden'); }, 2500);
 }
 
-startSplash();
 refresh();
 setInterval(refresh, 60000);
 document.addEventListener('visibilitychange', function() { if (!document.hidden) refresh(); });
