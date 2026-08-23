@@ -934,6 +934,55 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   color: var(--ink-muted);
   margin-top: var(--space-1);
 }
+/* My List - a kid's own notes, plans and reminders. */
+.mylist-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-3);
+}
+.mylist-add {
+  width: 44px; height: 44px; min-width: 44px;
+  border-radius: var(--radius-full); border: 0;
+  background: var(--brand); color: var(--on-brand);
+  font-size: var(--text-xl); font-weight: var(--weight-bold);
+  cursor: pointer; box-shadow: var(--shadow-1);
+}
+.mylist-add:active { transform: scale(0.94); }
+.mylist-filters { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+.mylist-cat {
+  font-size: var(--text-xs); color: var(--ink-muted);
+  border: 1px solid var(--border); border-radius: var(--radius-full);
+  padding: var(--space-1) var(--space-3);
+}
+.mylist-item.done .title { text-decoration: line-through; color: var(--ink-muted); }
+.mylist-actions { display: flex; align-items: center; gap: var(--space-2); }
+.icon-btn {
+  width: 44px; height: 44px; min-width: 44px;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--border); background: var(--surface);
+  font-size: var(--text-base); cursor: pointer; color: var(--ink);
+}
+.icon-btn:active { transform: scale(0.94); }
+.icon-btn[disabled] { opacity: 0.35; cursor: default; }
+
+/* Bottom sheet. .modal-bg centres its child; this pins it to the bottom, which
+   is where a thumb is. */
+.sheet-bg { align-items: flex-end; padding: 0; }
+.sheet {
+  max-width: 34rem;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  text-align: left;
+  transform: translateY(100%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sheet { transition: transform var(--dur-base) var(--ease-out); }
+}
+.sheet-bg:not(.hidden) .sheet { transform: translateY(0); }
+.sheet-label {
+  font-size: var(--text-sm); color: var(--ink-muted);
+  font-weight: var(--weight-medium); margin-bottom: var(--space-2);
+}
+.sheet-pills { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
 .ask-input { font-size: var(--text-base); width: 100%; padding: var(--space-3); border: 2px solid var(--border); border-radius: var(--radius-md); font-family: inherit; color: var(--ink); background: var(--surface-sunken); }
 .ask-input:focus { outline: none; border-color: var(--brand); }
 .pin-err { color: var(--danger); font-size: var(--text-sm); min-height: 1.2em; }
@@ -1133,6 +1182,12 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
           <h2 class="section-title">⭐ One-off Missions</h2>
           <div id="k-oneoff"></div>
         </div>
+        <div class="mylist-head">
+          <h2 class="section-title">🗂️ My List</h2>
+          <button class="mylist-add" id="k-mylist-add" type="button" onclick="openMyItemSheet()" aria-label="Add a note, plan or reminder">+</button>
+        </div>
+        <div class="mylist-filters" id="k-mylist-filters"></div>
+        <div id="k-mylist"></div>
       </div>
     </div>
 
@@ -1441,6 +1496,25 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
     <div class="modal-actions">
       <button class="btn" id="voice-reminder-primary" onclick="handleVoiceReminderPrimary()">Check it</button>
       <button class="btn ghost" id="voice-reminder-secondary" onclick="handleVoiceReminderSecondary()">Maybe later</button>
+    </div>
+  </div>
+</div>
+
+<div id="myitem-sheet" class="modal-bg sheet-bg hidden" aria-hidden="true">
+  <div class="modal sheet">
+    <h3>🗂️ Add to my list</h3>
+    <input class="ask-input" id="myitem-title" type="text" autocomplete="off" placeholder="What do you want to remember?">
+    <div>
+      <div class="sheet-label">What kind?</div>
+      <div class="sheet-pills" id="myitem-types"></div>
+    </div>
+    <div>
+      <div class="sheet-label">Where does it belong?</div>
+      <div class="sheet-pills" id="myitem-cats"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="myitem-save" onclick="saveMyItem()">Add it</button>
+      <button class="btn ghost" onclick="closeMyItemSheet()">Cancel</button>
     </div>
   </div>
 </div>
@@ -1849,6 +1923,14 @@ function renderKid(kid) {
   // the API calls and let the Home glance and the Calendar tab disagree about
   // what falls on a given day.
   loadKidCalendar(kid);
+  // Own fetch: My List items have no date, so the calendar action cannot see
+  // them. Loaded once per kid - renderKid() runs on every 60s poll.
+  if (myItemsLoadedFor !== kid.id) {
+    myItemsLoadedFor = kid.id;
+    myItems = [];
+    myItemsFilter = 'all';
+    loadMyItems(kid);
+  }
 
   var ranked = kidsOnly()
     .map(function(k) { return Object.assign({}, k, { pts: (state.stats[k.id] || {}).points || 0 }); })
@@ -2724,6 +2806,225 @@ function syncGoalDots() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// My List (#122): a kid's own notes, plans and reminders.
+//
+// Kept out of state/getState() deliberately. getState() never returned
+// planningItems, and the calendar action that does serve them skips anything
+// without a parseable date - which is every note. So My List has its own
+// fetch, the same shape as loadKidCalendar().
+// ---------------------------------------------------------------------------
+const MY_ITEM_TYPES = [
+  { key: 'note', label: '📝 Note' },
+  { key: 'reminder', label: '⏰ Reminder' },
+  { key: 'plan', label: '🗺️ Plan' },
+];
+const MY_ITEM_CATEGORIES = [
+  { key: 'school', label: '🎒 School' },
+  { key: 'home', label: '🏠 Home' },
+  { key: 'sport', label: '⚽ Sport' },
+  { key: 'fun', label: '🎉 Fun' },
+  { key: 'other', label: '✨ Other' },
+];
+
+let myItems = [];
+let myItemsLoading = false;
+let myItemsFilter = 'all';
+let myItemsLoadedFor = null;
+// Minimal taps: the sheet reopens on whatever was used last, because a kid
+// adding three school notes in a row should not re-pick school three times.
+let myItemLastType = 'note';
+let myItemLastCategory = 'school';
+
+function myItemLabel(list, key) {
+  var found = list.find(function(entry) { return entry.key === key; });
+  return found ? found.label : key;
+}
+
+async function loadMyItems(kid) {
+  if (!kid || !session || session.role !== 'kid') return;
+  myItemsLoading = true;
+  renderMyList();
+  var res;
+  try {
+    res = await api({ action: 'myItems', personId: session.personId, pin: session.pin, kidId: kid.id });
+  } catch (e) {
+    myItemsLoading = false;
+    renderMyList();
+    return;
+  }
+  myItemsLoading = false;
+  if (res && res.ok && Array.isArray(res.items)) myItems = res.items;
+  renderMyList();
+}
+
+function renderMyListFilters() {
+  var el = document.getElementById('k-mylist-filters');
+  if (!el) return;
+  var used = MY_ITEM_CATEGORIES.filter(function(cat) {
+    return myItems.some(function(item) { return item.category === cat.key; });
+  });
+  // Only one category in play means the filter row is noise.
+  if (used.length < 2) { el.innerHTML = ''; return; }
+  var pills = [{ key: 'all', label: 'All' }].concat(used);
+  el.innerHTML = pills.map(function(cat) {
+    return '<button type="button" class="choice-pill' + (myItemsFilter === cat.key ? ' active' : '') + '"'
+      + ' onclick="filterMyList(\'' + cat.key + '\')">' + cat.label + '</button>';
+  }).join('');
+}
+
+function filterMyList(category) {
+  myItemsFilter = category;
+  renderMyList();
+}
+
+function renderMyList() {
+  var el = document.getElementById('k-mylist');
+  if (!el) return;
+
+  renderMyListFilters();
+
+  if (myItemsLoading && myItems.length === 0) {
+    el.innerHTML = '<div class="glance-skel"></div><div class="glance-skel"></div>';
+    return;
+  }
+
+  var visible = myItems.filter(function(item) {
+    return myItemsFilter === 'all' || item.category === myItemsFilter;
+  });
+
+  if (visible.length === 0) {
+    el.innerHTML = myItems.length === 0
+      ? buildEmptyState('📝', 'Nothing on your list yet.', 'Tap + to add a note, plan or reminder.')
+      : buildEmptyState('🔍', 'Nothing in here.', 'Try another category.');
+    return;
+  }
+
+  el.innerHTML = visible.map(function(item) {
+    var done = item.status === 'done';
+    return '<div class="task mylist-item' + (done ? ' done dimmed' : '') + '" id="k-myitem-' + item.id + '">'
+      + '<button class="tick' + (done ? ' done' : '') + '" onclick="toggleMyItem(\'' + item.id + '\')"'
+      +   ' aria-label="' + (done ? 'Mark as not done' : 'Mark as done') + '">' + (done ? '✓' : '') + '</button>'
+      + '<div class="info">'
+      +   '<div class="title">' + esc(item.title) + '</div>'
+      +   '<div class="sub"><span class="mylist-cat">' + myItemLabel(MY_ITEM_CATEGORIES, item.category) + '</span> '
+      +     myItemLabel(MY_ITEM_TYPES, item.type) + '</div>'
+      + '</div>'
+      + '<div class="mylist-actions">'
+      +   '<button class="icon-btn" onclick="deleteMyItemCard(\'' + item.id + '\')" aria-label="Delete">🗑️</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function openMyItemSheet() {
+  document.getElementById('myitem-title').value = '';
+  renderMyItemSheetPills();
+  var sheet = document.getElementById('myitem-sheet');
+  sheet.classList.remove('hidden');
+  sheet.setAttribute('aria-hidden', 'false');
+  setTimeout(function() { document.getElementById('myitem-title').focus(); }, 50);
+}
+
+function closeMyItemSheet() {
+  var sheet = document.getElementById('myitem-sheet');
+  sheet.classList.add('hidden');
+  sheet.setAttribute('aria-hidden', 'true');
+}
+
+function renderMyItemSheetPills() {
+  document.getElementById('myitem-types').innerHTML = MY_ITEM_TYPES.map(function(t) {
+    return '<button type="button" class="choice-pill' + (myItemLastType === t.key ? ' active' : '') + '"'
+      + ' onclick="chooseMyItemType(\'' + t.key + '\')">' + t.label + '</button>';
+  }).join('');
+  document.getElementById('myitem-cats').innerHTML = MY_ITEM_CATEGORIES.map(function(c) {
+    return '<button type="button" class="choice-pill' + (myItemLastCategory === c.key ? ' active' : '') + '"'
+      + ' onclick="chooseMyItemCategory(\'' + c.key + '\')">' + c.label + '</button>';
+  }).join('');
+}
+
+function chooseMyItemType(key) { myItemLastType = key; renderMyItemSheetPills(); }
+function chooseMyItemCategory(key) { myItemLastCategory = key; renderMyItemSheetPills(); }
+
+async function saveMyItem() {
+  var title = String(document.getElementById('myitem-title').value || '').trim();
+  if (!title) { toast('Tell me what to add first.'); return; }
+
+  // Optimistic, mirroring doTask: show it, then reconcile. The synthetic id is
+  // replaced by the real one on success and removed on failure.
+  var syntheticId = '_opt_myitem_' + Date.now();
+  var prev = myItems.slice();
+  myItems = prev.concat([{
+    id: syntheticId, personId: session.personId, type: myItemLastType,
+    title: title, category: myItemLastCategory, status: 'open',
+    order: prev.length, source: 'manual', startAt: null,
+  }]);
+  closeMyItemSheet();
+  renderMyList();
+
+  var res;
+  try {
+    res = await api({
+      action: 'addMyItem', personId: session.personId, pin: session.pin, kidId: session.personId,
+      type: myItemLastType, title: title, category: myItemLastCategory,
+    });
+  } catch (e) {
+    myItems = prev; renderMyList(); toast('Connection problem — try again.'); return;
+  }
+  if (!res || res.ok === false) {
+    myItems = prev; renderMyList(); toast((res && res.error) || 'Could not add that.'); return;
+  }
+  myItems = myItems.map(function(item) { return item.id === syntheticId ? res.item : item; });
+  renderMyList();
+}
+
+async function toggleMyItem(itemId) {
+  var item = myItems.find(function(entry) { return entry.id === itemId; });
+  if (!item) return;
+  var nextStatus = item.status === 'done' ? 'open' : 'done';
+  var prev = myItems.slice();
+  myItems = myItems.map(function(entry) {
+    return entry.id === itemId ? Object.assign({}, entry, { status: nextStatus }) : entry;
+  });
+  renderMyList();
+
+  var res;
+  try {
+    res = await api({
+      action: 'updateMyItem', personId: session.personId, pin: session.pin, kidId: session.personId,
+      itemId: itemId, status: nextStatus,
+    });
+  } catch (e) {
+    myItems = prev; renderMyList(); toast('Connection problem — try again.'); return;
+  }
+  if (!res || res.ok === false) {
+    myItems = prev; renderMyList(); toast((res && res.error) || 'Could not update that.');
+  }
+}
+
+async function deleteMyItemCard(itemId) {
+  var item = myItems.find(function(entry) { return entry.id === itemId; });
+  if (!item) return;
+  if (!await askConfirm('Delete “' + item.title + '”?', 'Delete')) return;
+
+  var prev = myItems.slice();
+  myItems = myItems.filter(function(entry) { return entry.id !== itemId; });
+  renderMyList();
+
+  var res;
+  try {
+    res = await api({
+      action: 'deleteMyItem', personId: session.personId, pin: session.pin, kidId: session.personId,
+      itemId: itemId,
+    });
+  } catch (e) {
+    myItems = prev; renderMyList(); toast('Connection problem — try again.'); return;
+  }
+  if (!res || res.ok === false) {
+    myItems = prev; renderMyList(); toast((res && res.error) || 'Could not delete that.');
+  }
+}
+
 function renderRewardShop(kid, balance) {
   var rewards = (state.rewards || []).filter(function(r) { return r.active !== false; });
   var el = document.getElementById('k-rewards');
@@ -3005,6 +3306,10 @@ async function submitPin() {
 function saveSession() { localStorage.setItem('hero-session', JSON.stringify(session)); }
 function logout() {
   closeVoiceReminder();
+  closeMyItemSheet();
+  myItems = [];
+  myItemsLoadedFor = null;
+  myItemsFilter = 'all';
   session = null;
   pushSetupPersonId = null;
   localStorage.removeItem('hero-session');

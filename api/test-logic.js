@@ -1563,6 +1563,83 @@ async function main() {
   assert.strictEqual(afterCrossKid.length, beforeBlank.length + 4, 'cross-kid save should be rejected without writing');
   console.log('✓ saveVoicePlan rejects cross-kid save');
 
+  // -------------------------------------------------------------------------
+  // My List - kid-owned notes, plans and reminders (#122)
+  // -------------------------------------------------------------------------
+  const addedNote = await ROUTES.addMyItem({
+    personId: 'toby', pin: '1234', kidId: 'toby',
+    type: 'note', title: 'Library book is due', category: 'school',
+  });
+  assert.strictEqual(addedNote.ok, true, 'addMyItem should succeed');
+  assert.strictEqual(addedNote.item.status, 'open', 'new item starts open');
+  assert.strictEqual(addedNote.item.personId, 'toby', 'item belongs to the caller');
+  assert.strictEqual(addedNote.item.startAt, null, 'a note has no date');
+  console.log('\u2713 addMyItem creates an undated kid-owned note');
+
+  const addedPlan = await ROUTES.addMyItem({
+    personId: 'toby', pin: '1234', kidId: 'toby',
+    type: 'plan', title: 'Build the lego set', category: 'fun',
+  });
+  assert.ok(addedPlan.item.order > addedNote.item.order, 'new items append to the end');
+  console.log('\u2713 addMyItem appends to the end of the list');
+
+  const badType = await ROUTES.addMyItem({
+    personId: 'toby', pin: '1234', kidId: 'toby',
+    type: 'chore', title: 'Sneak in a chore', category: 'home',
+  });
+  assert.strictEqual(badType.ok, false, 'chore is not a My List type');
+  console.log('\u2713 addMyItem rejects a type outside note/reminder/plan');
+
+  const badCategory = await ROUTES.addMyItem({
+    personId: 'toby', pin: '1234', kidId: 'toby',
+    type: 'note', title: 'Whatever', category: 'nonsense',
+  });
+  assert.strictEqual(badCategory.ok, false, 'unknown category is rejected');
+  console.log('\u2713 addMyItem rejects an unknown category');
+
+  const listed = await ROUTES.myItems({ personId: 'toby', pin: '1234', kidId: 'toby' });
+  assert.strictEqual(listed.ok, true, 'myItems should succeed');
+  assert.ok(listed.items.every((item) => item.personId === 'toby'), 'only the caller\u2019s items come back');
+  assert.ok(
+    listed.items.every((item) => ['note', 'reminder', 'plan'].includes(item.type)),
+    'voice tasks and events stay out of My List',
+  );
+  console.log('\u2713 myItems returns only that kid\u2019s note/reminder/plan items');
+
+  const doneRes = await ROUTES.updateMyItem({
+    personId: 'toby', pin: '1234', kidId: 'toby',
+    itemId: addedNote.item.id, status: 'done',
+  });
+  assert.strictEqual(doneRes.item.status, 'done', 'status flips to done');
+  console.log('\u2713 updateMyItem marks an item done');
+
+  // A valid PIN proves who you are, not that the item you named is yours.
+  const crossKid = await ROUTES.updateMyItem({
+    personId: 'ollie', pin: '1234', kidId: 'ollie',
+    itemId: addedNote.item.id, title: 'Hijacked',
+  });
+  assert.strictEqual(crossKid.ok, false, 'another kid cannot edit this item');
+  const stillMine = (await ROUTES.myItems({ personId: 'toby', pin: '1234', kidId: 'toby' }))
+    .items.find((item) => item.id === addedNote.item.id);
+  assert.strictEqual(stillMine.title, 'Library book is due', 'the title was not changed');
+  console.log('\u2713 updateMyItem refuses to touch another kid\u2019s item');
+
+  const crossDelete = await ROUTES.deleteMyItem({
+    personId: 'ollie', pin: '1234', kidId: 'ollie', itemId: addedNote.item.id,
+  });
+  assert.strictEqual(crossDelete.ok, false, 'another kid cannot delete this item');
+  console.log('\u2713 deleteMyItem refuses to touch another kid\u2019s item');
+
+  await ROUTES.deleteMyItem({
+    personId: 'toby', pin: '1234', kidId: 'toby', itemId: addedNote.item.id,
+  });
+  const afterDelete = await ROUTES.myItems({ personId: 'toby', pin: '1234', kidId: 'toby' });
+  assert.ok(
+    !afterDelete.items.some((item) => item.id === addedNote.item.id),
+    'deleted item is gone from the list',
+  );
+  console.log('\u2713 deleteMyItem removes the owner\u2019s own item');
+
   console.log('\nALL LOGIC TESTS PASSED');
 }
 
