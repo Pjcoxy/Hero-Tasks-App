@@ -321,7 +321,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   0%, 70% { box-shadow: 0 0 0 3px var(--brand); }
   100%    { box-shadow: var(--shadow-1); }
 }
-.task.arriving { animation: reward-arrive 1.6s var(--ease-out); }
+.arriving { animation: reward-arrive 1.6s var(--ease-out); }
 .goal-card-title {
   font-size: var(--text-base);
   font-weight: var(--weight-bold);
@@ -784,6 +784,14 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 }
 .parent-list-row + .parent-list-row { margin-top: 0; }
 .parent-list-row .btn.small { flex: none; }
+/* Only rows that lead somewhere become buttons; these strip the UA chrome so
+   they sit flush with the inert rows beside them, and signal they are tappable. */
+button.parent-list-row {
+  width: 100%; text-align: left; font: inherit; color: inherit;
+  border: 0; cursor: pointer;
+}
+button.parent-list-row:active { transform: scale(0.99); }
+.parent-list-row-link { box-shadow: inset 0 0 0 1px var(--border); }
 .parent-statline {
   display: flex;
   align-items: center;
@@ -1275,14 +1283,8 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 
   <main class="parent-main">
     <div id="p-tab-approvals" class="parent-panel">
-      <section class="parent-section">
-        <h2 class="parent-section-title">Today &amp; this week</h2>
-        <div id="p-approvals-glance"></div>
-      </section>
-      <section class="parent-section">
-        <h2 class="parent-section-title">Today, by kid</h2>
-        <div id="p-approvals-today-by-kid"></div>
-      </section>
+      <!-- Work waiting on the parent comes first. This is the tab they land on,
+           and everything below is context for a decision, not a decision. -->
       <section class="parent-section">
         <h2 class="parent-section-title">Awaiting your approval</h2>
         <div id="p-pending"></div>
@@ -1290,6 +1292,14 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
       <section class="parent-section">
         <h2 class="parent-section-title">Reward requests</h2>
         <div id="p-reward-requests"></div>
+      </section>
+      <section class="parent-section">
+        <h2 class="parent-section-title">Today, by kid</h2>
+        <div id="p-approvals-today-by-kid"></div>
+      </section>
+      <section class="parent-section">
+        <h2 class="parent-section-title">Today &amp; this week</h2>
+        <div id="p-approvals-glance"></div>
       </section>
       <section class="parent-section">
         <h2 class="parent-section-title">Recently decided</h2>
@@ -2393,16 +2403,42 @@ function renderParentApprovalsTodayByKid() {
           ? buildEmptyState('🗓️', 'No chores today.', 'Nothing is due for ' + esc(kid.name) + ' today.')
           : '<div class="parent-list">' + todayItems.map(function(item) {
               var status = parentCalendarOverviewStatus(item);
-              return '<div class="parent-list-row">'
-                + '<div class="parent-copy">'
+              // A row saying 'Waiting on you' is the only one with something to
+              // go to, so only that one becomes a button. The rest stay inert
+              // rather than looking tappable and doing nothing.
+              var completion = status.className === 'waiting' ? parentCalendarLiveCompletion(item) : null;
+              var inner = '<div class="parent-copy">'
                 + '<span class="parent-list-title">' + esc(item.title || 'Untitled') + '</span>'
                 + '<div class="sub">' + esc(parentCalendarItemTime(item)) + (item.points ? ' · ' + item.points + ' pts' : '') + '</div>'
                 + '</div>'
-                + '<span class="tag ' + status.className + '">' + esc(status.label) + '</span>'
-                + '</div>';
+                + '<span class="tag ' + status.className + '">' + esc(status.label) + '</span>';
+              if (!completion) return '<div class="parent-list-row">' + inner + '</div>';
+              return '<button type="button" class="parent-list-row parent-list-row-link"'
+                + ' onclick="jumpToApproval(\'' + jsq(completion.id) + '\')"'
+                + ' aria-label="Go to the approval for ' + esc(item.title || 'this chore') + '">'
+                + inner + '</button>';
             }).join('') + '</div>')
       + '</div>';
   }).join('') || buildEmptyState('👧', 'Add a kid to start assigning tasks.', 'Once a kid is added, today’s overview will show up here.');
+}
+
+// Take the parent to the decision the row is about. Approving happens on the
+// pending card, so this scrolls to it and rings it rather than trying to
+// duplicate the approve/reject buttons inside the overview.
+function jumpToApproval(completionId) {
+  var row = document.getElementById('p-pending-' + completionId);
+  if (!row) {
+    // The completion was decided in another tab or on another device since this
+    // overview was drawn. Refresh rather than silently doing nothing.
+    toast('That one is already dealt with.');
+    refresh();
+    return;
+  }
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  row.classList.remove('arriving');
+  void row.offsetWidth;
+  row.classList.add('arriving');
+  setTimeout(function() { row.classList.remove('arriving'); }, 1700);
 }
 
 function renderParentApprovalsSummary() {
@@ -3249,7 +3285,7 @@ function renderParent(person) {
     el.innerHTML = pending.map(function(c) {
       var kid = state.people.find(function(k) { return k.id === c.kidId; }) || { name: '?', emoji: '❓' };
       var isExtra = !c.taskId;
-      return '<div class="card parent-card">'
+      return '<div class="card parent-card" id="p-pending-' + c.id + '">'
         + '<div class="parent-summary-row">'
         + '<span class="parent-kid-mark">' + avatarText(kid.emoji) + '</span>'
         + '<div class="parent-copy">'

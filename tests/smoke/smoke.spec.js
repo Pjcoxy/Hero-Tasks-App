@@ -436,3 +436,69 @@ test('Parent HQ task rows have no reorder controls', async ({ page }) => {
   await page.getByRole('button', { name: /^Tasks$/i }).first().click();
   await expect(page.locator('#p-tab-tasks .move-controls')).toHaveCount(0);
 });
+
+// Approvals is the tab a parent lands on. What is waiting on them has to be at
+// the top of it, not below two sections of context.
+test('Approvals opens with what is waiting on the parent, at the top', async ({ page }) => {
+  await pickPerson(page, 'Peter');
+
+  const headings = await page.locator('#p-tab-approvals .parent-section-title').allTextContents();
+  expect(headings[0]).toMatch(/Awaiting your approval/);
+  expect(headings[1]).toMatch(/Reward requests/);
+  expect(headings.slice(2).join(' ')).toMatch(/Today, by kid/);
+});
+
+// A "Waiting on you" row was a plain div - it looked actionable and did
+// nothing. It must now lead to the card where the decision is actually made.
+//
+// The seed ships no chores, so this creates one and completes it first. That
+// setup goes through the real API (the page's own route intercept forwards it
+// to the same handler), and every assertion below is still on rendered UI. An
+// earlier version of this test skipped itself when it found no waiting row,
+// which meant the behaviour it exists for was never actually checked.
+test('a Waiting on you row leads to its approval card', async ({ page }) => {
+  const pending = await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+
+    await post({
+      action: 'addTask', parentId: 'peter', parentPin: '1234',
+      kidId: 'toby', title: 'Feed the dog', points: 3, cycle: 'daily',
+    });
+    const state = await post({ action: 'state' });
+    const task = state.tasks.find((t) => t.title === 'Feed the dog');
+    await post({ action: 'completeTask', personId: 'toby', pin: '1234', taskId: task.id });
+    return true;
+  });
+  expect(pending).toBe(true);
+
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const waitingRow = page.locator('#p-approvals-today-by-kid .parent-list-row-link')
+    .filter({ hasText: 'Feed the dog' });
+  await expect(waitingRow).toHaveCount(1);
+  await expect(waitingRow).toContainText('Waiting on you');
+
+  await waitingRow.click();
+
+  // It must land on the real approval card, in view, with the buttons on it.
+  const highlighted = page.locator('#p-pending .arriving');
+  await expect(highlighted).toHaveCount(1);
+  await expect(highlighted).toContainText('Feed the dog');
+  await expect(highlighted).toBeInViewport();
+  await expect(highlighted.getByRole('button', { name: /Approve/ })).toBeVisible();
+});
+
+// Rows with nothing to go to must stay inert rather than looking tappable.
+test('rows that are not waiting on the parent are not links', async ({ page }) => {
+  await pickPerson(page, 'Peter');
+  const notStarted = page.locator('#p-approvals-today-by-kid .parent-list-row').filter({ hasText: 'Not started' });
+  const count = await notStarted.count();
+  for (let i = 0; i < count; i += 1) {
+    await expect(notStarted.nth(i)).not.toHaveClass(/parent-list-row-link/);
+  }
+});

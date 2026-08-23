@@ -107,9 +107,16 @@ check(/Today, by kid/.test(html), 'approvals tab includes Today, by kid title');
 const approvalsGlanceIndex = html.indexOf('id="p-approvals-glance"');
 const approvalsTodayByKidIndex = html.indexOf('id="p-approvals-today-by-kid"');
 const approvalsPendingIndex = html.indexOf('id="p-pending"');
-check(approvalsGlanceIndex !== -1 && approvalsPendingIndex !== -1 && approvalsGlanceIndex < approvalsPendingIndex, 'at-a-glance section appears before pending approvals list');
-check(approvalsGlanceIndex !== -1 && approvalsTodayByKidIndex !== -1 && approvalsGlanceIndex < approvalsTodayByKidIndex, 'today-by-kid section appears after at-a-glance section');
-check(approvalsTodayByKidIndex !== -1 && approvalsPendingIndex !== -1 && approvalsTodayByKidIndex < approvalsPendingIndex, 'today-by-kid section appears before pending approvals list');
+// Work waiting on the parent comes first on the tab they land on. These
+// assertions previously encoded the opposite order; the order changed, so they
+// were updated rather than dropped - the point is that the order is deliberate.
+const approvalsRewardReqIndex = html.indexOf('id="p-reward-requests"');
+check(approvalsPendingIndex !== -1 && approvalsTodayByKidIndex !== -1 && approvalsPendingIndex < approvalsTodayByKidIndex, 'pending approvals list appears before today-by-kid section');
+check(approvalsPendingIndex !== -1 && approvalsGlanceIndex !== -1 && approvalsPendingIndex < approvalsGlanceIndex, 'pending approvals list appears before at-a-glance section');
+check(approvalsRewardReqIndex !== -1 && approvalsTodayByKidIndex !== -1 && approvalsRewardReqIndex < approvalsTodayByKidIndex, 'reward requests appear before today-by-kid section');
+check(approvalsTodayByKidIndex !== -1 && approvalsGlanceIndex !== -1 && approvalsTodayByKidIndex < approvalsGlanceIndex, 'today-by-kid section appears before at-a-glance section');
+check(/onclick="jumpToApproval\(/.test(html), 'waiting-on-you rows link through to their approval');
+check(/id="p-pending-' \+ c\.id \+ '"/.test(html), 'pending approval cards carry an id to jump to');
 check(/function loadParentApprovalsGlance\(\)/.test(html), 'approvals at-a-glance loader exists');
 check(/action:\s*'calendar'[\s\S]*parentId:\s*session\.personId[\s\S]*parentPin:\s*session\.pin/.test(html), 'approvals at-a-glance reuses calendar action with parent credentials');
 check(/function renderParentApprovalsGlance\(\)/.test(html), 'approvals at-a-glance renderer exists');
