@@ -904,3 +904,98 @@ test('approval cards use the kid photo, matching the cards below', async ({ page
   const card = page.locator('#p-pending .parent-card').filter({ hasText: 'Face check chore' });
   await expect(card.locator('img.avatar-photo')).toHaveCount(1);
 });
+
+// Calendar. Replaces Day/Week/Month chips with one month you arrow through, a
+// pinned "this week" strip, and an agenda that expands inline on the same
+// screen. Dots are coloured per PERSON, which is what removes the need for a
+// legend - the colour already means something from the avatars and cards.
+async function seedCalendar(page) {
+  await page.evaluate(async () => {
+    const post = (b) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
+    }).then((r) => r.json());
+    const at = (offset, hour) => {
+      const d = new Date();
+      d.setDate(d.getDate() + offset);
+      d.setHours(hour, 0, 0, 0);
+      return d.toISOString();
+    };
+    await post({ action: 'addPlanningItem', parentId: 'peter', parentPin: '1234', type: 'event', title: 'Soccer match', startAt: at(2, 10), personId: 'ollie' });
+    await post({ action: 'addPlanningItem', parentId: 'peter', parentPin: '1234', type: 'event', title: 'Dentist', startAt: at(2, 14), personId: 'toby' });
+  });
+  await page.reload();
+}
+
+async function openParentCalendar(page) {
+  await pickPerson(page, 'Peter');
+  await page.getByRole('button', { name: /^Calendar$/ }).first().click();
+  await expect(page.locator('#p-calendar-grid .cal-cell').first()).toBeVisible();
+}
+
+test('the calendar is one month you arrow through, not a view switcher', async ({ page }) => {
+  await openParentCalendar(page);
+
+  // The old Day/Week/Month chips are gone, not restyled.
+  await expect(page.locator('#p-calendar-view-day')).toHaveCount(0);
+  await expect(page.locator('#p-calendar-view-month')).toHaveCount(0);
+
+  const label = page.locator('#p-calendar-range');
+  const start = await label.textContent();
+  await page.getByRole('button', { name: 'Next month' }).click();
+  await expect(label).not.toHaveText(start);
+  await page.getByRole('button', { name: 'Previous month' }).click();
+  await expect(label).toHaveText(start);
+});
+
+test('a this-week strip is pinned above the grid, with no tapping needed', async ({ page }) => {
+  await openParentCalendar(page);
+  await expect(page.locator('#p-calendar-week .cal-chip')).toHaveCount(7);
+
+  // It is above the month grid, and it moves independently of the month.
+  const strip = await page.locator('#p-calendar-week').boundingBox();
+  const grid = await page.locator('#p-calendar-grid').boundingBox();
+  expect(strip.y).toBeLessThan(grid.y);
+
+  const first = await page.locator('#p-calendar-week .cal-chip-num').first().textContent();
+  await page.getByRole('button', { name: 'Next week' }).click();
+  await expect(page.locator('#p-calendar-week .cal-chip-num').first()).not.toHaveText(first);
+});
+
+test('dots are coloured per person, and there is no legend', async ({ page }) => {
+  await seedCalendar(page);
+  await openParentCalendar(page);
+
+  // Two people have something on the same day, so that day carries two dots in
+  // two different colours. One dot per person, not per item.
+  const busy = page.locator('#p-calendar-grid .cal-cell').filter({ has: page.locator('.cal-dot') });
+  expect(await busy.count()).toBeGreaterThan(0);
+
+  const colours = await page.locator('#p-calendar-grid .cal-cell .cal-dot').evaluateAll(
+    (els) => [...new Set(els.map((e) => e.style.background))],
+  );
+  expect(colours.length, 'different people should get different dot colours').toBeGreaterThan(1);
+
+  await expect(page.locator('#p-tab-calendar')).not.toContainText(/legend/i);
+});
+
+test('tapping a day expands its agenda inline, without leaving the screen', async ({ page }) => {
+  await seedCalendar(page);
+  await openParentCalendar(page);
+
+  await expect(page.locator('#p-calendar-agenda')).toContainText('Tap a day');
+
+  const busy = page.locator('#p-calendar-grid .cal-cell').filter({ has: page.locator('.cal-dot') }).first();
+  await busy.click();
+
+  // Same screen: the grid is still there, with the agenda under it.
+  await expect(page.locator('#p-calendar-grid')).toBeVisible();
+  const agenda = page.locator('#p-calendar-agenda');
+  await expect(agenda).not.toContainText('Tap a day');
+  const grid = await page.locator('#p-calendar-grid').boundingBox();
+  const box = await agenda.boundingBox();
+  expect(box.y).toBeGreaterThan(grid.y);
+
+  // Tapping the open day again closes it, so the grid never gets stuck open.
+  await busy.click();
+  await expect(agenda).toContainText('Tap a day');
+});

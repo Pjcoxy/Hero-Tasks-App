@@ -95,7 +95,16 @@ check(/let parentTab = 'approvals';/.test(html), 'parent tab state defaults to a
 check(/function switchParentTab\(tab\)/.test(html), 'parent tab switcher exists');
 check(/id="p-tab-calendar"/.test(html), 'parent calendar tab panel exists');
 check(/\['approvals', 'tasks', 'rewards', 'calendar', 'settings'\]/.test(html), 'parent tab switcher includes calendar');
-check(/function switchParentCalendarView\(view\)/.test(html), 'parent calendar view switcher exists');
+// The parent calendar dropped Day/Week/Month for a single month with arrows,
+// a pinned week strip and an inline agenda. These replace the view-switcher
+// check rather than dropping it - the point is still that the controls exist.
+check(/function parentCalendarStep\(delta\)/.test(html), 'parent calendar steps month by month');
+check(/function parentCalendarWeekStep\(delta\)/.test(html), 'parent calendar week strip has its own nav');
+check(/id="p-calendar-week"/.test(html), 'parent calendar has a this-week strip');
+check(/id="p-calendar-grid"/.test(html), 'parent calendar has a month grid');
+check(/id="p-calendar-agenda"/.test(html), 'parent calendar expands an agenda inline');
+check(/function parentCalendarPersonColour\(item\)/.test(html), 'calendar dots are coloured per person');
+check(!/id="p-calendar-view-(day|week|month)"/.test(html), 'the old parent Day/Week/Month chips are gone');
 check(/action:\s*'addPlanningItem'/.test(html), 'parent calendar form calls addPlanningItem');
 check(/action:\s*'updatePlanningItem'/.test(html), 'parent calendar edit calls updatePlanningItem');
 check(/action:\s*'deletePlanningItem'/.test(html), 'parent calendar delete calls deletePlanningItem');

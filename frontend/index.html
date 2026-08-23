@@ -397,6 +397,86 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 }
 .arriving { animation: reward-arrive 1.6s var(--ease-out); }
 
+/* ─── Calendar ────────────────────────────────────────────────────────────
+   One month, arrows to move. A "this week" strip pinned above it so the week
+   ahead needs no interaction, and tapping any day expands its agenda inline
+   underneath rather than switching to another view.
+
+   Dots are coloured PER PERSON, using the same kid colours already on their
+   avatars, rings and cards. That is what removes the need for a legend: the
+   colour already means something everywhere else in the app. */
+.cal-monthnav {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.cal-monthlabel { font-size: var(--text-lg); font-weight: var(--weight-bold); }
+
+.cal-weekstrip-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: var(--text-sm); color: var(--ink-muted);
+  font-weight: var(--weight-medium);
+  margin-bottom: var(--space-2);
+}
+.cal-weeknav { display: flex; gap: var(--space-1); }
+.icon-btn.small { width: 32px; height: 32px; min-width: 32px; font-size: var(--text-sm); }
+
+.cal-weekstrip {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--space-1);
+  margin-bottom: var(--space-5);
+}
+.cal-chip {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-1);
+  padding: var(--space-2) 0;
+  border: 0; background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  cursor: pointer; color: var(--ink);
+  font: inherit;
+}
+.cal-chip-dow { font-size: var(--text-xs); color: var(--ink-muted); }
+.cal-chip-num { font-size: var(--text-base); font-weight: var(--weight-bold); }
+
+.cal-dowrow, .cal-cells {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--space-1);
+}
+.cal-dow {
+  text-align: center; font-size: var(--text-xs);
+  color: var(--ink-muted); padding-bottom: var(--space-2);
+}
+.cal-cell {
+  /* A square that stays square at any width, so the grid keeps its shape on a
+     small phone and on a wide window alike. */
+  aspect-ratio: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--space-1);
+  border: 0; background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  cursor: pointer; color: var(--ink);
+  font: inherit;
+}
+.cal-cell-num { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.cal-cell.outside { opacity: 0.35; }
+.cal-cell:active, .cal-chip:active { transform: scale(0.95); }
+
+/* Today is stated with a ring, selection with a fill: they can be true at once
+   and must not look like the same thing. */
+.cal-cell.today, .cal-chip.today { box-shadow: inset 0 0 0 2px var(--brand); }
+.cal-cell.selected, .cal-chip.selected { background: var(--brand); color: var(--on-brand); }
+.cal-cell.selected .cal-cell-num,
+.cal-chip.selected .cal-chip-num,
+.cal-chip.selected .cal-chip-dow { color: var(--on-brand); }
+
+.cal-dots { display: flex; gap: 2px; justify-content: center; min-height: 6px; }
+.cal-dot { width: 6px; height: 6px; border-radius: var(--radius-full); }
+.cal-dot-lg { width: 10px; height: 10px; min-width: 10px; margin-top: var(--space-2); }
+
+.cal-agenda { margin-top: var(--space-5); }
+.cal-agenda-hint { text-align: center; }
+
 /* Status pills. The house style for "what is going on with this" - a colour and
    two words, never a sentence. Reads at a glance and takes one line where the
    prose it replaced took four. */
@@ -1591,14 +1671,22 @@ button.parent-list-row:active { transform: scale(0.99); }
       <section class="parent-section">
         <h2 class="parent-section-title">Calendar</h2>
         <div class="card parent-card">
-          <div class="parent-calendar-controls" role="tablist" aria-label="Parent calendar view">
-            <button id="p-calendar-view-day" class="parent-calendar-chip" onclick="switchParentCalendarView('day')">Day</button>
-            <button id="p-calendar-view-week" class="parent-calendar-chip active" onclick="switchParentCalendarView('week')">Week</button>
-            <button id="p-calendar-view-month" class="parent-calendar-chip" onclick="switchParentCalendarView('month')">Month</button>
+          <div class="cal-monthnav">
+            <button class="icon-btn" onclick="parentCalendarStep(-1)" aria-label="Previous month">‹</button>
+            <div id="p-calendar-range" class="cal-monthlabel" aria-live="polite"></div>
+            <button class="icon-btn" onclick="parentCalendarStep(1)" aria-label="Next month">›</button>
           </div>
-          <div id="p-calendar-range" class="parent-calendar-range"></div>
+          <div class="cal-weekstrip-head">
+            <span>This week</span>
+            <div class="cal-weeknav">
+              <button class="icon-btn small" onclick="parentCalendarWeekStep(-1)" aria-label="Previous week">‹</button>
+              <button class="icon-btn small" onclick="parentCalendarWeekStep(1)" aria-label="Next week">›</button>
+            </div>
+          </div>
+          <div id="p-calendar-week" class="cal-weekstrip"></div>
+          <div id="p-calendar-grid" class="cal-grid"></div>
+          <div id="p-calendar-agenda" class="cal-agenda"></div>
         </div>
-        <div id="p-calendar-list" class="parent-calendar-list"></div>
       </section>
     </div>
 
@@ -1897,7 +1985,12 @@ var voiceReminderDraft = null;
 // What the prize carousel was last built for. Re-centring only happens when
 // this changes, so a background refresh cannot snap the card back mid-swipe.
 var goalCarouselSignature = '';
-let parentCalendarView = 'week';
+// Month being shown, week shown in the strip, and which day is expanded.
+// Nulls mean "today's" - resolved at render so the app does not go stale
+// sitting open overnight.
+let parentCalendarMonth = null;
+let parentCalendarWeekStart = null;
+let parentCalendarSelectedDay = null;
 let parentCalendarItems = [];
 let parentCalendarLoading = false;
 let parentApprovalsGlanceItems = [];
@@ -2014,6 +2107,15 @@ async function ensurePushSubscription() {
       subscription: subscription.toJSON ? subscription.toJSON() : subscription,
     });
   } catch (_) {}
+}
+
+// Local date key, same shape as todayStr(). Deliberately not
+// toISOString().slice(0,10) - that converts to UTC first, so an evening east of
+// Greenwich lands on tomorrow.
+function isoDate(date) {
+  return date.getFullYear()
+    + '-' + String(date.getMonth() + 1).padStart(2, '0')
+    + '-' + String(date.getDate()).padStart(2, '0');
 }
 
 function todayStr() {
@@ -2469,30 +2571,96 @@ function updatePlanningTypeVisibility() {
   document.getElementById('p-plan-end-wrap').classList.toggle('hidden', !isEvent);
 }
 
-function parentCalendarBounds(viewOverride) {
-  var view = viewOverride || parentCalendarView;
+function parentCalendarActiveMonth() {
+  if (parentCalendarMonth) return parentCalendarMonth;
+  var now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+function parentCalendarActiveWeek() {
+  if (parentCalendarWeekStart) return parentCalendarWeekStart;
   var now = new Date();
   now.setHours(0, 0, 0, 0);
-  var start = new Date(now);
-  var end = new Date(now);
-  var label = '';
+  return startOfWeek(now);
+}
 
-  if (view === 'week') {
-    start = startOfWeek(now);
-    end = addDays(start, 6);
-    label = start.toLocaleDateString([], { month: 'short', day: 'numeric' })
-      + ' – '
-      + end.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-  } else if (view === 'month') {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
-    end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    label = start.toLocaleDateString([], { month: 'long', year: 'numeric' });
-  } else {
-    label = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-  }
+// One fetch covers both the month grid and the week strip: the range runs from
+// the start of the grid's first week to the end of its last, and is widened if
+// the strip has been walked outside the month. Two ranges would mean two
+// requests that could disagree about a day on the boundary.
+function parentCalendarBounds() {
+  var month = parentCalendarActiveMonth();
+  var start = startOfWeek(new Date(month.getFullYear(), month.getMonth(), 1));
+  var lastOfMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+  var end = addDays(startOfWeek(lastOfMonth), 6);
 
+  var weekStart = parentCalendarActiveWeek();
+  var weekEnd = addDays(weekStart, 6);
+  if (weekStart < start) start = new Date(weekStart);
+  if (weekEnd > end) end = new Date(weekEnd);
+
+  start.setHours(0, 0, 0, 0);
   end.setHours(23, 59, 59, 999);
-  return { start: start, end: end, label: label };
+  return {
+    start: start,
+    end: end,
+    label: month.toLocaleDateString([], { month: 'long', year: 'numeric' }),
+  };
+}
+
+function parentCalendarStep(delta) {
+  var month = parentCalendarActiveMonth();
+  parentCalendarMonth = new Date(month.getFullYear(), month.getMonth() + delta, 1);
+  parentCalendarSelectedDay = null;
+  renderParentCalendar();
+  loadParentCalendar();
+}
+
+function parentCalendarWeekStep(delta) {
+  parentCalendarWeekStart = addDays(parentCalendarActiveWeek(), delta * 7);
+  renderParentCalendar();
+  loadParentCalendar();
+}
+
+function parentCalendarSelectDay(dayKey) {
+  // Tapping the open day closes it, so the grid is never stuck expanded.
+  parentCalendarSelectedDay = parentCalendarSelectedDay === dayKey ? null : dayKey;
+  renderParentCalendar();
+}
+
+// Colour by PERSON, not by activity type. The kid colours are already on their
+// avatars, their rings and their cards, so a dot means something before anyone
+// reads a legend - which is why there is no legend.
+function parentCalendarPersonColour(item) {
+  var id = item.kind === 'chore' ? item.kidId : item.personId;
+  if (id === null || id === undefined) return 'var(--ink-subtle)';   // whole family
+  var idx = kidsOnly().findIndex(function(k) { return k.id === id; });
+  if (idx >= 0) return 'var(--kid-' + (Math.min(idx, 3) + 1) + ')';
+  return 'var(--brand)';                                             // a parent
+}
+
+function parentCalendarItemsByDay() {
+  var byDay = {};
+  (parentCalendarItems || []).forEach(function(item) {
+    var key = parentCalendarDayKey(item);
+    if (!key) return;
+    if (!byDay[key]) byDay[key] = [];
+    byDay[key].push(item);
+  });
+  return byDay;
+}
+
+function parentCalendarDots(items) {
+  // One dot per person, not per item: five chores for one kid is one dot, and
+  // a day with four dots really does involve four people.
+  var seen = [];
+  (items || []).forEach(function(item) {
+    var colour = parentCalendarPersonColour(item);
+    if (seen.indexOf(colour) === -1) seen.push(colour);
+  });
+  return '<span class="cal-dots">' + seen.slice(0, 4).map(function(c) {
+    return '<span class="cal-dot" style="background:' + c + '"></span>';
+  }).join('') + '</span>';
 }
 
 function parentCalendarDayKey(item) {
@@ -2738,79 +2906,102 @@ function renderParentCalendarChecklists(item) {
 
 function renderParentCalendar() {
   var range = document.getElementById('p-calendar-range');
-  var list = document.getElementById('p-calendar-list');
-  if (!range || !list) return;
+  var strip = document.getElementById('p-calendar-week');
+  var grid = document.getElementById('p-calendar-grid');
+  var agenda = document.getElementById('p-calendar-agenda');
+  if (!range || !strip || !grid || !agenda) return;
 
-  ['day', 'week', 'month'].forEach(function(name) {
-    var btn = document.getElementById('p-calendar-view-' + name);
-    if (btn) btn.classList.toggle('active', name === parentCalendarView);
-  });
-
-  var bounds = parentCalendarBounds();
-  range.textContent = bounds.label;
+  range.textContent = parentCalendarBounds().label;
 
   if (parentCalendarLoading) {
-    list.innerHTML = parentCalendarSkeletonHtml();
+    strip.innerHTML = '';
+    grid.innerHTML = parentCalendarSkeletonHtml();
+    agenda.innerHTML = '';
     return;
   }
 
-  var byDay = {};
-  (parentCalendarItems || []).forEach(function(item) {
-    var key = parentCalendarDayKey(item);
-    if (!key) return;
-    if (!byDay[key]) byDay[key] = [];
-    byDay[key].push(item);
-  });
-  var days = Object.keys(byDay).sort();
-  if (days.length === 0) {
-    list.innerHTML = buildEmptyState('🗓️', 'No calendar items in this range.', 'Add an event or reminder above.');
-    return;
+  var byDay = parentCalendarItemsByDay();
+  var todayKey = todayStr();
+
+  function dayButton(cls, day, inner) {
+    var key = isoDate(day);
+    var items = byDay[key] || [];
+    return '<button type="button" class="' + cls
+      + (key === todayKey ? ' today' : '')
+      + (key === parentCalendarSelectedDay ? ' selected' : '') + '"'
+      + ' onclick="parentCalendarSelectDay(\'' + key + '\')"'
+      + ' aria-label="' + esc(day.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))
+      + ', ' + items.length + ' item' + (items.length === 1 ? '' : 's') + '">'
+      + inner(day, items) + '</button>';
   }
 
-  list.innerHTML = days.map(function(dayKey) {
-    var dayItems = byDay[dayKey].slice().sort(parentCalendarSortWhen);
-    var heading = new Date(dayKey + 'T12:00:00').toLocaleDateString([], {
-      weekday: 'long',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
+  // ── This week: always on, so the week ahead costs no interaction at all ──
+  var weekStart = parentCalendarActiveWeek();
+  strip.innerHTML = Array.from({ length: 7 }, function(_, i) {
+    return dayButton('cal-chip', addDays(weekStart, i), function(day, items) {
+      return '<span class="cal-chip-dow">' + esc(day.toLocaleDateString([], { weekday: 'narrow' })) + '</span>'
+        + '<span class="cal-chip-num">' + day.getDate() + '</span>'
+        + parentCalendarDots(items);
     });
-    return '<div class="card parent-card">'
-      + '<h3 class="parent-section-title">' + esc(heading) + '</h3>'
-      + '<div class="parent-list">' + dayItems.map(function(item) {
-          var canManage = item.kind === 'event' || item.kind === 'reminder';
-          var notes = item.notes ? '<div class="sub">📝 ' + esc(item.notes) + '</div>' : '';
-          var actions = canManage
-            ? '<div class="parent-actions">'
-              + '<button class="btn ghost small" onclick="parentEditPlanningItem(\'' + jsq(item.id) + '\')">Edit</button>'
-              + '<button class="btn red-ghost small" onclick="parentDeletePlanningItem(\'' + jsq(item.id) + '\')">Delete</button>'
-              + '</div>'
-            : '';
-          return '<div class="parent-list-row">'
-            + '<div class="parent-copy">'
-            + '<span class="parent-list-title">' + esc(item.title || 'Untitled')
-            + (Array.isArray(item.conflictsWith) && item.conflictsWith.length > 0 ? '<span class="p-clash-indicator">⚠ clash</span>' : '')
-            + '</span>'
-            + '<div class="sub"><span class="tag parent-calendar-kind">' + esc(item.kind || 'item') + '</span>'
-            + ' · ' + esc(parentCalendarItemTime(item))
-            + ' · ' + esc(parentCalendarWho(item))
-            + (item.kind === 'chore' && item.points ? ' · ' + item.points + ' pts' : '')
-            + '</div>'
-            + notes
-            + renderParentCalendarChecklists(item)
-            + actions
-            + '</div>'
-            + '</div>';
-        }).join('') + '</div>'
-      + '</div>';
   }).join('');
-}
 
-function switchParentCalendarView(view) {
-  if (parentCalendarView === view) return;
-  parentCalendarView = view;
-  renderParentCalendar();
-  loadParentCalendar();
+  // ── Month grid ──
+  var month = parentCalendarActiveMonth();
+  var gridStart = startOfWeek(new Date(month.getFullYear(), month.getMonth(), 1));
+  var lastOfMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+  var weeks = Math.round((addDays(startOfWeek(lastOfMonth), 6) - gridStart) / 86400000 / 7);
+
+  grid.innerHTML = '<div class="cal-dowrow">'
+    + Array.from({ length: 7 }, function(_, i) {
+        return '<span class="cal-dow">'
+          + esc(addDays(gridStart, i).toLocaleDateString([], { weekday: 'narrow' })) + '</span>';
+      }).join('')
+    + '</div><div class="cal-cells">'
+    + Array.from({ length: weeks * 7 }, function(_, i) {
+        var day = addDays(gridStart, i);
+        var outside = day.getMonth() !== month.getMonth();
+        return dayButton('cal-cell' + (outside ? ' outside' : ''), day, function(d, items) {
+          return '<span class="cal-cell-num">' + d.getDate() + '</span>' + parentCalendarDots(items);
+        });
+      }).join('')
+    + '</div>';
+
+  // ── Agenda for the chosen day, expanded inline ──
+  // In place rather than a whole-screen week view: it stays one screen with no
+  // mode to get back out of. Same thing Google and Apple Calendar do.
+  if (!parentCalendarSelectedDay) {
+    agenda.innerHTML = '<div class="sub cal-agenda-hint">Tap a day to see what is on.</div>';
+    return;
+  }
+
+  var dayItems = (byDay[parentCalendarSelectedDay] || []).slice().sort(parentCalendarSortWhen);
+  var heading = new Date(parentCalendarSelectedDay + 'T12:00:00')
+    .toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+
+  agenda.innerHTML = '<h3 class="parent-section-title">' + esc(heading) + '</h3>'
+    + (dayItems.length === 0
+        ? buildEmptyPill('Nothing on')
+        : '<div class="parent-list">' + dayItems.map(function(item) {
+            var canManage = item.kind === 'event' || item.kind === 'reminder';
+            var notes = item.notes ? '<div class="sub">📝 ' + esc(item.notes) + '</div>' : '';
+            return '<div class="parent-list-row">'
+              + '<span class="cal-dot cal-dot-lg" style="background:'
+              + parentCalendarPersonColour(item) + '"></span>'
+              + '<div class="parent-copy">'
+              + '<span class="parent-list-title">' + esc(item.title || 'Untitled') + '</span>'
+              + '<div class="sub">' + esc(parentCalendarItemTime(item))
+              + ' · ' + esc(parentCalendarWho(item))
+              + (item.kind === 'chore' && item.points ? ' · ' + item.points + ' pts' : '') + '</div>'
+              + notes
+              + '</div>'
+              + (canManage
+                  ? '<div class="parent-actions">'
+                    + '<button class="btn ghost small" onclick="parentEditPlanningItem(\'' + jsq(item.id) + '\')">Edit</button>'
+                    + '<button class="btn red-ghost small" onclick="parentDeletePlanningItem(\'' + jsq(item.id) + '\')">Delete</button>'
+                    + '</div>'
+                  : '')
+              + '</div>';
+          }).join('') + '</div>');
 }
 
 async function loadParentCalendar() {
