@@ -82,6 +82,7 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.webp': 'image/webp',
   '.webmanifest': 'application/manifest+json',
 };
 

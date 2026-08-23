@@ -7,8 +7,8 @@ const HOUSEHOLD_ID = 'default';
 const SEED_PEOPLE = [
   { id: 'peter', name: 'Peter', emoji: '🧔', pin: '1234', role: 'parent' },
   { id: 'tymanda', name: 'Tymanda', emoji: '👩', pin: '1234', role: 'parent' },
-  { id: 'toby', name: 'Toby', emoji: 'svg:3d-printer', pin: '1234', role: 'kid' },
-  { id: 'ollie', name: 'Ollie', emoji: 'svg:quokka', pin: '1234', role: 'kid' },
+  { id: 'toby', name: 'Toby', emoji: 'img:toby', pin: '1234', role: 'kid' },
+  { id: 'ollie', name: 'Ollie', emoji: 'img:ollie', pin: '1234', role: 'kid' },
 ];
 
 // One-time corrections to people who were seeded BEFORE a default changed.
@@ -24,6 +24,12 @@ const SEED_PEOPLE = [
 const AVATAR_MIGRATIONS = [
   { id: 'toby', from: '\u{1F996}', to: 'svg:3d-printer' },
   { id: 'ollie', from: '\u{1F98A}', to: 'svg:quokka' },
+  // Real artwork replaces the placeholder SVGs. ensureSeeded() only creates
+  // records when the household does not exist, so changing SEED_PEOPLE alone
+  // would change nothing for a household created weeks ago - migrations are the
+  // only thing that moves an existing record.
+  { id: 'toby', from: 'svg:3d-printer', to: 'img:toby' },
+  { id: 'ollie', from: 'svg:quokka', to: 'img:ollie' },
 ];
 
 // The reward shop shipped with no rewards at all, so renderRewardShop() always

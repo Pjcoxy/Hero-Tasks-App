@@ -252,6 +252,49 @@ spinner on a full screen, and never a blank flash followed by content jumping in
 
 ---
 
+### Avatars
+
+Three kinds, resolved by prefix on `person.emoji`:
+
+| Value | Renders as |
+|---|---|
+| `img:<key>` | A photo from `frontend/img/`, via `IMG_AVATARS` |
+| `svg:<key>` | An inline SVG tinted with the kid's colour, via `SVG_AVATARS` |
+| anything else | The string itself, i.e. an emoji |
+
+Photo avatars ship **two crops per kid**, not one scaled down: `tile` is
+chest-up for the person picker, `head` is tighter on the face because at ~40px
+a chest-up shot is an unreadable smudge. `renderAvatarHtml()` defaults to
+`tile`, `setAvatar()` defaults to `head`; pass the other explicitly.
+
+Every kind also needs a `fallback` emoji. Plenty of places can only hold text —
+`<option>` labels, prompt lists, the parent kid-mark — and an avatar that
+renders as nothing there is worse than an emoji.
+
+`.avatar-photo` fills whatever round or rounded slot it is dropped into
+(`width/height: 100%`, `object-fit: cover`, `border-radius: inherit`), so the
+same markup works at 2.5rem in the header and 4.5rem on a tile.
+
+**Changing an avatar needs a migration.** `ensureSeeded()` only creates records
+when the household does not exist, so editing `SEED_PEOPLE` changes nothing for
+a household created weeks ago. `AVATAR_MIGRATIONS` is the only thing that moves
+an existing record — this is the #88 trap, and it has now caught us twice.
+
+### Artwork behind the person picker
+
+`.who-band` carries the splash image with the brand gradient **underneath as a
+real fallback**, so a 404 or a slow load shows a branded band rather than a
+white gap. The artwork carries its own wordmark, so the band's `<h1>` is
+`display: none` rather than deleted — it is what shows if the image never
+arrives.
+
+Text over artwork gets `--text-scrim`, not a solid bar: it has to hold contrast
+against whatever the picture happens to be without hiding it.
+
+Keep the splash under ~200KB. It is the first paint on a phone, and this one is
+720px wide at WebP q76 — a bigger source buys nothing behind a `cover`
+background.
+
 ### Swipeable card row
 
 Used for the kid Home prize banner. Native CSS `scroll-snap`, never a carousel
