@@ -322,3 +322,54 @@ test('the voice capture sheet lets the kid pick the item type and saves it', asy
   await expect(page.locator('#voice-reminder-modal')).toBeHidden();
   await expect(page.locator('#toast')).toContainText(/Event saved/i);
 });
+
+// #122. My List: a kid's own notes, plans and reminders, separate from the
+// chores a parent assigns. These items have no date, which is exactly why they
+// need their own fetch - the calendar action skips anything without a parseable
+// startAt, so an undated note is invisible to every other screen in the app.
+test('a kid can add something to their own list and tick it off', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+  await page.getByRole('button', { name: /missions/i }).first().click();
+
+  await expect(page.locator('#k-mylist')).toContainText('Nothing on your list yet');
+
+  await page.locator('#k-mylist-add').click();
+  await expect(page.locator('#myitem-sheet')).toBeVisible();
+  await page.locator('#myitem-title').fill('Library book is due');
+  await page.getByRole('button', { name: /🎒 School/ }).click();
+  await page.getByRole('button', { name: /Add it/ }).click();
+
+  // Sheet closes and the item lands - if the route were wrong this would stay
+  // on screen as an optimistic row and then vanish on the rollback.
+  await expect(page.locator('#myitem-sheet')).toBeHidden();
+  const card = page.locator('#k-mylist .mylist-item').filter({ hasText: 'Library book is due' });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('🎒 School');
+
+  // Tick it off; it must survive a reload, which is the real proof it persisted
+  // rather than only ever existing in the optimistic local copy.
+  await card.locator('.tick').click();
+  await expect(card).toHaveClass(/done/);
+
+  await page.reload();
+  await page.getByRole('button', { name: /missions/i }).first().click();
+  const after = page.locator('#k-mylist .mylist-item').filter({ hasText: 'Library book is due' });
+  await expect(after).toBeVisible();
+  await expect(after).toHaveClass(/done/);
+});
+
+// One kid's list must never show up on another kid's screen.
+test('my list is private to the kid who wrote it', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+  await page.getByRole('button', { name: /missions/i }).first().click();
+  await page.locator('#k-mylist-add').click();
+  await page.locator('#myitem-title').fill('Ollie secret plan');
+  await page.getByRole('button', { name: /Add it/ }).click();
+  await expect(page.locator('#k-mylist')).toContainText('Ollie secret plan');
+
+  await page.locator('.kid-header-left').click();
+  await pickPerson(page, 'Toby');
+  await page.getByRole('button', { name: /missions/i }).first().click();
+  await expect(page.locator('#k-mylist')).not.toContainText('Ollie secret plan');
+  await expect(page.locator('#k-mylist')).toContainText('Nothing on your list yet');
+});

@@ -1083,6 +1083,138 @@ async function sendDueReminders(now = new Date()) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// My List - a kid's own notes, plans and reminders.
+//
+// These sit in the same planningItems container as the parent calendar, but on
+// their own routes gated by requireSelf rather than requireParent. Separate
+// routes rather than loosening the parent ones: validatePlanningPayload demands
+// an ISO startAt and only allows event|reminder, and a note jotted down with no
+// date fits neither. Widening it to admit undated notes would weaken the
+// validation the parent calendar depends on.
+//
+// This is also why My List exists at all. calendar() skips any item whose
+// startAt will not parse, so an undated personal item - including a voice item
+// whose "when" could not be read - is invisible everywhere in the app today.
+const MY_ITEM_TYPES = ['note', 'reminder', 'plan'];
+const MY_ITEM_CATEGORIES = ['school', 'home', 'sport', 'fun', 'other'];
+
+function isMyItem(doc, kidId) {
+  return doc
+    && doc.active !== false
+    && doc.personId === kidId
+    && MY_ITEM_TYPES.includes(doc.type);
+}
+
+async function readMyItems(kidId) {
+  const items = await queryHousehold('planningItems');
+  return items
+    .filter((doc) => isMyItem(doc, kidId))
+    .sort((a, b) => {
+      const byOrder = (a.order ?? 0) - (b.order ?? 0);
+      if (byOrder !== 0) return byOrder;
+      return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+    });
+}
+
+async function myItems(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
+  return { ok: true, items: await readMyItems(req.kidId) };
+}
+
+async function addMyItem(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
+
+  const title = String(req.title || '').trim();
+  if (!title) return { ok: false, error: 'title is required' };
+
+  const type = String(req.type || '').trim();
+  if (!MY_ITEM_TYPES.includes(type)) {
+    return { ok: false, error: `type must be one of: ${MY_ITEM_TYPES.join(', ')}` };
+  }
+
+  const category = String(req.category || 'other').trim();
+  if (!MY_ITEM_CATEGORIES.includes(category)) {
+    return { ok: false, error: `category must be one of: ${MY_ITEM_CATEGORIES.join(', ')}` };
+  }
+
+  // New items go to the end of the kid's own list.
+  const existing = await readMyItems(req.kidId);
+  const order = existing.length
+    ? Math.max(...existing.map((doc) => doc.order ?? 0)) + 1
+    : 0;
+
+  const doc = {
+    id: randomUUID(),
+    householdId: HOUSEHOLD_ID,
+    personId: req.kidId,
+    type,
+    title,
+    category,
+    order,
+    status: 'open',
+    source: 'manual',
+    startAt: null,
+    allDay: false,
+    active: true,
+    createdAt: new Date().toISOString(),
+  };
+  await container('planningItems').items.create(doc);
+  return { ok: true, item: doc };
+}
+
+async function updateMyItem(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
+  const planningItems = container('planningItems');
+  const { resource: doc } = await planningItems
+    .item(req.itemId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+
+  // The ownership check is the point of this route: a valid PIN proves who you
+  // are, not that the item you named is yours.
+  if (!isMyItem(doc, req.kidId)) return { ok: false, error: 'Item not found' };
+
+  if (req.title !== undefined) {
+    const title = String(req.title || '').trim();
+    if (!title) return { ok: false, error: 'title is required' };
+    doc.title = title;
+  }
+  if (req.category !== undefined) {
+    const category = String(req.category || '').trim();
+    if (!MY_ITEM_CATEGORIES.includes(category)) {
+      return { ok: false, error: `category must be one of: ${MY_ITEM_CATEGORIES.join(', ')}` };
+    }
+    doc.category = category;
+  }
+  if (req.status !== undefined) {
+    const status = String(req.status || '').trim();
+    if (!['open', 'done'].includes(status)) return { ok: false, error: 'status must be open or done' };
+    doc.status = status;
+  }
+
+  await planningItems.item(req.itemId, HOUSEHOLD_ID).replace(doc);
+  return { ok: true, item: doc };
+}
+
+async function deleteMyItem(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
+  const planningItems = container('planningItems');
+  const { resource: doc } = await planningItems
+    .item(req.itemId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!isMyItem(doc, req.kidId)) return { ok: false, error: 'Item not found' };
+
+  // Soft delete, matching every other write to this container. #120 specified a
+  // hard delete, but that was written before the parent calendar CRUD landed -
+  // calendar() and the parent routes all test `active === false`, and one row
+  // that vanishes instead is a trap for the next person reading this file.
+  doc.active = false;
+  await planningItems.item(req.itemId, HOUSEHOLD_ID).replace(doc);
+  return { ok: true };
+}
+
 async function saveVoicePlan(req) {
   await requireSelf(req.personId, req.pin, req.kidId);
   const title = String(req.title || '').trim();
@@ -1146,6 +1278,10 @@ const ROUTES = {
   rejectRedemption,
   cancelRedemption,
   saveVoicePlan,
+  myItems,
+  addMyItem,
+  updateMyItem,
+  deleteMyItem,
 };
 
 app.http('hero', {
