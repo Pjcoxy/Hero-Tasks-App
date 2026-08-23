@@ -373,3 +373,66 @@ test('my list is private to the kid who wrote it', async ({ page }) => {
   await expect(page.locator('#k-mylist')).not.toContainText('Ollie secret plan');
   await expect(page.locator('#k-mylist')).toContainText('Nothing on your list yet');
 });
+
+// #123. A kid can put their own list in the order they care about. The API
+// requires every one of their ids, so the interesting part is that moving one
+// row inside a filtered or split view still sends a complete, valid list.
+//
+// The smoke server keeps one in-memory store for the whole run, so Ollie's list
+// already has rows from earlier tests. These assert on the relative order of two
+// rows they add themselves rather than on the whole list.
+test('a kid can reorder their own list, and it sticks', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+  await page.getByRole('button', { name: /missions/i }).first().click();
+
+  for (const title of ['Alpha row', 'Beta row']) {
+    await page.locator('#k-mylist-add').click();
+    await page.locator('#myitem-title').fill(title);
+    await page.getByRole('button', { name: /Add it/ }).click();
+    await expect(page.locator('#k-mylist')).toContainText(title);
+  }
+
+  const titles = () => page.locator('#k-mylist .mylist-item .title').allTextContents();
+  const indexOf = async (label) => (await titles()).indexOf(label);
+
+  // New items append, so Alpha sits directly above Beta.
+  expect(await indexOf('Beta row')).toBe((await indexOf('Alpha row')) + 1);
+
+  await page.locator('#k-mylist .mylist-item')
+    .nth(await indexOf('Beta row'))
+    .getByRole('button', { name: 'Move up' })
+    .click();
+  await expect.poll(async () => (await indexOf('Beta row')) < (await indexOf('Alpha row'))).toBe(true);
+
+  // A reload is the real proof - an optimistic swap alone would look identical.
+  await page.reload();
+  await page.getByRole('button', { name: /missions/i }).first().click();
+  await expect.poll(async () => (await indexOf('Beta row')) < (await indexOf('Alpha row'))).toBe(true);
+});
+
+// The ends must be inert, not an error toast.
+test('moving past the ends of the list is a no-op', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+  await page.getByRole('button', { name: /missions/i }).first().click();
+
+  await page.locator('#k-mylist-add').click();
+  await page.locator('#myitem-title').fill('Ends check row');
+  await page.getByRole('button', { name: /Add it/ }).click();
+  await expect(page.locator('#k-mylist')).toContainText('Ends check row');
+
+  const rows = page.locator('#k-mylist .mylist-item');
+  await expect(rows.first().getByRole('button', { name: 'Move up' })).toBeDisabled();
+  await expect(rows.last().getByRole('button', { name: 'Move down' })).toBeDisabled();
+
+  // Reordering is organisation, not achievement: no toast, no celebration.
+  await rows.first().getByRole('button', { name: 'Move down' }).click();
+  await expect(page.locator('#toast')).toBeHidden();
+});
+
+// Reordering is organisation, not achievement - the parent's own task views
+// must not sprout kid reorder controls.
+test('Parent HQ task rows have no reorder controls', async ({ page }) => {
+  await pickPerson(page, 'Peter');
+  await page.getByRole('button', { name: /^Tasks$/i }).first().click();
+  await expect(page.locator('#p-tab-tasks .move-controls')).toHaveCount(0);
+});
