@@ -779,9 +779,18 @@ test('the sign-in screen is the artwork, with the faces on it', async ({ page })
   expect(Math.max(...tops) - Math.min(...tops), 'the faces should share one row')
     .toBeLessThanOrEqual(2);
 
+  // The row moved from the foot to the sky above the wordmark - the one band of
+  // the artwork that is genuinely empty. It has to stay clear of the logo.
   const view = page.viewportSize();
-  expect(Math.min(...tops), 'the row should sit low, leaving the artwork visible')
-    .toBeGreaterThan(view.height * 0.6);
+  expect(Math.max(...tops), 'the row should sit in the sky above the wordmark')
+    .toBeLessThan(view.height * 0.12);
+});
+
+test('the sign-in screen has no prompt text on it', async ({ page }) => {
+  await expect(page.locator('#screen-who')).not.toContainText('Who are you');
+  // The names are still there for screen readers, just not drawn on the artwork.
+  const label = await page.locator('.who-tile').first().getAttribute('aria-label');
+  expect(label).toMatch(/Peter|Tymanda|Toby|Ollie/);
 });
 
 test('there is no separate splash screen to sit through', async ({ page }) => {
@@ -809,4 +818,62 @@ test('the sign-in bar spans the phone screen rather than collapsing to its conte
   const sheet = await page.locator('.who-sheet').boundingBox();
   expect(Math.round(sheet.width)).toBe(412);
   expect(Math.round(sheet.x)).toBe(0);
+});
+
+// "Appy not wordy". Parent HQ reported zero with a four-line empty state, three
+// times on one screen, and put "Today's chores overview" under every kid's name.
+// Status is a colour and two words now.
+test('a kid card reports status as pills, not paragraphs', async ({ page }) => {
+  await page.evaluate(async () => {
+    const post = (b) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
+    }).then((r) => r.json());
+    await post({ action: 'addTask', parentId: 'peter', parentPin: '1234', kidId: 'toby', title: 'Pill check chore', points: 3, cycle: 'daily' });
+    const st = await post({ action: 'state' });
+    const t = st.tasks.find((x) => x.title === 'Pill check chore');
+    await post({ action: 'completeTask', personId: 'toby', pin: '1234', taskId: t.id });
+  });
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const cards = page.locator('#p-approvals-today-by-kid .parent-card');
+  const toby = cards.filter({ hasText: 'Toby' });
+  await expect(toby.locator('.pill.warn')).toContainText(/\d+ pending/);
+  await expect(toby.locator('.pill.neutral')).toContainText(/chore/);
+
+  // The filler subtitle is gone from every card.
+  await expect(page.locator('#p-approvals-today-by-kid')).not.toContainText('chores overview');
+});
+
+test('a kid with nothing on gets one pill, not an empty state', async ({ page }) => {
+  await pickPerson(page, 'Peter');
+  const ollie = page.locator('#p-approvals-today-by-kid .parent-card').filter({ hasText: 'Ollie' });
+  await expect(ollie.locator('.pill.good')).toContainText('All caught up');
+  // No emoji-and-two-sentences block explaining that zero means zero.
+  await expect(ollie.locator('.empty')).toHaveCount(0);
+});
+
+test('empty parent sections are a pill, not a paragraph', async ({ page }) => {
+  await pickPerson(page, 'Peter');
+  await expect(page.locator('#p-reward-requests .pill')).toContainText('0 requests');
+  await expect(page.locator('#p-reward-requests')).not.toContainText('will show up here');
+});
+
+// The kids have photos now; the approval card was still drawing the emoji
+// fallback while the cards right below it showed the real face.
+test('approval cards use the kid photo, matching the cards below', async ({ page }) => {
+  await page.evaluate(async () => {
+    const post = (b) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
+    }).then((r) => r.json());
+    await post({ action: 'addTask', parentId: 'peter', parentPin: '1234', kidId: 'toby', title: 'Face check chore', points: 1, cycle: 'oneoff' });
+    const st = await post({ action: 'state' });
+    const t = st.tasks.find((x) => x.title === 'Face check chore');
+    await post({ action: 'completeTask', personId: 'toby', pin: '1234', taskId: t.id });
+  });
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const card = page.locator('#p-pending .parent-card').filter({ hasText: 'Face check chore' });
+  await expect(card.locator('img.avatar-photo')).toHaveCount(1);
 });
