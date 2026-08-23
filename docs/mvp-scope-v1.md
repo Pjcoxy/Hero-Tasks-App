@@ -37,9 +37,27 @@ Closes #1.
   - Detect low-confidence/ambiguous transcript and require user confirmation or edit.
 - Save only confirmed, structured content.
 
+## What motivates a kid (settled in #9)
+
+Points count toward **real prizes in the Rewards shop** — ice cream, a player
+for the soccer game, picking dinner. Nothing else.
+
+The original build had a pet ladder (Egg → Hatchling → … → MEGA LEGEND), a
+daily streak and achievement badges. All three were removed: hatching an egg
+buys nothing, a streak only ever punishes the day it breaks, and a badge is a
+picture of a badge. The kids ignored them.
+
+> "the kids dont care about streaks, eggs hatching etc - this incentive path
+> replaces that"
+
+The test for anything proposed here: **does it end in a prize the kids can
+hold?** If not, it does not belong. `stats[].streak` and `stats[].badges` are
+still computed server-side but nothing renders them.
+
 ## Non-goals for v1
 - Multi-household support.
-- Advanced analytics/gamification beyond basic progress.
+- Invented currencies — levels, pets, streaks, badges, combo multipliers.
+- Advanced analytics beyond basic progress.
 - Fully autonomous AI scheduling or planning.
 - Third-party integrations (school systems, calendars, smart home platforms).
 - Enterprise-grade org/admin controls.

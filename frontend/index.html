@@ -67,6 +67,9 @@
   --space-2: 0.5rem;
   --space-3: 0.75rem;
   --space-4: 1rem;
+  /* Widest the content ever gets. Past this the layout centres rather than
+     stretching - see the responsive shell section. */
+  --shell-max: 72rem;
   --space-5: 1.5rem;
   --space-6: 2rem;
   --space-7: 3rem;
@@ -1066,6 +1069,94 @@ button.parent-list-row:active { transform: scale(0.99); }
   background: var(--surface);
 }
 
+/* ─── Responsive shell ─────────────────────────────────────────────────
+   Phone stays the primary case and nothing below changes it. What these rules
+   fix is the app opening on a laptop or a 34-inch monitor: content had no
+   maximum width, so a task row stretched to ~1900px to hold thirty characters
+   while type and padding stayed at phone scale.
+
+   Two techniques, picked per element:
+
+   - Content blocks that sit on the page background just get a max-width and
+     auto margins.
+   - Full-bleed bars (headers, nav, the coloured hero) keep their background
+     edge to edge and centre their CONTENT with a padding-inline that grows.
+     Capping their width instead would leave the page background showing at
+     the sides, which reads as a broken layout rather than a centred one.
+
+   Every token is rem-based, so stepping the root font-size scales type and
+   spacing together rather than needing a rule per component. That is the whole
+   of the "scale with the breakpoint" requirement. The steps are percentages
+   rather than px so they scale from whatever the reader has their browser set
+   to - a px value would silently override someone's larger default.
+
+   Breakpoints checked: 360, 430, 768, 1280, 1920+. */
+/* These each carry their own --space-4 gutter, so the cap has to allow for it
+   or their content sits inset from the header's by exactly that gutter - an
+   18px step at the left edge that reads as a misalignment, because it is one. */
+.tab-content,
+.home-content-sheet,
+.parent-panel,
+.who-sheet {
+  max-width: calc(var(--shell-max) + var(--space-4) * 2);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.kid-header,
+.parent-header,
+.parent-tabbar,
+.tab-bar,
+.who-band,
+.kid-home-hero {
+  padding-inline: max(var(--space-4), calc((100% - var(--shell-max)) / 2));
+}
+
+/* The hero's own children are already full-width of it; the padding above
+   centres them, so the carousel must not add its own inset on top. */
+@media (min-width: 48rem) {
+  .goal-card { padding-inline: 0; }
+}
+
+/* Tablet and up. */
+@media (min-width: 48rem) {
+  html { font-size: 106.25%; }
+  /* Four across instead of two: at this width a 2-column picker gives each
+     person a tile wider than it is tall. */
+  .tile-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* Laptop and up: use the width rather than padding it out. */
+@media (min-width: 64rem) {
+  .home-glance-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: var(--space-5);
+    align-items: start;
+  }
+  /* auto-fill rather than a fixed 2, so these become three across on a very
+     wide monitor instead of stretching to half a metre each. */
+  #p-pending,
+  #p-reward-requests,
+  #p-approvals-today-by-kid,
+  #p-decided {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+    gap: var(--space-3);
+    align-items: start;
+  }
+  /* Those grids own the spacing now; the per-card margin would double it. */
+  #p-pending > .card,
+  #p-reward-requests > .card,
+  #p-approvals-today-by-kid > .card,
+  #p-decided > .card { margin-bottom: 0; }
+}
+
+/* Desktop. */
+@media (min-width: 80rem) {
+  html { font-size: 112.5%; }
+}
+
 /* ─── Confetti canvas ─────────────────────────────────────────────────── */
 #confetti-canvas { position: fixed; inset: 0; pointer-events: none; z-index: 99; }
 
@@ -1188,10 +1279,16 @@ button.parent-list-row:active { transform: scale(0.99); }
         <div class="goal-dots" id="k-goal-dots"></div>
       </div>
       <div class="home-content-sheet">
-        <h2 class="section-title">📅 Today</h2>
-        <div id="k-glance-today"></div>
-        <h2 class="section-title">🗓️ This Week</h2>
-        <div id="k-glance-week"></div>
+        <div class="home-glance-grid">
+          <section>
+            <h2 class="section-title">📅 Today</h2>
+            <div id="k-glance-today"></div>
+          </section>
+          <section>
+            <h2 class="section-title">🗓️ This Week</h2>
+            <div id="k-glance-week"></div>
+          </section>
+        </div>
         <div class="kid-home-actions">
           <button class="btn ghost" onclick="addExtraPrompt()">➕ I did something extra!</button>
           <button class="btn voice-trigger" id="k-voice-reminder-btn" onclick="openVoiceReminderFlow()">🎤 Add a voice reminder</button>
