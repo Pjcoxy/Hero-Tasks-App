@@ -581,3 +581,80 @@ test('a plain approve goes straight through with no dialog', async ({ page }) =>
   await expect(page.locator('#ask-modal')).toBeHidden();
   await expect(card).toBeHidden();
 });
+
+// #174. The app installs on desktops. With no maximum width a task row
+// stretched to ~1900px to hold thirty characters, at phone type scale.
+//
+// Checked at every breakpoint the design system names, because the failure is
+// silent - nothing errors, it just reads as a stretched phone page.
+const BREAKPOINTS = [
+  { w: 360, h: 780, label: 'small phone' },
+  { w: 430, h: 932, label: 'large phone' },
+  { w: 768, h: 1024, label: 'tablet' },
+  { w: 1280, h: 800, label: 'laptop' },
+  { w: 1920, h: 1080, label: 'wide' },
+];
+
+for (const bp of BREAKPOINTS) {
+  test(`nothing scrolls sideways at ${bp.w}px (${bp.label})`, async ({ page }) => {
+    await page.setViewportSize({ width: bp.w, height: bp.h });
+    await pickPerson(page, 'Ollie');
+
+    for (const tab of ['home', 'missions', 'rewards', 'leaderboard', 'calendar']) {
+      await page.locator(`#tabbtn-${tab}`).click();
+      const overflows = await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      );
+      expect(overflows, `${tab} tab overflows at ${bp.w}px`).toBe(false);
+    }
+  });
+}
+
+test('content is capped and centred on a wide screen, not stretched', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await pickPerson(page, 'Ollie');
+
+  // 72rem at the 112.5% root of the wide breakpoint is ~1296px. The assertion
+  // that matters is simply that it is nowhere near the 1920 viewport.
+  const sheetWidth = await page.locator('.home-content-sheet').evaluate((el) => el.clientWidth);
+  expect(sheetWidth).toBeLessThan(1500);
+
+  // Centred, not left-aligned: equal gap either side, within a pixel.
+  const box = await page.locator('.home-content-sheet').boundingBox();
+  const rightGap = 1920 - (box.x + box.width);
+  expect(Math.abs(box.x - rightGap)).toBeLessThanOrEqual(1);
+
+  // And the width is actually used: Today and This Week sit side by side.
+  const today = await page.locator('#k-glance-today').boundingBox();
+  const week = await page.locator('#k-glance-week').boundingBox();
+  expect(week.x).toBeGreaterThan(today.x + today.width - 1);
+});
+
+test('the parent approval list goes multi-column on a wide screen', async ({ page }) => {
+  await page.evaluate(async () => {
+    const post = (b) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
+    }).then((r) => r.json());
+    for (const t of ['Grid one', 'Grid two', 'Grid three']) {
+      await post({ action: 'addTask', parentId: 'peter', parentPin: '1234', kidId: 'toby', title: t, points: 1, cycle: 'oneoff' });
+    }
+    const st = await post({ action: 'state' });
+    for (const t of st.tasks.filter((x) => x.title.startsWith('Grid '))) {
+      await post({ action: 'completeTask', personId: 'toby', pin: '1234', taskId: t.id });
+    }
+  });
+
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const cards = page.locator('#p-pending > .card');
+  expect(await cards.count()).toBeGreaterThanOrEqual(3);
+
+  // Two cards sharing a row is the whole point - one column would put every
+  // card at the same x, each one stretched across the screen.
+  const first = await cards.nth(0).boundingBox();
+  const second = await cards.nth(1).boundingBox();
+  expect(second.x).toBeGreaterThan(first.x);
+  expect(first.width).toBeLessThan(800);
+});

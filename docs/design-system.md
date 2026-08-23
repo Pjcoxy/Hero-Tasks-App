@@ -252,6 +252,93 @@ spinner on a full screen, and never a blank flash followed by content jumping in
 
 ---
 
+### Swipeable card row
+
+Used for the kid Home prize banner. Native CSS `scroll-snap`, never a carousel
+library — touch, trackpad and keyboard all work for free and it degrades to a
+plain horizontal scroller where snap is unsupported.
+
+- Cards are exactly `100%` wide with **no gap**, so `scrollLeft / clientWidth`
+  is the card index. Dots read that; keep it true or the maths stops working.
+- Open on the card that matters (the prize being saved for), not card one.
+- Guard re-centring behind a signature of what the row is showing. `render()`
+  runs on every 60s poll; without the guard each one snaps the card back under
+  a thumb mid-swipe.
+- A card that leads somewhere is a `<button>`. A swipe ends with a finger on a
+  card too, so ignore a click arriving within 250ms of the last scroll event.
+
+### Bottom sheet
+
+For quick-add flows (My List). `.modal-bg` centres; a sheet pins to the bottom
+where a thumb is: `align-items: flex-end`, `--radius-lg` on the top corners
+only, `--shadow-3`, and it slides up with `transform: translateY(100%) → 0`
+under `prefers-reduced-motion: no-preference`.
+
+Never `window.prompt()` — the browser's own dialog shows the deployment
+hostname, which is how a kid ends up reading `salmon-river-0e879dc00…` in a
+question about chores.
+
+### Move controls
+
+Up/down `▲▼` icon buttons, 44px targets, stacked in a `.move-controls` column.
+
+Reordering is **organisation, not achievement**: no toast, no `celebrate()`, no
+vibration. First-up and last-down are `disabled`, never an error toast.
+
+### Notes on a decision
+
+A grown-up's comment on an approve or decline, shown read-only on the kid's own
+card. `--surface-sunken` with a 💬 for an approval; `--warning-wash` with a 🔧
+for a decline, because that one is a thing to fix. It is a message about a
+decision already made, not a thread — no reply affordance.
+
+### Linking a row to where the action is
+
+A row that summarises something actionable elsewhere becomes a `<button>` that
+scrolls the real target into view and rings it (`.arriving`, a 1.6s
+`box-shadow` pulse). Rows with nowhere to go stay inert `<div>`s — a row that
+looks tappable and does nothing is worse than one that plainly is not.
+
+---
+
+## Responsive
+
+Phone-first, and phone stays the primary case. But the app installs on desktops
+too, and content with no maximum width stretched a task row to ~1900px to hold
+thirty characters while type and padding stayed at phone scale.
+
+**Breakpoints.** 360 (small phone), 430 (large phone), 768 (tablet), 1280
+(laptop), 1920+ (wide). Check all five, on every tab, both roles.
+
+**`--shell-max: 72rem`.** Content caps there and centres.
+
+Two techniques, picked per element:
+
+- Blocks sitting on the page background: `max-width` and auto margins. If the
+  block carries its own gutter, cap at `calc(var(--shell-max) + gutter * 2)` or
+  its content sits inset from the header's by exactly that gutter.
+- Full-bleed bars (headers, nav, the coloured hero): keep the background edge
+  to edge and centre the *content* with
+  `padding-inline: max(var(--space-4), calc((100% - var(--shell-max)) / 2))`.
+  Capping their width instead leaves page background at the sides, which reads
+  as broken rather than centred.
+
+**Scaling type and spacing** is one rule, not one per component: every token is
+rem-based, so step `html { font-size }` at the breakpoint. Use **percentages**
+(`106.25%`, `112.5%`), not px — a px value silently overrides a reader who has
+set a larger default.
+
+**Using the width, not padding it out.** At `64rem`+ the kid Home glance puts
+Today and This Week side by side, and the parent's card lists become
+`repeat(auto-fill, minmax(20rem, 1fr))` — auto-fill so a very wide monitor gets
+three columns rather than two half-metre ones. Grids own their spacing, so zero
+the per-card `margin-bottom` inside them or it doubles up.
+
+**Never a horizontally scrolling page.** Wide content scrolls inside its own
+container.
+
+---
+
 ## Parent HQ
 
 Same tokens, different register:
