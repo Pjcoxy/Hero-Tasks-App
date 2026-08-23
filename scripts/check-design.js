@@ -139,7 +139,7 @@ check(Boolean(bodyMatch), '<body> block exists');
 
 if (bodyMatch) {
   const body = bodyMatch[1];
-  const allowedTopLevelIds = new Set(['confetti-canvas', 'screen-who', 'screen-kid', 'screen-parent', 'pin-modal', 'ask-modal', 'voice-reminder-modal', 'myitem-sheet', 'toast']);
+  const allowedTopLevelIds = new Set(['confetti-canvas', 'screen-splash', 'screen-who', 'screen-kid', 'screen-parent', 'pin-modal', 'ask-modal', 'voice-reminder-modal', 'myitem-sheet', 'toast']);
   const seenTopLevelIds = new Set();
   let unexpectedTopLevel = 0;
 

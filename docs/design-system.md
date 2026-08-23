@@ -280,20 +280,33 @@ when the household does not exist, so editing `SEED_PEOPLE` changes nothing for
 a household created weeks ago. `AVATAR_MIGRATIONS` is the only thing that moves
 an existing record — this is the #88 trap, and it has now caught us twice.
 
-### Artwork behind the person picker
+### The splash screen
 
-`.who-band` carries the splash image with the brand gradient **underneath as a
-real fallback**, so a 404 or a slow load shows a branded band rather than a
-white gap. The artwork carries its own wordmark, so the band's `<h1>` is
-`display: none` rather than deleted — it is what shows if the image never
-arrives.
+**Its own screen, showing the artwork and nothing else.** `#screen-splash` sits
+alongside `screen-who` / `screen-kid` / `screen-parent` in `show()`.
 
-Text over artwork gets `--text-scrim`, not a solid bar: it has to hold contrast
-against whatever the picture happens to be without hiding it.
+It was first built as a background on the picker's header band. That was wrong:
+it turned the four sign-in tiles into the bottom half of what should be a held
+frame, and made one screen do two jobs. Splash is a held frame; the picker is
+where something is chosen. Separate screens.
 
-Keep the splash under ~200KB. It is the first paint on a phone, and this one is
-720px wide at WebP q76 — a bigger source buys nothing behind a `cover`
-background.
+- `contain`, not `cover`. This is a composed picture with a deliberate edge —
+  cropping the logo off a tall phone to fill the corners is worse than a thin
+  letterbox.
+- Brand colour underneath, so a slow or failed image is a branded screen rather
+  than white.
+- Clears itself once the app has something to show **and** a minimum beat has
+  passed, so it never flashes on a fast connection. A tap skips it. A backstop
+  timer clears it even if the first load never resolves — a splash must never
+  become a dead end.
+- Once dismissed it does not return. `render()` runs on every 60s poll, and a
+  splash reappearing mid-use would be absurd.
+
+Keep it under ~200KB: it is the first paint on a phone. This one is 720px wide
+at WebP q76.
+
+The picker keeps its own gradient band and wordmark — they are not a fallback
+for the splash, they are that screen's own design.
 
 ### The app icon
 
@@ -383,9 +396,14 @@ thirty characters while type and padding stayed at phone scale.
 
 Two techniques, picked per element:
 
-- Blocks sitting on the page background: `max-width` and auto margins. If the
-  block carries its own gutter, cap at `calc(var(--shell-max) + gutter * 2)` or
-  its content sits inset from the header's by exactly that gutter.
+- Blocks sitting on the page background: `width: 100%`, `max-width`, and auto
+  margins. If the block carries its own gutter, cap at
+  `calc(var(--shell-max) + gutter * 2)` or its content sits inset from the
+  header's by exactly that gutter.
+  **`width: 100%` is load-bearing.** On a flex item, auto cross-axis margins
+  override `align-self: stretch`, so `max-width` + auto margins alone collapses
+  it to its content width — that is how the person picker ended up 273px wide on
+  a 412px phone.
 - Full-bleed bars (headers, nav, the coloured hero): keep the background edge
   to edge and centre the *content* with
   `padding-inline: max(var(--space-4), calc((100% - var(--shell-max)) / 2))`.
