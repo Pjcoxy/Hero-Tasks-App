@@ -206,9 +206,17 @@ test('tapping a prize card opens it in the Rewards tab', async ({ page }) => {
 
   // The row it landed on must be the prize that was tapped, and it must be the
   // one in view - not just present somewhere in the list.
+  //
+  // Polled rather than asserted once. The jump defers a tick past the tab
+  // transition and then scrolls with behaviour:'smooth', and the shared store
+  // grows through the run so the list this scrolls through gets longer. A
+  // single immediate assertion was racing the scroll and failed intermittently
+  // late in the suite.
   const row = page.locator('#k-rewards .task').filter({ hasText: "Ice cream from McDonald's" });
   await expect(row).toBeVisible();
-  await expect(row).toBeInViewport();
+  await expect.poll(async () => row.isVisible().then(() => row.boundingBox())
+    .then((b) => b !== null && b.y >= 0 && b.y < page.viewportSize().height))
+    .toBe(true);
 });
 
 // A swipe ends with a finger on a card too. A browser suppresses the click once

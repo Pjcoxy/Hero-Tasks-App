@@ -296,17 +296,26 @@ It took three goes to get here, and the failures are the useful part:
 4. Faces moved up into the **sky above the wordmark** — the artwork was
    untouched, but loose circles floating on a picture read as decoration, not as
    controls. Nothing anchored them and nothing said "this is the way in".
-5. This: a **panel docked to the bottom edge** holding the four faces.
+5. A **solid panel** docked to the bottom — anchored, but it anchors by
+   covering: a fifth of the screen of flat white to hold four faces.
+6. This: a **frosted glass bar** on the bottom edge. 11% of the screen, and the
+   picture carries on through it.
 
-- **A surface, not floating circles.** An edge, a radius and a shadow say "these
-  are controls" in a way that position alone cannot. That is what anchors them.
+- **A surface is what anchors, not position.** An edge and a radius say "these
+  are controls" in a way position alone cannot. But the surface does not have to
+  be opaque to do that — glass anchors just as well and costs half the height.
+- **Dark glass, not light.** A white bar over the foot of this artwork — boots
+  and backpack in shadow — just turns grey. Dark tint with white labels keeps
+  the colour underneath.
+- `backdrop-filter` is progressive. Without it this is a plain translucent bar,
+  which is fine.
 - **Every person is the same kind of thing.** Same circle, same ring weight,
-  same name underneath. A parent on a dark disc beside a kid's photo read as two
-  different categories rather than four ways into one app.
+  same name. A parent on a dark disc beside a kid's photo read as two different
+  categories rather than four ways into one app.
 - **Fixed width per tile, never `flex-basis: auto`.** Sized from content, an
   emoji glyph is narrower than a photo — the circles come out different sizes
   and the names land on four different baselines.
-- The prompt stays gone. Four faces in a panel are self-explanatory; the
+- The prompt stays gone. Four faces in a bar are self-explanatory; the
   `Kid` / `Parent 👑` line stays gone too, at a third line each.
 
 **Sizing by aspect ratio, not width.** The artwork is portrait, roughly 0.45

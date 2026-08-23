@@ -51,6 +51,10 @@
      opaque: the picture should still read through the foot of the screen. */
   --scrim-strong: rgba(20,12,52,0.82);
   --scrim-soft:   rgba(20,12,52,0.45);
+  /* Frosted glass for a bar that has to sit ON artwork: enough surface to read
+     as a control strip, sheer enough that the picture carries on through it. */
+  --glass:        rgba(20,12,52,0.42);
+  --glass-edge:   rgba(255,255,255,0.18);
   /* Colour — per-kid */
   --kid-1: #0ea5a5;
   --kid-2: #f0873a;
@@ -154,16 +158,22 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 @media (min-aspect-ratio: 3/5) {
   #screen-who { background-size: contain; }
 }
-/* A real panel, docked to the bottom edge.
-   Loose circles floating in the sky read as decoration, not as controls -
-   nothing anchored them and nothing said "these are the way in". A surface with
-   an edge, a radius and a shadow does both jobs at once. */
+/* A frosted bar, docked to the bottom edge.
+   Loose circles floating on the artwork read as decoration rather than as the
+   way in - nothing anchored them. But a solid panel is a slab: it anchors by
+   covering, and takes a fifth of the screen to hold four faces.
+
+   Glass does the same job for less. There is still a surface with an edge, so
+   it still reads as a strip of controls; the picture just carries on through
+   it. Backdrop blur is progressive - without support it is a plain translucent
+   bar, which is fine. */
 .who-sheet {
   flex: none;
-  padding: var(--space-5) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-5));
-  background: var(--surface);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  box-shadow: var(--shadow-3);
+  padding: var(--space-3) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-3));
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--glass-edge);
 }
 
 /* One row, however many people. Four fits a small phone comfortably; a fifth
@@ -181,7 +191,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
      circles came out different sizes and the names sat at four different
      heights. */
   flex: 0 0 auto;
-  width: 4.5rem;
+  width: 3.75rem;
   background: none;
   border: 0;
   padding: 0;
@@ -206,15 +216,17 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   /* Parents and kids get the same circle, the same ring weight and the same
      name underneath. A parent on a dark disc beside a kid's photo read as two
      different kinds of thing rather than four ways into the same app. */
-  background: var(--surface-sunken);
-  box-shadow: 0 0 0 3px var(--tile-ring, var(--brand)), var(--shadow-1);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--tile-ring, var(--brand));
 }
 /* Names are back now there is a panel to hold them - on the artwork they had
    nowhere to sit and landed on the shield. */
 .who-tile .tile-name {
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   font-weight: var(--weight-bold);
-  color: var(--ink);
+  /* White on dark glass. A light bar over the foot of this artwork - which is
+     boots and backpack in shadow - just turns grey. */
+  color: var(--on-brand);
   line-height: var(--leading-tight);
 }
 /* The 'Kid' / 'Parent 👑' line stays off. Four people in one household do not
