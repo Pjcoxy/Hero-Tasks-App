@@ -146,6 +146,7 @@ async function getState() {
       title: t.title,
       points: t.points,
       cycle: t.cycle,
+      days: Array.isArray(t.days) && t.days.length ? t.days : null,
       dueBy: t.dueBy || null,
       // Chores created before reordering existed have no order field. Falling
       // back to 0 here keeps them ahead of nothing in particular rather than
@@ -437,8 +438,35 @@ async function removePushSubscription(req) {
   return { ok: true };
 }
 
+// Which weekdays a weekly chore falls on: 0=Sunday .. 6=Saturday.
+//
+// Before this existed, `weekly` meant "the weekday this chore happened to be
+// created on" - real recurrence, but nobody could see or choose the day. Rather
+// than migrate those rows, an absent or empty `days` still falls back to the
+// creation-day anchor, so every chore written before today keeps landing where
+// it always has. Anything created since carries its own days.
+function normaliseChoreDays(value) {
+  if (!Array.isArray(value)) return null;
+  const days = [...new Set(value.map(Number))];
+  if (!days.length) return null;
+  if (days.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) return null;
+  return days.sort((a, b) => a - b);
+}
+
+function choreFallsOnDay(chore, day, anchor) {
+  const days = Array.isArray(chore.days) && chore.days.length
+    ? chore.days
+    : [anchor.getUTCDay()];
+  return days.includes(day.getUTCDay());
+}
+
 async function addTask(req) {
   await requireParent(req.parentId, req.parentPin);
+  let days = null;
+  if (req.cycle === 'weekly' && req.days !== undefined) {
+    days = normaliseChoreDays(req.days);
+    if (!days) return { ok: false, error: 'pick at least one weekday' };
+  }
   await container('chores').items.create({
     id: randomUUID(),
     householdId: HOUSEHOLD_ID,
@@ -446,6 +474,8 @@ async function addTask(req) {
     title: req.title,
     points: Number(req.points) || 5,
     cycle: req.cycle || 'daily',
+    // Only meaningful on a weekly chore. Null falls back to the creation day.
+    days,
     // Due date/time only applies to one-off tasks — daily/weekly recurrence already
     // defines "when", and a recurring due-time is a separate feature (ties into
     // reminders, issue #11) rather than a natural extension of this field.
@@ -526,6 +556,17 @@ async function updateTask(req) {
       .catch(() => ({ resource: null }));
     if (!kid || kid.role !== 'kid') return { ok: false, error: 'Kid not found' };
     chore.kidId = req.kidId;
+  }
+  if (req.days !== undefined && req.days !== null) {
+    const days = normaliseChoreDays(req.days);
+    if (!days) return { ok: false, error: 'pick at least one weekday' };
+    chore.days = days;
+  }
+  // Same shape as dueBy below: a field that only means anything for one cycle
+  // is cleared when the chore moves off it, so a task switched to Every day and
+  // back does not quietly keep the weekdays it had two edits ago.
+  if (chore.cycle !== 'weekly') {
+    chore.days = null;
   }
   if (chore.cycle !== 'oneoff') {
     chore.dueBy = null;
@@ -733,7 +774,7 @@ async function calendar(req) {
     const anchor = startOfUtcDay(new Date(chore.createdAt || startAt));
     for (let day = new Date(rangeStartDay); day.getTime() <= rangeEndDay.getTime(); day.setUTCDate(day.getUTCDate() + 1)) {
       if (day.getTime() < anchor.getTime()) continue;
-      if (chore.cycle === 'daily' || (chore.cycle === 'weekly' && day.getUTCDay() === anchor.getUTCDay())) {
+      if (chore.cycle === 'daily' || (chore.cycle === 'weekly' && choreFallsOnDay(chore, day, anchor))) {
         schedule.push({
           kind: 'chore',
           taskId: chore.id,
@@ -741,6 +782,9 @@ async function calendar(req) {
           title: chore.title,
           points: chore.points,
           cycle: chore.cycle,
+          // The client matches completions per day when a chore names its days,
+          // so it has to be able to see them on the occurrence.
+          days: Array.isArray(chore.days) && chore.days.length ? chore.days : null,
           occurrenceAt: utcDateIso(day),
           occurrenceDate: toDateOnlyIso(day),
         });
