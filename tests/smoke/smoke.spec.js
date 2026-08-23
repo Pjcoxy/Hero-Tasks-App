@@ -857,6 +857,34 @@ test('the sign-in bar spans the phone screen rather than collapsing to its conte
   expect(Math.round(sheet.x)).toBe(0);
 });
 
+// Twice now the sign-in bar has drifted back into being a box sitting on the
+// artwork - first a solid coloured panel, then a frosted one. What draws the
+// box is an edge: a flat fill, a blur boundary or a hairline along the top all
+// give the eye a line to find, at any opacity. The bar is a gradient that fades
+// out upwards instead, so there is no edge to see. This guards the shape of the
+// thing rather than an exact colour, which is free to be retuned.
+test('the sign-in bar is a fading scrim, not a panel with an edge', async ({ page }) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  const style = await page.locator('.who-sheet').evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      image: s.backgroundImage,
+      colour: s.backgroundColor,
+      topBorder: s.borderTopWidth,
+      blur: s.backdropFilter || s.webkitBackdropFilter,
+    };
+  });
+  expect(style.image, 'the bar should be a gradient').toContain('gradient');
+  expect(style.colour, 'no flat fill under the gradient').toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+  expect(parseFloat(style.topBorder), 'no hairline along the top').toBe(0);
+  expect(style.blur || 'none', 'no blur boundary').toBe('none');
+
+  // And it stays a thin strip: a tenth of the screen or so, not a fifth.
+  const sheet = await page.locator('.who-sheet').boundingBox();
+  expect(sheet.height / 915, 'the bar should stay under an eighth of the screen')
+    .toBeLessThan(0.125);
+});
+
 // "Appy not wordy". Parent HQ reported zero with a four-line empty state, three
 // times on one screen, and put "Today's chores overview" under every kid's name.
 // Status is a colour and two words now.
