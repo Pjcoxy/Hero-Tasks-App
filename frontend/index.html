@@ -43,6 +43,10 @@
   --danger:       #d93a4a;
   --danger-wash:  #fce4e6;
   --overlay:      rgba(28,24,48,0.5);
+  /* Text sitting directly on artwork. Darker than --overlay because it has to
+     hold contrast against whatever the picture happens to be, not a known
+     surface. */
+  --text-scrim:   0 1px 6px rgba(28,24,48,0.7);
   /* Colour — per-kid */
   --kid-1: #0ea5a5;
   --kid-2: #f0873a;
@@ -123,15 +127,40 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 
 /* ─── Who screen ──────────────────────────────────────────────────────── */
 .who-band {
-  background: linear-gradient(155deg, var(--brand) 0%, var(--brand-soft) 100%);
+  /* The gradient stays underneath as the fallback: if the artwork 404s or is
+     still loading, this is a branded band rather than a white gap. */
+  background:
+    url('img/hero-splash.webp') top center / cover no-repeat,
+    linear-gradient(155deg, var(--brand) 0%, var(--brand-soft) 100%);
   padding: calc(env(safe-area-inset-top, 0px) + var(--space-7)) var(--space-5) calc(var(--space-7) + var(--space-4));
   text-align: center;
   color: var(--on-brand);
   flex-shrink: 0;
+  /* Tall enough to show the logo and the kids beneath it. Capped in vh so a
+     short landscape window does not give the band the whole screen. */
+  min-height: 46vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  position: relative;
 }
-.who-band-emoji { font-size: var(--text-3xl); line-height: 1; }
-.who-band h1 { font-size: var(--text-2xl); font-weight: var(--weight-bold); margin-top: var(--space-3); line-height: var(--leading-tight); }
-.who-band p  { font-size: var(--text-base); opacity: 0.9; margin-top: var(--space-2); }
+/* The artwork carries its own title, so the band's own wordmark is hidden
+   rather than deleted - it is the fallback when the image cannot load. */
+.who-band-emoji, .who-band h1 { display: none; }
+.who-band p  {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  margin-top: var(--space-2);
+  position: relative;
+  /* A scrim, not a solid bar: the prompt has to stay legible wherever the
+     artwork happens to be light, without hiding the picture. */
+  text-shadow: var(--text-scrim);
+}
+@media (min-width: 64rem) {
+  /* A portrait image cropped to a wide band shows very little, and the picker
+     is what matters on desktop - give the band less of the screen. */
+  .who-band { min-height: 32vh; }
+}
 
 .who-sheet {
   flex: 1;
@@ -168,6 +197,27 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .who-tile.parent { background: var(--ink); color: var(--surface); }
 .who-tile.kid-tile { outline-color: var(--kid-color, var(--brand)); }
 .who-tile .tile-emoji { font-size: var(--text-2xl); line-height: 1; }
+/* Photo avatars fill whatever round or rounded slot they are dropped into, so
+   the same markup works at 2.5rem in the header and 4.5rem on a picker tile. */
+.avatar-photo {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
+}
+.who-tile .tile-emoji:has(.avatar-photo) {
+  width: 4.5rem; height: 4.5rem;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  box-shadow: var(--shadow-1);
+}
+.kid-avatar-wrap { overflow: hidden; }
+.board-row span:has(.avatar-photo) {
+  width: 2rem; height: 2rem;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  display: inline-block;
+}
 .who-tile .tile-name  { font-size: var(--text-lg); font-weight: var(--weight-bold); color: inherit; }
 .who-tile .tile-sub   { font-size: var(--text-sm); color: var(--ink-muted); }
 .who-tile.parent .tile-sub { color: var(--on-brand-muted); }
@@ -1709,14 +1759,38 @@ var SVG_AVATAR_FALLBACK = {
   'quokka': '\u{1F43E}',
   '3d-printer': '\u{1F5A8}\uFE0F',
 };
+
+// Photo avatars, stored as "img:<key>". Two files per kid rather than one
+// scaled down: the tile is a chest-up portrait, the head crop is tighter on the
+// face because at ~40px a chest-up shot is an unreadable smudge.
+//
+// `fallback` is what every text-only context gets - <option> labels, prompt
+// lists, the parent kid-mark. Those cannot hold an <img>, and an avatar that
+// renders as nothing there would be worse than an emoji.
+var IMG_AVATARS = {
+  toby:  { tile: 'img/avatar-toby.webp',  head: 'img/head-toby.webp',  fallback: '\u{1F5A8}\uFE0F' },
+  ollie: { tile: 'img/avatar-ollie.webp', head: 'img/head-ollie.webp', fallback: '\u{1F43E}' },
+};
+
+function imgAvatar(value) {
+  return value && value.indexOf('img:') === 0 ? IMG_AVATARS[value.slice(4)] : null;
+}
+
 function avatarText(value) {
+  var photo = imgAvatar(value);
+  if (photo) return photo.fallback;
   if (value && value.indexOf('svg:') === 0) {
     return SVG_AVATAR_FALLBACK[value.slice(4)] || '\u2B50';
   }
   return value || '\u2753';
 }
 
-function renderAvatarHtml(value, color) {
+// size: 'tile' for the person picker, 'head' for anywhere small.
+function renderAvatarHtml(value, color, size) {
+  var photo = imgAvatar(value);
+  if (photo) {
+    return '<img class="avatar-photo" src="' + photo[size === 'head' ? 'head' : 'tile'] + '" alt="">';
+  }
   if (value && value.indexOf('svg:') === 0) {
     var key = value.slice(4);
     var fn = SVG_AVATARS[key];
@@ -1726,7 +1800,12 @@ function renderAvatarHtml(value, color) {
 }
 
 // Sets element innerHTML to the avatar, or textContent for plain emoji.
-function setAvatar(el, value, color) {
+function setAvatar(el, value, color, size) {
+  var photo = imgAvatar(value);
+  if (photo) {
+    el.innerHTML = '<img class="avatar-photo" src="' + photo[size === 'tile' ? 'tile' : 'head'] + '" alt="">';
+    return;
+  }
   if (value && value.indexOf('svg:') === 0) {
     var key = value.slice(4);
     var fn = SVG_AVATARS[key];
@@ -2066,7 +2145,7 @@ function renderKid(kid) {
   document.getElementById('k-board').innerHTML = ranked.map(function(k, i) {
     return '<div class="board-row">'
       + '<span class="place">' + (medals[i] || (i + 1)) + '</span>'
-      + '<span>' + renderAvatarHtml(k.emoji, 'var(--kid-' + (Math.min(ranked.findIndex(function(r) { return r.id === k.id; }), 3) + 1) + ')') + '</span>'
+      + '<span>' + renderAvatarHtml(k.emoji, 'var(--kid-' + (Math.min(ranked.findIndex(function(r) { return r.id === k.id; }), 3) + 1) + ')', 'head') + '</span>'
       + '<span class="b-name">' + esc(k.name) + (k.id === kid.id ? ' (you!)' : '') + '</span>'
       + '<span class="b-pts">' + k.pts + ' pts</span>'
       + '</div>';

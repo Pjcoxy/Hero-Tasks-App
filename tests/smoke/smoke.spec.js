@@ -658,3 +658,57 @@ test('the parent approval list goes multi-column on a wide screen', async ({ pag
   expect(second.x).toBeGreaterThan(first.x);
   expect(first.width).toBeLessThan(800);
 });
+
+// Photo avatars and the splash artwork. The failure mode here is silent: a
+// wrong path leaves an <img> that renders as nothing, and every source-level
+// check still passes because the markup is correct. These assert the bytes
+// actually arrived by reading naturalWidth.
+test('the kids have real photo avatars on the picker, and they load', async ({ page }) => {
+  for (const name of ['Toby', 'Ollie']) {
+    const tile = page.locator('.who-tile').filter({ hasText: name });
+    const img = tile.locator('img.avatar-photo');
+    await expect(img).toHaveCount(1);
+    const loaded = await img.evaluate((el) => el.complete && el.naturalWidth > 0);
+    expect(loaded, `${name}'s avatar did not load`).toBe(true);
+  }
+});
+
+test('the kid header carries the photo through after signing in', async ({ page }) => {
+  await pickPerson(page, 'Toby');
+  const img = page.locator('#k-avatar img.avatar-photo');
+  await expect(img).toHaveCount(1);
+  const loaded = await img.evaluate((el) => el.complete && el.naturalWidth > 0);
+  expect(loaded).toBe(true);
+  // The header uses the tighter head crop, not the chest-up tile - at ~40px the
+  // tile is an unreadable smudge.
+  await expect(img).toHaveAttribute('src', /head-/);
+});
+
+test('the splash artwork loads behind the person picker', async ({ page }) => {
+  const band = page.locator('.who-band');
+  const url = await band.evaluate((el) => getComputedStyle(el).backgroundImage);
+  expect(url).toContain('hero-splash.webp');
+
+  // A 404 would leave the fallback gradient and look deliberate, so fetch it.
+  const status = await page.evaluate(async () => {
+    const res = await fetch('img/hero-splash.webp');
+    return res.status;
+  });
+  expect(status).toBe(200);
+});
+
+// Existing households were created before the artwork existed. ensureSeeded()
+// only creates records when the household is absent, so a changed seed alone
+// would leave the live kids on their old placeholder SVGs - the #88 trap.
+test('an existing household is migrated onto the photo avatars', async ({ page }) => {
+  const emojis = await page.evaluate(async () => {
+    const res = await fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'state' }),
+    });
+    const state = await res.json();
+    return Object.fromEntries(state.people.map((p) => [p.id, p.emoji]));
+  });
+  expect(emojis.toby).toBe('img:toby');
+  expect(emojis.ollie).toBe('img:ollie');
+});

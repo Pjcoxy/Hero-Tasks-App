@@ -4,7 +4,8 @@
   },
   "mimeTypes": {
     ".json": "application/json",
-    ".svg": "image/svg+xml"
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp"
   },
   "globalHeaders": {
     "X-Content-Type-Options": "nosniff",

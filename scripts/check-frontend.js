@@ -190,8 +190,14 @@ async function runParentEditTaskChecks() {
   // implementation is lifted out of the page rather than stubbed - otherwise
   // these checks would pass against behaviour the app does not have.
   const fallbackSrc = (html.match(/var SVG_AVATAR_FALLBACK = \{[\s\S]*?\};/) || [''])[0];
+  // avatarText() also resolves photo avatars now, so the sandbox needs the
+  // table and the lookup or the eval'd copy throws on an undefined helper.
+  const imgAvatarsSrc = (html.match(/var IMG_AVATARS = \{[\s\S]*?\n\};/) || [''])[0];
+  const imgAvatarFnSrc = extractFunctionSource('imgAvatar');
   const avatarTextSrc = extractFunctionSource('avatarText');
   check(Boolean(fallbackSrc), 'SVG_AVATAR_FALLBACK found for the sandbox');
+  check(Boolean(imgAvatarsSrc), 'IMG_AVATARS found for the sandbox');
+  check(Boolean(imgAvatarFnSrc), 'imgAvatar source found for the sandbox');
   check(Boolean(avatarTextSrc), 'avatarText source found for the sandbox');
 
   const factory = new Function(
@@ -202,7 +208,7 @@ async function runParentEditTaskChecks() {
     'kidsOnly',
     'api',
     'toastApiError',
-    `${fallbackSrc}\n${avatarTextSrc}\n` +
+    `${fallbackSrc}\n${imgAvatarsSrc}\n${imgAvatarFnSrc}\n${avatarTextSrc}\n` +
       source.replace(/^async function parentEditTask/, 'return async function')
   );
 
