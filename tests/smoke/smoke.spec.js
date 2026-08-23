@@ -160,10 +160,75 @@ test('cancelling the in-app dialog does nothing', async ({ page }) => {
 test('the kid Home screen names a real reward and how far away it is', async ({ page }) => {
   await pickPerson(page, 'Ollie');
 
-  // Cheapest unaffordable reward first - a nearby goal, not a hopeless one.
-  await expect(page.locator('#k-goal-title')).toContainText('A player for your soccer game');
-  await expect(page.locator('#k-progress-lbl')).toContainText(/\d+ more points? to go/);
-  await expect(page.locator('#k-goal-balance')).toContainText(/\d+ points? to spend/);
+  const cards = page.locator('#k-goal-carousel .goal-card');
+  // One card per active reward, cheapest first.
+  await expect(cards).toHaveCount(4);
+  await expect(cards.nth(0)).toContainText('A player for your soccer game');
+  await expect(cards.nth(1)).toContainText("Ice cream from McDonald's");
+  await expect(cards.nth(0)).toContainText(/\d+ more points? to go/);
+});
+
+// #178. The carousel has to be swipeable and it has to open on the prize the
+// kid is actually working toward - the cheapest one they cannot yet afford -
+// not on card one by accident of it happening to be the same card.
+test('the prize carousel scrolls and tracks which prize you are on', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+
+  const carousel = page.locator('#k-goal-carousel');
+  const dots = page.locator('#k-goal-dots .goal-dot');
+  await expect(dots).toHaveCount(4);
+
+  // A brand new kid has 0 points, so the cheapest prize is the target: card 0.
+  await expect(dots.nth(0)).toHaveClass(/active/);
+  expect(await carousel.evaluate((el) => el.scrollLeft)).toBe(0);
+
+  // The container must actually be scrollable - if the cards were stacked or
+  // full-width-wrapped, scrollWidth would equal clientWidth and no swipe would
+  // be possible at all.
+  const [scrollWidth, clientWidth] = await carousel.evaluate((el) => [el.scrollWidth, el.clientWidth]);
+  expect(scrollWidth).toBeGreaterThan(clientWidth);
+
+  // Swipe to the next prize; the dots must follow.
+  await carousel.evaluate((el) => { el.scrollLeft = el.clientWidth; });
+  await expect(dots.nth(1)).toHaveClass(/active/);
+  await expect(dots.nth(0)).not.toHaveClass(/active/);
+});
+
+// Tapping a prize should hand the kid to the Rewards tab, on that prize's row -
+// the carousel only ever shows the gap, redeeming happens in the shop.
+test('tapping a prize card opens it in the Rewards tab', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+
+  await page.locator('#k-goal-carousel .goal-card').nth(1).click();
+
+  await expect(page.locator('#tab-rewards')).toBeVisible();
+  await expect(page.locator('#tab-home')).toBeHidden();
+
+  // The row it landed on must be the prize that was tapped, and it must be the
+  // one in view - not just present somewhere in the list.
+  const row = page.locator('#k-rewards .task').filter({ hasText: "Ice cream from McDonald's" });
+  await expect(row).toBeVisible();
+  await expect(row).toBeInViewport();
+});
+
+// A swipe ends with a finger on a card too. A browser suppresses the click once
+// a touch has scrolled, but scroll-snap keeps firing scroll events while it
+// settles, and a click arriving in that window must not throw the kid onto the
+// Rewards tab. Fired synchronously right after the scroll, because that is the
+// only window the guard covers - a normal deliberate tap is well outside it and
+// must still work (the test above proves that half).
+test('a tap arriving while the carousel is still settling is ignored', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+
+  await page.evaluate(() => {
+    const carousel = document.getElementById('k-goal-carousel');
+    carousel.scrollLeft = carousel.clientWidth;
+    carousel.dispatchEvent(new Event('scroll'));
+    document.querySelectorAll('#k-goal-carousel .goal-card')[1].click();
+  });
+
+  await expect(page.locator('#tab-home')).toBeVisible();
+  await expect(page.locator('#tab-rewards')).toBeHidden();
 });
 
 // #9. The hero used to count toward a pet ladder (Egg -> Hatchling -> ... ->
