@@ -308,7 +308,20 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   min-width: 0;
   scroll-snap-align: center;
   padding: 0 var(--space-5);
+  /* A real <button> so it is keyboard-reachable and announced as tappable;
+     these strip the UA chrome so it still reads as part of the banner. */
+  background: none; border: 0; color: inherit; font: inherit;
+  text-align: center; cursor: pointer; display: block;
 }
+.goal-card:active { transform: scale(0.98); }
+
+/* Where the tap lands, so the prize you chose is obviously the one in front of
+   you rather than just somewhere in a list you were dropped into. */
+@keyframes reward-arrive {
+  0%, 70% { box-shadow: 0 0 0 3px var(--brand); }
+  100%    { box-shadow: var(--shadow-1); }
+}
+.task.arriving { animation: reward-arrive 1.6s var(--ease-out); }
 .goal-card-title {
   font-size: var(--text-base);
   font-weight: var(--weight-bold);
@@ -1094,7 +1107,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
     <!-- HOME TAB -->
     <div id="tab-home" class="tab-panel">
       <div class="kid-home-hero" id="k-home-hero">
-        <div class="goal-carousel" id="k-goal-carousel" onscroll="syncGoalDots()"></div>
+        <div class="goal-carousel" id="k-goal-carousel" onscroll="onGoalCarouselScroll()"></div>
         <div class="goal-dots" id="k-goal-dots"></div>
       </div>
       <div class="home-content-sheet">
@@ -2618,7 +2631,7 @@ function renderRewardProgress(balance) {
     .sort(function(a, b) { return a.cost - b.cost; });
 
   if (rewards.length === 0) {
-    carousel.innerHTML = '<div class="goal-card">'
+    carousel.innerHTML = '<div class="goal-card" role="note">'
       + '<div class="goal-card-title">\u2B50 Keep earning points!</div>'
       + '<div class="progress-wrap">'
       +   '<div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>'
@@ -2633,7 +2646,8 @@ function renderRewardProgress(balance) {
     var affordable = r.cost <= balance;
     var shortBy = r.cost - balance;
     var pct = r.cost > 0 ? Math.min(100, Math.round((balance / r.cost) * 100)) : 100;
-    return '<div class="goal-card">'
+    return '<button type="button" class="goal-card" onclick="openPrizeInRewards(\'' + r.id + '\')"'
+      + ' aria-label="' + esc(r.title) + ' \u2014 ' + (affordable ? 'you can get this, tap to claim' : shortBy + ' more points') + '">'
       + '<div class="goal-card-title">' + (affordable ? '\uD83C\uDF89 ' : '\uD83C\uDF81 ') + esc(r.title) + '</div>'
       + '<div class="progress-wrap">'
       +   '<div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%"></div></div>'
@@ -2642,7 +2656,7 @@ function renderRewardProgress(balance) {
              ? 'You can get this one! Claim it in Rewards.'
              : shortBy + ' more point' + (shortBy === 1 ? '' : 's') + ' to go!')
       +   '</div>'
-      + '</div></div>';
+      + '</div></button>';
   }).join('');
 
   dots.innerHTML = rewards.map(function() { return '<span class="goal-dot"></span>'; }).join('');
@@ -2665,6 +2679,36 @@ function renderRewardProgress(balance) {
     carousel.scrollLeft = carousel.clientWidth * targetIdx;
   }
   syncGoalDots();
+}
+
+// A swipe and a tap both end with a finger on a card. Browsers usually suppress
+// the click once a gesture has scrolled, but scroll-snap keeps firing scroll
+// events while it settles, and a tap landing in that window would otherwise
+// throw the kid onto the Rewards tab when all they did was swipe.
+var goalScrolledAt = 0;
+
+function onGoalCarouselScroll() {
+  goalScrolledAt = Date.now();
+  syncGoalDots();
+}
+
+// Tap a prize to go and claim it. The carousel only ever showed the gap; the
+// Rewards tab is where redeeming actually happens, so this hands the kid over
+// to the right row rather than making them find it again.
+function openPrizeInRewards(rewardId) {
+  if (Date.now() - goalScrolledAt < 250) return;
+  switchTab('rewards');
+  // switchTab plays an entry transition on the panel it reveals. Scrolling in
+  // the same frame lands against the mid-transition position, so wait one tick.
+  setTimeout(function() {
+    var row = document.getElementById('k-reward-' + rewardId);
+    if (!row) return;
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    row.classList.remove('arriving');
+    void row.offsetWidth;
+    row.classList.add('arriving');
+    setTimeout(function() { row.classList.remove('arriving'); }, 1700);
+  }, 60);
 }
 
 // Cards are exactly as wide as the carousel with no gap between them, so the
@@ -2690,7 +2734,7 @@ function renderRewardShop(kid, balance) {
   el.innerHTML = rewards.map(function(r) {
     var canAfford = r.cost <= balance;
     var shortBy   = Math.max(0, r.cost - balance);
-    return '<div class="task ' + (canAfford ? '' : 'dimmed') + '">'
+    return '<div class="task ' + (canAfford ? '' : 'dimmed') + '" id="k-reward-' + r.id + '">'
       + '<div class="info">'
       + '<div class="title">' + esc(r.title) + '</div>'
       + '<div class="sub">' + (canAfford ? 'Ready when you are! ✨' : shortBy + ' more points to go!') + '</div>'

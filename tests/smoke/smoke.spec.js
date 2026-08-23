@@ -194,6 +194,43 @@ test('the prize carousel scrolls and tracks which prize you are on', async ({ pa
   await expect(dots.nth(0)).not.toHaveClass(/active/);
 });
 
+// Tapping a prize should hand the kid to the Rewards tab, on that prize's row -
+// the carousel only ever shows the gap, redeeming happens in the shop.
+test('tapping a prize card opens it in the Rewards tab', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+
+  await page.locator('#k-goal-carousel .goal-card').nth(1).click();
+
+  await expect(page.locator('#tab-rewards')).toBeVisible();
+  await expect(page.locator('#tab-home')).toBeHidden();
+
+  // The row it landed on must be the prize that was tapped, and it must be the
+  // one in view - not just present somewhere in the list.
+  const row = page.locator('#k-rewards .task').filter({ hasText: "Ice cream from McDonald's" });
+  await expect(row).toBeVisible();
+  await expect(row).toBeInViewport();
+});
+
+// A swipe ends with a finger on a card too. A browser suppresses the click once
+// a touch has scrolled, but scroll-snap keeps firing scroll events while it
+// settles, and a click arriving in that window must not throw the kid onto the
+// Rewards tab. Fired synchronously right after the scroll, because that is the
+// only window the guard covers - a normal deliberate tap is well outside it and
+// must still work (the test above proves that half).
+test('a tap arriving while the carousel is still settling is ignored', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+
+  await page.evaluate(() => {
+    const carousel = document.getElementById('k-goal-carousel');
+    carousel.scrollLeft = carousel.clientWidth;
+    carousel.dispatchEvent(new Event('scroll'));
+    document.querySelectorAll('#k-goal-carousel .goal-card')[1].click();
+  });
+
+  await expect(page.locator('#tab-home')).toBeVisible();
+  await expect(page.locator('#tab-rewards')).toBeHidden();
+});
+
 // #9. The hero used to count toward a pet ladder (Egg -> Hatchling -> ... ->
 // MEGA LEGEND) and a daily streak. Neither buys anything, so neither motivated
 // anyone. If any of this reappears, the incentive path has been undone.
