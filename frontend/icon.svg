@@ -1,4 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Hero Tasks">
+  <!-- Generated from the same geometry as the PNG icons, so the two cannot
+       drift. Shield and star are lifted from the Hero Tasks artwork; the mark
+       is redrawn rather than cropped because in the artwork the shield's bottom
+       point sits behind the wordmark and cannot be cut out cleanly. -->
   <rect width="512" height="512" rx="96" fill="#6d3bf5"/>
-  <text x="256" y="330" font-size="280" text-anchor="middle" font-family="-apple-system, sans-serif">🦸</text>
+  <path d="M89.3 49.4 L422.7 49.4 L445.4 73.9 L445.4 237.6 Q422.7 434.0 256.0 458.6 Q89.3 434.0 66.6 237.6 L66.6 73.9 Z" fill="#140840" opacity="0.35"/>
+  <path d="M89.3 43.2 L422.7 43.2 L445.4 67.8 L445.4 231.4 Q422.7 427.9 256.0 452.4 Q89.3 427.9 66.6 231.4 L66.6 67.8 Z" fill="#4a1fb0"/>
+  <path d="M91.0 40.4 L421.0 40.4 L443.5 64.7 L443.5 226.7 Q421.0 421.1 256.0 445.5 Q91.0 421.1 68.5 226.7 L68.5 64.7 Z" fill="#7c4ee2"/>
+  <path d="M94.3 49.4 L417.7 49.4 L439.8 73.2 L439.8 231.9 Q417.7 422.5 256.0 446.3 Q94.3 422.5 72.2 231.9 L72.2 73.2 Z" fill="#4a1fb0"/>
+  <path d="M122.6 86.2 L389.4 86.2 L407.6 105.8 L407.6 236.8 Q389.4 393.9 256.0 413.5 Q122.6 393.9 104.4 236.8 L104.4 105.8 Z" fill="#202e96"/>
+  <path d="M124.3 84.1 L387.7 84.1 L405.7 103.5 L405.7 232.8 Q387.7 388.0 256.0 407.4 Q124.3 388.0 106.3 232.8 L106.3 103.5 Z" fill="#2f43ca"/>
+  <polygon points="256.0,140.3 285.4,213.5 364.1,218.8 303.6,269.4 322.8,345.9 256.0,304.0 189.2,345.9 208.4,269.4 147.9,218.8 226.6,213.5" fill="#d68a06"/>
+  <polygon points="256.0,134.2 285.4,207.4 364.1,212.7 303.6,263.3 322.8,339.8 256.0,297.8 189.2,339.8 208.4,263.3 147.9,212.7 226.6,207.4" fill="#ffb815"/>
 </svg>
