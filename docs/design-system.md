@@ -327,6 +327,59 @@ row on top of the wordmark. Wider than that, the whole picture is fitted with
 More people would shrink the row rather than wrap it. That is the right failure:
 a second row starts eating the picture again.
 
+### Calendar
+
+One month, arrowed through. A **"this week" strip pinned above it**, and tapping
+any day **expands its agenda inline underneath** — same screen, no mode to get
+back out of. That is what Google Calendar, Apple Calendar and Cozi all do.
+
+**Dots are coloured per person, never per activity type.** The kid colours are
+already on their avatars, their rings and their cards, so a dot means something
+before anyone reads a key. That is what removes the need for a legend — and a
+legend is a thing to learn before the screen is useful.
+
+- **One dot per person, not per item.** Five chores for one kid is one dot, and
+  a day showing four dots really does involve four people. Capped at four.
+- **Today is a ring, selection is a fill.** Both can be true of the same day and
+  they must not look like the same thing.
+- The week strip and the grid share a selection, so tapping in either highlights
+  both.
+- Tapping the open day closes it. A grid that can only be expanded is a grid
+  that gets stuck expanded.
+- **One fetch covers both** the grid and the strip: the range runs from the
+  start of the grid's first week to the end of its last, widened if the strip
+  has been walked outside the month. Two ranges would be two requests that could
+  disagree about a day on the boundary.
+- Day cells are `aspect-ratio: 1`, so the grid keeps its shape from a small
+  phone to a wide window.
+
+Use `isoDate(date)` for day keys, never `toISOString().slice(0, 10)` — that
+converts to UTC first, so an evening east of Greenwich lands on tomorrow.
+
+### Status pills, not paragraphs
+
+**Appy, not wordy.** A status is a colour and two words. Never a sentence, and
+never an explanation of what the absence of things means.
+
+| | |
+|---|---|
+| `.pill.neutral` | a count — `2 chores`, `0 requests` |
+| `.pill.good` | nothing needed — `All caught up` |
+| `.pill.warn` | something waiting — `1 pending` |
+
+`buildEmptyPill(text)` is the empty state for a parent section. The full
+`buildEmptyState()` — emoji, headline, explanatory sentence — is four lines to
+report zero, and Parent HQ says "nothing here" three times on one screen. Keep
+the full version for kid screens, where an empty day should feel like good news
+rather than a null.
+
+Two rules this settled:
+
+- **A filler subtitle is worse than no subtitle.** "Today's chores overview"
+  under every kid's name repeated the section heading and cost a line per kid.
+- **Where a person has a photo, use it.** An approval card drawing the emoji
+  fallback directly above cards showing the real face reads as a bug.
+
 ### Swipeable card row
 
 Used for the kid Home prize banner. Native CSS `scroll-snap`, never a carousel
