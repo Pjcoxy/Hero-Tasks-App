@@ -51,6 +51,10 @@
      opaque: the picture should still read through the foot of the screen. */
   --scrim-strong: rgba(20,12,52,0.82);
   --scrim-soft:   rgba(20,12,52,0.45);
+  /* Frosted glass for a bar that has to sit ON artwork: enough surface to read
+     as a control strip, sheer enough that the picture carries on through it. */
+  --glass:        rgba(20,12,52,0.42);
+  --glass-edge:   rgba(255,255,255,0.18);
   /* Colour — per-kid */
   --kid-1: #0ea5a5;
   --kid-2: #f0873a;
@@ -154,24 +158,22 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 @media (min-aspect-ratio: 3/5) {
   #screen-who { background-size: contain; }
 }
+/* A frosted bar, docked to the bottom edge.
+   Loose circles floating on the artwork read as decoration rather than as the
+   way in - nothing anchored them. But a solid panel is a slab: it anchors by
+   covering, and takes a fifth of the screen to hold four faces.
+
+   Glass does the same job for less. There is still a surface with an edge, so
+   it still reads as a strip of controls; the picture just carries on through
+   it. Backdrop blur is progressive - without support it is a plain translucent
+   bar, which is fine. */
 .who-sheet {
   flex: none;
-  padding: var(--space-7) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-5));
-  /* Fades up rather than starting hard, so it reads as light falling off the
-     bottom of the picture and not as a panel laid on top of it. */
-  background: linear-gradient(
-    to top,
-    var(--scrim-strong) 0%,
-    var(--scrim-soft) 55%,
-    transparent 100%);
-}
-.who-prompt {
-  text-align: center;
-  color: var(--on-brand);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
-  text-shadow: var(--text-scrim);
-  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-3));
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--glass-edge);
 }
 
 /* One row, however many people. Four fits a small phone comfortably; a fifth
@@ -180,18 +182,23 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 #who-grid {
   display: flex;
   justify-content: center;
-  gap: var(--space-3);
+  align-items: flex-start;
+  gap: var(--space-4);
 }
 .who-tile {
-  flex: 1 1 0;
-  max-width: 6rem;
+  /* A fixed width, not flex-basis: auto. With auto the tile takes its width
+     from its content, and an emoji glyph is narrower than a photo - so the
+     circles came out different sizes and the names sat at four different
+     heights. */
+  flex: 0 0 auto;
+  width: 3.75rem;
   background: none;
   border: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
   cursor: pointer;
   touch-action: manipulation;
   transition: transform var(--dur-fast) var(--ease-out);
@@ -206,22 +213,25 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   align-items: center;
   justify-content: center;
   font-size: var(--text-2xl);
+  /* Parents and kids get the same circle, the same ring weight and the same
+     name underneath. A parent on a dark disc beside a kid's photo read as two
+     different kinds of thing rather than four ways into the same app. */
   background: var(--surface);
-  /* The ring is what carries whose face this is - kid colour for a kid, brand
-     for a parent - now that there is no card behind it. */
-  box-shadow: 0 0 0 3px var(--tile-ring, var(--brand)), var(--shadow-2);
+  box-shadow: 0 0 0 3px var(--tile-ring, var(--brand));
 }
-.who-tile.parent .tile-emoji { background: var(--ink); color: var(--surface); }
+/* Names are back now there is a panel to hold them - on the artwork they had
+   nowhere to sit and landed on the shield. */
 .who-tile .tile-name {
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   font-weight: var(--weight-bold);
+  /* White on dark glass. A light bar over the foot of this artwork - which is
+     boots and backpack in shadow - just turns grey. */
   color: var(--on-brand);
-  text-shadow: var(--text-scrim);
   line-height: var(--leading-tight);
 }
-/* The 'Kid'/'Parent 👑' line goes: at this size the face and the name are the
-   whole message, and a third line per person would need more of the picture. */
-.who-tile .tile-sub { display: none; }
+/* The 'Kid' / 'Parent 👑' line stays off. Four people in one household do not
+   need their category spelled out, and it was a third line each. */
+.who-tile .tile-sub { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
 .skel-row {
   height: 5.5rem;
@@ -386,6 +396,113 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   100%    { box-shadow: var(--shadow-1); }
 }
 .arriving { animation: reward-arrive 1.6s var(--ease-out); }
+
+/* ─── Calendar ────────────────────────────────────────────────────────────
+   One month, arrows to move. A "this week" strip pinned above it so the week
+   ahead needs no interaction, and tapping any day expands its agenda inline
+   underneath rather than switching to another view.
+
+   Dots are coloured PER PERSON, using the same kid colours already on their
+   avatars, rings and cards. That is what removes the need for a legend: the
+   colour already means something everywhere else in the app. */
+.cal-monthnav {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.cal-monthlabel { font-size: var(--text-lg); font-weight: var(--weight-bold); }
+
+.cal-weekstrip-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: var(--text-sm); color: var(--ink-muted);
+  font-weight: var(--weight-medium);
+  margin-bottom: var(--space-2);
+}
+.cal-weeknav { display: flex; gap: var(--space-1); }
+.icon-btn.small { width: 32px; height: 32px; min-width: 32px; font-size: var(--text-sm); }
+
+.cal-weekstrip {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--space-1);
+  margin-bottom: var(--space-5);
+}
+.cal-chip {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-1);
+  padding: var(--space-2) 0;
+  border: 0; background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  cursor: pointer; color: var(--ink);
+  font: inherit;
+}
+.cal-chip-dow { font-size: var(--text-xs); color: var(--ink-muted); }
+.cal-chip-num { font-size: var(--text-base); font-weight: var(--weight-bold); }
+
+.cal-dowrow, .cal-cells {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--space-1);
+}
+.cal-dow {
+  text-align: center; font-size: var(--text-xs);
+  color: var(--ink-muted); padding-bottom: var(--space-2);
+}
+.cal-cell {
+  /* A square that stays square at any width, so the grid keeps its shape on a
+     small phone and on a wide window alike. */
+  aspect-ratio: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--space-1);
+  border: 0; background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  cursor: pointer; color: var(--ink);
+  font: inherit;
+}
+.cal-cell-num { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.cal-cell.outside { opacity: 0.35; }
+.cal-cell:active, .cal-chip:active { transform: scale(0.95); }
+
+/* Today is stated with a ring, selection with a fill: they can be true at once
+   and must not look like the same thing. */
+.cal-cell.today, .cal-chip.today { box-shadow: inset 0 0 0 2px var(--brand); }
+.cal-cell.selected, .cal-chip.selected { background: var(--brand); color: var(--on-brand); }
+.cal-cell.selected .cal-cell-num,
+.cal-chip.selected .cal-chip-num,
+.cal-chip.selected .cal-chip-dow { color: var(--on-brand); }
+
+.cal-dots { display: flex; gap: 2px; justify-content: center; min-height: 6px; }
+.cal-dot { width: 6px; height: 6px; border-radius: var(--radius-full); }
+.cal-dot-lg { width: 10px; height: 10px; min-width: 10px; margin-top: var(--space-2); }
+
+.cal-agenda { margin-top: var(--space-5); }
+.cal-agenda-hint { text-align: center; }
+
+/* Status pills. The house style for "what is going on with this" - a colour and
+   two words, never a sentence. Reads at a glance and takes one line where the
+   prose it replaced took four. */
+.pill-row { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; }
+.pill-row-start { justify-content: flex-start; }
+.pill {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  border-radius: var(--radius-full);
+  padding: var(--space-1) var(--space-3);
+  white-space: nowrap;
+}
+.pill.neutral { background: var(--surface-sunken); color: var(--ink-muted); }
+.pill.good    { background: var(--success-wash); color: var(--success); }
+.pill.warn    { background: var(--warning-wash); color: var(--warning); }
+
+/* The kid's own face on their card, rather than their name doing all the work. */
+.parent-kid-line { display: flex; align-items: center; gap: var(--space-3); }
+.parent-kid-face {
+  width: 2.25rem; height: 2.25rem; min-width: 2.25rem;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-sunken);
+  box-shadow: 0 0 0 2px var(--border);
+}
 
 /* A grown-up's note on a decision, shown on the kid's own card. */
 .decision-note {
@@ -1298,7 +1415,6 @@ button.parent-list-row:active { transform: scale(0.99); }
         <div class="skel-row"></div>
       </div>
     </div>
-    <p class="who-prompt">Who are you?</p>
     <div id="who-grid"></div>
     <div id="setup-warn" class="setup-warn hidden">
       <strong>⚙️ Can't reach the server:</strong> check that <code>API_URL</code> at the top of this
@@ -1555,14 +1671,22 @@ button.parent-list-row:active { transform: scale(0.99); }
       <section class="parent-section">
         <h2 class="parent-section-title">Calendar</h2>
         <div class="card parent-card">
-          <div class="parent-calendar-controls" role="tablist" aria-label="Parent calendar view">
-            <button id="p-calendar-view-day" class="parent-calendar-chip" onclick="switchParentCalendarView('day')">Day</button>
-            <button id="p-calendar-view-week" class="parent-calendar-chip active" onclick="switchParentCalendarView('week')">Week</button>
-            <button id="p-calendar-view-month" class="parent-calendar-chip" onclick="switchParentCalendarView('month')">Month</button>
+          <div class="cal-monthnav">
+            <button class="icon-btn" onclick="parentCalendarStep(-1)" aria-label="Previous month">‹</button>
+            <div id="p-calendar-range" class="cal-monthlabel" aria-live="polite"></div>
+            <button class="icon-btn" onclick="parentCalendarStep(1)" aria-label="Next month">›</button>
           </div>
-          <div id="p-calendar-range" class="parent-calendar-range"></div>
+          <div class="cal-weekstrip-head">
+            <span>This week</span>
+            <div class="cal-weeknav">
+              <button class="icon-btn small" onclick="parentCalendarWeekStep(-1)" aria-label="Previous week">‹</button>
+              <button class="icon-btn small" onclick="parentCalendarWeekStep(1)" aria-label="Next week">›</button>
+            </div>
+          </div>
+          <div id="p-calendar-week" class="cal-weekstrip"></div>
+          <div id="p-calendar-grid" class="cal-grid"></div>
+          <div id="p-calendar-agenda" class="cal-agenda"></div>
         </div>
-        <div id="p-calendar-list" class="parent-calendar-list"></div>
       </section>
     </div>
 
@@ -1774,8 +1898,10 @@ var SVG_AVATAR_FALLBACK = {
 // lists, the parent kid-mark. Those cannot hold an <img>, and an avatar that
 // renders as nothing there would be worse than an emoji.
 var IMG_AVATARS = {
-  toby:  { tile: 'img/avatar-toby.webp',  head: 'img/head-toby.webp',  fallback: '\u{1F5A8}\uFE0F' },
-  ollie: { tile: 'img/avatar-ollie.webp', head: 'img/head-ollie.webp', fallback: '\u{1F43E}' },
+  toby:    { tile: 'img/avatar-toby.webp',    head: 'img/head-toby.webp',    fallback: '\u{1F5A8}\uFE0F' },
+  ollie:   { tile: 'img/avatar-ollie.webp',   head: 'img/head-ollie.webp',   fallback: '\u{1F43E}' },
+  peter:   { tile: 'img/avatar-peter.webp',   head: 'img/head-peter.webp',   fallback: '\u{1F9D4}' },
+  tymanda: { tile: 'img/avatar-tymanda.webp', head: 'img/head-tymanda.webp', fallback: '\u{1F469}' },
 };
 
 function imgAvatar(value) {
@@ -1859,7 +1985,12 @@ var voiceReminderDraft = null;
 // What the prize carousel was last built for. Re-centring only happens when
 // this changes, so a background refresh cannot snap the card back mid-swipe.
 var goalCarouselSignature = '';
-let parentCalendarView = 'week';
+// Month being shown, week shown in the strip, and which day is expanded.
+// Nulls mean "today's" - resolved at render so the app does not go stale
+// sitting open overnight.
+let parentCalendarMonth = null;
+let parentCalendarWeekStart = null;
+let parentCalendarSelectedDay = null;
 let parentCalendarItems = [];
 let parentCalendarLoading = false;
 let parentApprovalsGlanceItems = [];
@@ -1978,6 +2109,15 @@ async function ensurePushSubscription() {
   } catch (_) {}
 }
 
+// Local date key, same shape as todayStr(). Deliberately not
+// toISOString().slice(0,10) - that converts to UTC first, so an evening east of
+// Greenwich lands on tomorrow.
+function isoDate(date) {
+  return date.getFullYear()
+    + '-' + String(date.getMonth() + 1).padStart(2, '0')
+    + '-' + String(date.getDate()).padStart(2, '0');
+}
+
 function todayStr() {
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -1995,6 +2135,14 @@ function cycleCompletion(task) {
   if (task.cycle === 'daily')  return live.find(c => c.date === todayStr()) || null;
   if (task.cycle === 'weekly') return live.find(c => isoWeek(c.date) === isoWeek(todayStr())) || null;
   return live[0] || null;
+}
+
+// Parent HQ says "nothing here" a lot: no approvals, no reward requests, no
+// decisions yet. A full empty state - emoji, headline, explanatory sentence -
+// is four lines to report zero, three times over on one screen. This is the
+// same information as one pill.
+function buildEmptyPill(text) {
+  return '<div class="pill-row pill-row-start"><span class="pill neutral">' + esc(text) + '</span></div>';
 }
 
 function buildEmptyState(emoji, line1, line2) {
@@ -2092,6 +2240,7 @@ function renderWho() {
     var kidColorVal = isParent ? 'var(--brand)' : 'var(--kid-' + (Math.min(kids.findIndex(function(k) { return k.id === p.id; }), 3) + 1) + ')';
     return '<button class="who-tile ' + (isParent ? 'parent' : 'kid-tile') + '"'
       + kidColorAttr
+      + ' aria-label="' + esc(p.name) + ', ' + (isParent ? 'parent' : 'kid') + '"'
       + ' onclick="pickPerson(\'' + p.id + '\')" touch-action="manipulation">'
       + '<span class="tile-emoji">' + renderAvatarHtml(p.emoji, kidColorVal) + '</span>'
       + '<span class="tile-name">' + esc(p.name) + '</span>'
@@ -2422,30 +2571,96 @@ function updatePlanningTypeVisibility() {
   document.getElementById('p-plan-end-wrap').classList.toggle('hidden', !isEvent);
 }
 
-function parentCalendarBounds(viewOverride) {
-  var view = viewOverride || parentCalendarView;
+function parentCalendarActiveMonth() {
+  if (parentCalendarMonth) return parentCalendarMonth;
+  var now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+function parentCalendarActiveWeek() {
+  if (parentCalendarWeekStart) return parentCalendarWeekStart;
   var now = new Date();
   now.setHours(0, 0, 0, 0);
-  var start = new Date(now);
-  var end = new Date(now);
-  var label = '';
+  return startOfWeek(now);
+}
 
-  if (view === 'week') {
-    start = startOfWeek(now);
-    end = addDays(start, 6);
-    label = start.toLocaleDateString([], { month: 'short', day: 'numeric' })
-      + ' – '
-      + end.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-  } else if (view === 'month') {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
-    end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    label = start.toLocaleDateString([], { month: 'long', year: 'numeric' });
-  } else {
-    label = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-  }
+// One fetch covers both the month grid and the week strip: the range runs from
+// the start of the grid's first week to the end of its last, and is widened if
+// the strip has been walked outside the month. Two ranges would mean two
+// requests that could disagree about a day on the boundary.
+function parentCalendarBounds() {
+  var month = parentCalendarActiveMonth();
+  var start = startOfWeek(new Date(month.getFullYear(), month.getMonth(), 1));
+  var lastOfMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+  var end = addDays(startOfWeek(lastOfMonth), 6);
 
+  var weekStart = parentCalendarActiveWeek();
+  var weekEnd = addDays(weekStart, 6);
+  if (weekStart < start) start = new Date(weekStart);
+  if (weekEnd > end) end = new Date(weekEnd);
+
+  start.setHours(0, 0, 0, 0);
   end.setHours(23, 59, 59, 999);
-  return { start: start, end: end, label: label };
+  return {
+    start: start,
+    end: end,
+    label: month.toLocaleDateString([], { month: 'long', year: 'numeric' }),
+  };
+}
+
+function parentCalendarStep(delta) {
+  var month = parentCalendarActiveMonth();
+  parentCalendarMonth = new Date(month.getFullYear(), month.getMonth() + delta, 1);
+  parentCalendarSelectedDay = null;
+  renderParentCalendar();
+  loadParentCalendar();
+}
+
+function parentCalendarWeekStep(delta) {
+  parentCalendarWeekStart = addDays(parentCalendarActiveWeek(), delta * 7);
+  renderParentCalendar();
+  loadParentCalendar();
+}
+
+function parentCalendarSelectDay(dayKey) {
+  // Tapping the open day closes it, so the grid is never stuck expanded.
+  parentCalendarSelectedDay = parentCalendarSelectedDay === dayKey ? null : dayKey;
+  renderParentCalendar();
+}
+
+// Colour by PERSON, not by activity type. The kid colours are already on their
+// avatars, their rings and their cards, so a dot means something before anyone
+// reads a legend - which is why there is no legend.
+function parentCalendarPersonColour(item) {
+  var id = item.kind === 'chore' ? item.kidId : item.personId;
+  if (id === null || id === undefined) return 'var(--ink-subtle)';   // whole family
+  var idx = kidsOnly().findIndex(function(k) { return k.id === id; });
+  if (idx >= 0) return 'var(--kid-' + (Math.min(idx, 3) + 1) + ')';
+  return 'var(--brand)';                                             // a parent
+}
+
+function parentCalendarItemsByDay() {
+  var byDay = {};
+  (parentCalendarItems || []).forEach(function(item) {
+    var key = parentCalendarDayKey(item);
+    if (!key) return;
+    if (!byDay[key]) byDay[key] = [];
+    byDay[key].push(item);
+  });
+  return byDay;
+}
+
+function parentCalendarDots(items) {
+  // One dot per person, not per item: five chores for one kid is one dot, and
+  // a day with four dots really does involve four people.
+  var seen = [];
+  (items || []).forEach(function(item) {
+    var colour = parentCalendarPersonColour(item);
+    if (seen.indexOf(colour) === -1) seen.push(colour);
+  });
+  return '<span class="cal-dots">' + seen.slice(0, 4).map(function(c) {
+    return '<span class="cal-dot" style="background:' + c + '"></span>';
+  }).join('') + '</span>';
 }
 
 function parentCalendarDayKey(item) {
@@ -2559,7 +2774,7 @@ function renderParentApprovalsGlance() {
     .sort(parentCalendarSortWhen);
   var nothingScheduled = todayItems.length === 0 && weekItems.length === 0;
   el.innerHTML = (nothingScheduled
-      ? buildEmptyState('🗓️', 'Nothing scheduled today or this week.', 'You’re all caught up for now.')
+      ? buildEmptyPill('Nothing scheduled')
       : '<div class="card parent-card">'
         + '<h3 class="parent-section-title">Today</h3>'
         + renderParentGlanceRows(todayItems, 'Nothing today.')
@@ -2588,16 +2803,28 @@ function renderParentApprovalsTodayByKid() {
         return item.kind === 'chore' && item.kidId === kid.id && parentCalendarDayKey(item) === todayKey;
       })
       .sort(parentCalendarSortWhen);
+    // Status as pills, not paragraphs. 'Today's chores overview' under every
+    // name said nothing the heading had not already said, and a kid with
+    // nothing on got a five-line empty state to report zero.
+    var waiting = todayItems.filter(function(item) {
+      return parentCalendarOverviewStatus(item).className === 'waiting';
+    }).length;
+    var pills = '<span class="pill neutral">' + todayItems.length + ' chore'
+      + (todayItems.length === 1 ? '' : 's') + '</span>'
+      + (waiting > 0
+          ? '<span class="pill warn">' + waiting + ' pending</span>'
+          : '<span class="pill good">All caught up</span>');
+
     return '<div class="card parent-card">'
       + '<div class="parent-item-head">'
-      + '<div class="parent-copy">'
-      + '<strong>' + avatarText(kid.emoji) + ' ' + esc(kid.name) + '</strong>'
-      + '<div class="sub">Today’s chores overview</div>'
+      + '<div class="parent-copy parent-kid-line">'
+      + '<span class="parent-kid-face">' + renderAvatarHtml(kid.emoji, 'var(--brand)', 'head') + '</span>'
+      + '<strong>' + esc(kid.name) + '</strong>'
       + '</div>'
-      + '<span class="parent-badge">' + todayItems.length + ' chore' + (todayItems.length === 1 ? '' : 's') + '</span>'
+      + '<div class="pill-row">' + pills + '</div>'
       + '</div>'
       + (todayItems.length === 0
-          ? buildEmptyState('🗓️', 'No chores today.', 'Nothing is due for ' + esc(kid.name) + ' today.')
+          ? ''
           : '<div class="parent-list">' + todayItems.map(function(item) {
               var status = parentCalendarOverviewStatus(item);
               // A row saying 'Waiting on you' is the only one with something to
@@ -2679,79 +2906,102 @@ function renderParentCalendarChecklists(item) {
 
 function renderParentCalendar() {
   var range = document.getElementById('p-calendar-range');
-  var list = document.getElementById('p-calendar-list');
-  if (!range || !list) return;
+  var strip = document.getElementById('p-calendar-week');
+  var grid = document.getElementById('p-calendar-grid');
+  var agenda = document.getElementById('p-calendar-agenda');
+  if (!range || !strip || !grid || !agenda) return;
 
-  ['day', 'week', 'month'].forEach(function(name) {
-    var btn = document.getElementById('p-calendar-view-' + name);
-    if (btn) btn.classList.toggle('active', name === parentCalendarView);
-  });
-
-  var bounds = parentCalendarBounds();
-  range.textContent = bounds.label;
+  range.textContent = parentCalendarBounds().label;
 
   if (parentCalendarLoading) {
-    list.innerHTML = parentCalendarSkeletonHtml();
+    strip.innerHTML = '';
+    grid.innerHTML = parentCalendarSkeletonHtml();
+    agenda.innerHTML = '';
     return;
   }
 
-  var byDay = {};
-  (parentCalendarItems || []).forEach(function(item) {
-    var key = parentCalendarDayKey(item);
-    if (!key) return;
-    if (!byDay[key]) byDay[key] = [];
-    byDay[key].push(item);
-  });
-  var days = Object.keys(byDay).sort();
-  if (days.length === 0) {
-    list.innerHTML = buildEmptyState('🗓️', 'No calendar items in this range.', 'Add an event or reminder above.');
-    return;
+  var byDay = parentCalendarItemsByDay();
+  var todayKey = todayStr();
+
+  function dayButton(cls, day, inner) {
+    var key = isoDate(day);
+    var items = byDay[key] || [];
+    return '<button type="button" class="' + cls
+      + (key === todayKey ? ' today' : '')
+      + (key === parentCalendarSelectedDay ? ' selected' : '') + '"'
+      + ' onclick="parentCalendarSelectDay(\'' + key + '\')"'
+      + ' aria-label="' + esc(day.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))
+      + ', ' + items.length + ' item' + (items.length === 1 ? '' : 's') + '">'
+      + inner(day, items) + '</button>';
   }
 
-  list.innerHTML = days.map(function(dayKey) {
-    var dayItems = byDay[dayKey].slice().sort(parentCalendarSortWhen);
-    var heading = new Date(dayKey + 'T12:00:00').toLocaleDateString([], {
-      weekday: 'long',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
+  // ── This week: always on, so the week ahead costs no interaction at all ──
+  var weekStart = parentCalendarActiveWeek();
+  strip.innerHTML = Array.from({ length: 7 }, function(_, i) {
+    return dayButton('cal-chip', addDays(weekStart, i), function(day, items) {
+      return '<span class="cal-chip-dow">' + esc(day.toLocaleDateString([], { weekday: 'narrow' })) + '</span>'
+        + '<span class="cal-chip-num">' + day.getDate() + '</span>'
+        + parentCalendarDots(items);
     });
-    return '<div class="card parent-card">'
-      + '<h3 class="parent-section-title">' + esc(heading) + '</h3>'
-      + '<div class="parent-list">' + dayItems.map(function(item) {
-          var canManage = item.kind === 'event' || item.kind === 'reminder';
-          var notes = item.notes ? '<div class="sub">📝 ' + esc(item.notes) + '</div>' : '';
-          var actions = canManage
-            ? '<div class="parent-actions">'
-              + '<button class="btn ghost small" onclick="parentEditPlanningItem(\'' + jsq(item.id) + '\')">Edit</button>'
-              + '<button class="btn red-ghost small" onclick="parentDeletePlanningItem(\'' + jsq(item.id) + '\')">Delete</button>'
-              + '</div>'
-            : '';
-          return '<div class="parent-list-row">'
-            + '<div class="parent-copy">'
-            + '<span class="parent-list-title">' + esc(item.title || 'Untitled')
-            + (Array.isArray(item.conflictsWith) && item.conflictsWith.length > 0 ? '<span class="p-clash-indicator">⚠ clash</span>' : '')
-            + '</span>'
-            + '<div class="sub"><span class="tag parent-calendar-kind">' + esc(item.kind || 'item') + '</span>'
-            + ' · ' + esc(parentCalendarItemTime(item))
-            + ' · ' + esc(parentCalendarWho(item))
-            + (item.kind === 'chore' && item.points ? ' · ' + item.points + ' pts' : '')
-            + '</div>'
-            + notes
-            + renderParentCalendarChecklists(item)
-            + actions
-            + '</div>'
-            + '</div>';
-        }).join('') + '</div>'
-      + '</div>';
   }).join('');
-}
 
-function switchParentCalendarView(view) {
-  if (parentCalendarView === view) return;
-  parentCalendarView = view;
-  renderParentCalendar();
-  loadParentCalendar();
+  // ── Month grid ──
+  var month = parentCalendarActiveMonth();
+  var gridStart = startOfWeek(new Date(month.getFullYear(), month.getMonth(), 1));
+  var lastOfMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+  var weeks = Math.round((addDays(startOfWeek(lastOfMonth), 6) - gridStart) / 86400000 / 7);
+
+  grid.innerHTML = '<div class="cal-dowrow">'
+    + Array.from({ length: 7 }, function(_, i) {
+        return '<span class="cal-dow">'
+          + esc(addDays(gridStart, i).toLocaleDateString([], { weekday: 'narrow' })) + '</span>';
+      }).join('')
+    + '</div><div class="cal-cells">'
+    + Array.from({ length: weeks * 7 }, function(_, i) {
+        var day = addDays(gridStart, i);
+        var outside = day.getMonth() !== month.getMonth();
+        return dayButton('cal-cell' + (outside ? ' outside' : ''), day, function(d, items) {
+          return '<span class="cal-cell-num">' + d.getDate() + '</span>' + parentCalendarDots(items);
+        });
+      }).join('')
+    + '</div>';
+
+  // ── Agenda for the chosen day, expanded inline ──
+  // In place rather than a whole-screen week view: it stays one screen with no
+  // mode to get back out of. Same thing Google and Apple Calendar do.
+  if (!parentCalendarSelectedDay) {
+    agenda.innerHTML = '<div class="sub cal-agenda-hint">Tap a day to see what is on.</div>';
+    return;
+  }
+
+  var dayItems = (byDay[parentCalendarSelectedDay] || []).slice().sort(parentCalendarSortWhen);
+  var heading = new Date(parentCalendarSelectedDay + 'T12:00:00')
+    .toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+
+  agenda.innerHTML = '<h3 class="parent-section-title">' + esc(heading) + '</h3>'
+    + (dayItems.length === 0
+        ? buildEmptyPill('Nothing on')
+        : '<div class="parent-list">' + dayItems.map(function(item) {
+            var canManage = item.kind === 'event' || item.kind === 'reminder';
+            var notes = item.notes ? '<div class="sub">📝 ' + esc(item.notes) + '</div>' : '';
+            return '<div class="parent-list-row">'
+              + '<span class="cal-dot cal-dot-lg" style="background:'
+              + parentCalendarPersonColour(item) + '"></span>'
+              + '<div class="parent-copy">'
+              + '<span class="parent-list-title">' + esc(item.title || 'Untitled') + '</span>'
+              + '<div class="sub">' + esc(parentCalendarItemTime(item))
+              + ' · ' + esc(parentCalendarWho(item))
+              + (item.kind === 'chore' && item.points ? ' · ' + item.points + ' pts' : '') + '</div>'
+              + notes
+              + '</div>'
+              + (canManage
+                  ? '<div class="parent-actions">'
+                    + '<button class="btn ghost small" onclick="parentEditPlanningItem(\'' + jsq(item.id) + '\')">Edit</button>'
+                    + '<button class="btn red-ghost small" onclick="parentDeletePlanningItem(\'' + jsq(item.id) + '\')">Delete</button>'
+                    + '</div>'
+                  : '')
+              + '</div>';
+          }).join('') + '</div>');
 }
 
 async function loadParentCalendar() {
@@ -3484,14 +3734,14 @@ function renderParent(person) {
 
   var el = document.getElementById('p-pending');
   if (pending.length === 0) {
-    el.innerHTML = buildEmptyState('✨', 'Nothing waiting — all caught up! ✨', 'You can pop over to tasks or settings whenever you are ready.');
+    el.innerHTML = buildEmptyPill('All caught up');
   } else {
     el.innerHTML = pending.map(function(c) {
       var kid = state.people.find(function(k) { return k.id === c.kidId; }) || { name: '?', emoji: '❓' };
       var isExtra = !c.taskId;
       return '<div class="card parent-card" id="p-pending-' + c.id + '">'
         + '<div class="parent-summary-row">'
-        + '<span class="parent-kid-mark">' + avatarText(kid.emoji) + '</span>'
+        + '<span class="parent-kid-face">' + renderAvatarHtml(kid.emoji, 'var(--brand)', 'head') + '</span>'
         + '<div class="parent-copy">'
         + '<strong>' + esc(kid.name) + '</strong>'
         + '<div>' + esc(c.title) + (isExtra ? ' <span class="tag extra">kid-added</span>' : '') + '</div>'
@@ -3550,7 +3800,7 @@ function renderParent(person) {
   }).join('') || buildEmptyState('👧', 'Add a kid to start assigning tasks.', 'Once a kid is added, you can assign chores from this tab.');
 
   document.getElementById('p-reward-requests').innerHTML = pendingRedemptions.length === 0
-    ? buildEmptyState('🎁', 'No reward requests right now', 'When kids redeem rewards, they will show up here for approval.')
+    ? buildEmptyPill('0 requests')
     : pendingRedemptions.map(function(r) {
         var kid = state.people.find(function(k) { return k.id === r.kidId; }) || { name: '?', emoji: '❓' };
         return '<div class="card parent-card">'
@@ -3575,7 +3825,7 @@ function renderParent(person) {
     .sort(function(a, b) { return new Date(b.decidedAt) - new Date(a.decidedAt); })
     .slice(0, 15);
   document.getElementById('p-decided').innerHTML = decided.length === 0
-    ? buildEmptyState('🗂️', 'No decisions recorded yet.', 'Approved and rejected completions will appear here.')
+    ? buildEmptyPill('Nothing decided yet')
     : '<div class="parent-list">' + decided.map(function(c) {
         var kid = state.people.find(function(k) { return k.id === c.kidId; }) || { name: '?', emoji: '❓' };
         var decisionLabel = c.status === 'approved' ? '✓ Approved' : '✗ Rejected';

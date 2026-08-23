@@ -206,9 +206,17 @@ test('tapping a prize card opens it in the Rewards tab', async ({ page }) => {
 
   // The row it landed on must be the prize that was tapped, and it must be the
   // one in view - not just present somewhere in the list.
+  //
+  // Polled rather than asserted once. The jump defers a tick past the tab
+  // transition and then scrolls with behaviour:'smooth', and the shared store
+  // grows through the run so the list this scrolls through gets longer. A
+  // single immediate assertion was racing the scroll and failed intermittently
+  // late in the suite.
   const row = page.locator('#k-rewards .task').filter({ hasText: "Ice cream from McDonald's" });
   await expect(row).toBeVisible();
-  await expect(row).toBeInViewport();
+  await expect.poll(async () => row.isVisible().then(() => row.boundingBox())
+    .then((b) => b !== null && b.y >= 0 && b.y < page.viewportSize().height))
+    .toBe(true);
 });
 
 // A swipe ends with a finger on a card too. A browser suppresses the click once
@@ -663,8 +671,10 @@ test('the parent approval list goes multi-column on a wide screen', async ({ pag
 // wrong path leaves an <img> that renders as nothing, and every source-level
 // check still passes because the markup is correct. These assert the bytes
 // actually arrived by reading naturalWidth.
-test('the kids have real photo avatars on the picker, and they load', async ({ page }) => {
-  for (const name of ['Toby', 'Ollie']) {
+test('everyone has a real photo avatar on the picker, and they load', async ({ page }) => {
+  // All four, not just the kids. Kids on photos beside parents on generic emoji
+  // read as two different kinds of account rather than four people.
+  for (const name of ['Peter', 'Tymanda', 'Toby', 'Ollie']) {
     const tile = page.locator('.who-tile').filter({ hasText: name });
     const img = tile.locator('img.avatar-photo');
     await expect(img).toHaveCount(1);
@@ -712,6 +722,8 @@ test('an existing household is migrated onto the photo avatars', async ({ page }
   });
   expect(emojis.toby).toBe('img:toby');
   expect(emojis.ollie).toBe('img:ollie');
+  expect(emojis.peter).toBe('img:peter');
+  expect(emojis.tymanda).toBe('img:tymanda');
 });
 
 // App icons. A PWA icon fails silently - the launcher just shows a letter or a
@@ -779,9 +791,33 @@ test('the sign-in screen is the artwork, with the faces on it', async ({ page })
   expect(Math.max(...tops) - Math.min(...tops), 'the faces should share one row')
     .toBeLessThanOrEqual(2);
 
+  // Anchored in a panel at the foot, not floating on the artwork. Loose circles
+  // in the sky read as decoration rather than as the way in.
   const view = page.viewportSize();
-  expect(Math.min(...tops), 'the row should sit low, leaving the artwork visible')
+  expect(Math.min(...tops), 'the row should sit in the panel at the foot')
     .toBeGreaterThan(view.height * 0.6);
+
+  const panel = await page.locator('.who-sheet').boundingBox();
+  expect(Math.round(panel.y + panel.height), 'the panel should meet the bottom edge')
+    .toBe(view.height);
+
+  // Every person is the same kind of control: same circle, same ring, same name.
+  // Sized from content, an emoji glyph is narrower than a photo and the four
+  // came out at different sizes on different baselines.
+  const circles = await page.locator('.who-tile .tile-emoji').evaluateAll(
+    (els) => els.map((e) => {
+      const r = e.getBoundingClientRect();
+      return `${Math.round(r.width)}x${Math.round(r.height)}@${Math.round(r.y)}`;
+    }),
+  );
+  expect(new Set(circles).size, 'all four avatars should be identical').toBe(1);
+});
+
+test('the sign-in screen has no prompt text on it', async ({ page }) => {
+  await expect(page.locator('#screen-who')).not.toContainText('Who are you');
+  // Names are drawn again now there is a panel to hold them.
+  await expect(page.locator('.who-tile').filter({ hasText: 'Toby' })).toHaveCount(1);
+  await expect(page.locator('.who-tile').filter({ hasText: 'Peter' })).toHaveCount(1);
 });
 
 test('there is no separate splash screen to sit through', async ({ page }) => {
@@ -809,4 +845,157 @@ test('the sign-in bar spans the phone screen rather than collapsing to its conte
   const sheet = await page.locator('.who-sheet').boundingBox();
   expect(Math.round(sheet.width)).toBe(412);
   expect(Math.round(sheet.x)).toBe(0);
+});
+
+// "Appy not wordy". Parent HQ reported zero with a four-line empty state, three
+// times on one screen, and put "Today's chores overview" under every kid's name.
+// Status is a colour and two words now.
+test('a kid card reports status as pills, not paragraphs', async ({ page }) => {
+  await page.evaluate(async () => {
+    const post = (b) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
+    }).then((r) => r.json());
+    await post({ action: 'addTask', parentId: 'peter', parentPin: '1234', kidId: 'toby', title: 'Pill check chore', points: 3, cycle: 'daily' });
+    const st = await post({ action: 'state' });
+    const t = st.tasks.find((x) => x.title === 'Pill check chore');
+    await post({ action: 'completeTask', personId: 'toby', pin: '1234', taskId: t.id });
+  });
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const cards = page.locator('#p-approvals-today-by-kid .parent-card');
+  const toby = cards.filter({ hasText: 'Toby' });
+  await expect(toby.locator('.pill.warn')).toContainText(/\d+ pending/);
+  await expect(toby.locator('.pill.neutral')).toContainText(/chore/);
+
+  // The filler subtitle is gone from every card.
+  await expect(page.locator('#p-approvals-today-by-kid')).not.toContainText('chores overview');
+});
+
+test('a kid with nothing on gets one pill, not an empty state', async ({ page }) => {
+  await pickPerson(page, 'Peter');
+  const ollie = page.locator('#p-approvals-today-by-kid .parent-card').filter({ hasText: 'Ollie' });
+  await expect(ollie.locator('.pill.good')).toContainText('All caught up');
+  // No emoji-and-two-sentences block explaining that zero means zero.
+  await expect(ollie.locator('.empty')).toHaveCount(0);
+});
+
+test('empty parent sections are a pill, not a paragraph', async ({ page }) => {
+  await pickPerson(page, 'Peter');
+  await expect(page.locator('#p-reward-requests .pill')).toContainText('0 requests');
+  await expect(page.locator('#p-reward-requests')).not.toContainText('will show up here');
+});
+
+// The kids have photos now; the approval card was still drawing the emoji
+// fallback while the cards right below it showed the real face.
+test('approval cards use the kid photo, matching the cards below', async ({ page }) => {
+  await page.evaluate(async () => {
+    const post = (b) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
+    }).then((r) => r.json());
+    await post({ action: 'addTask', parentId: 'peter', parentPin: '1234', kidId: 'toby', title: 'Face check chore', points: 1, cycle: 'oneoff' });
+    const st = await post({ action: 'state' });
+    const t = st.tasks.find((x) => x.title === 'Face check chore');
+    await post({ action: 'completeTask', personId: 'toby', pin: '1234', taskId: t.id });
+  });
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const card = page.locator('#p-pending .parent-card').filter({ hasText: 'Face check chore' });
+  await expect(card.locator('img.avatar-photo')).toHaveCount(1);
+});
+
+// Calendar. Replaces Day/Week/Month chips with one month you arrow through, a
+// pinned "this week" strip, and an agenda that expands inline on the same
+// screen. Dots are coloured per PERSON, which is what removes the need for a
+// legend - the colour already means something from the avatars and cards.
+async function seedCalendar(page) {
+  await page.evaluate(async () => {
+    const post = (b) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
+    }).then((r) => r.json());
+    const at = (offset, hour) => {
+      const d = new Date();
+      d.setDate(d.getDate() + offset);
+      d.setHours(hour, 0, 0, 0);
+      return d.toISOString();
+    };
+    await post({ action: 'addPlanningItem', parentId: 'peter', parentPin: '1234', type: 'event', title: 'Soccer match', startAt: at(2, 10), personId: 'ollie' });
+    await post({ action: 'addPlanningItem', parentId: 'peter', parentPin: '1234', type: 'event', title: 'Dentist', startAt: at(2, 14), personId: 'toby' });
+  });
+  await page.reload();
+}
+
+async function openParentCalendar(page) {
+  await pickPerson(page, 'Peter');
+  await page.getByRole('button', { name: /^Calendar$/ }).first().click();
+  await expect(page.locator('#p-calendar-grid .cal-cell').first()).toBeVisible();
+}
+
+test('the calendar is one month you arrow through, not a view switcher', async ({ page }) => {
+  await openParentCalendar(page);
+
+  // The old Day/Week/Month chips are gone, not restyled.
+  await expect(page.locator('#p-calendar-view-day')).toHaveCount(0);
+  await expect(page.locator('#p-calendar-view-month')).toHaveCount(0);
+
+  const label = page.locator('#p-calendar-range');
+  const start = await label.textContent();
+  await page.getByRole('button', { name: 'Next month' }).click();
+  await expect(label).not.toHaveText(start);
+  await page.getByRole('button', { name: 'Previous month' }).click();
+  await expect(label).toHaveText(start);
+});
+
+test('a this-week strip is pinned above the grid, with no tapping needed', async ({ page }) => {
+  await openParentCalendar(page);
+  await expect(page.locator('#p-calendar-week .cal-chip')).toHaveCount(7);
+
+  // It is above the month grid, and it moves independently of the month.
+  const strip = await page.locator('#p-calendar-week').boundingBox();
+  const grid = await page.locator('#p-calendar-grid').boundingBox();
+  expect(strip.y).toBeLessThan(grid.y);
+
+  const first = await page.locator('#p-calendar-week .cal-chip-num').first().textContent();
+  await page.getByRole('button', { name: 'Next week' }).click();
+  await expect(page.locator('#p-calendar-week .cal-chip-num').first()).not.toHaveText(first);
+});
+
+test('dots are coloured per person, and there is no legend', async ({ page }) => {
+  await seedCalendar(page);
+  await openParentCalendar(page);
+
+  // Two people have something on the same day, so that day carries two dots in
+  // two different colours. One dot per person, not per item.
+  const busy = page.locator('#p-calendar-grid .cal-cell').filter({ has: page.locator('.cal-dot') });
+  expect(await busy.count()).toBeGreaterThan(0);
+
+  const colours = await page.locator('#p-calendar-grid .cal-cell .cal-dot').evaluateAll(
+    (els) => [...new Set(els.map((e) => e.style.background))],
+  );
+  expect(colours.length, 'different people should get different dot colours').toBeGreaterThan(1);
+
+  await expect(page.locator('#p-tab-calendar')).not.toContainText(/legend/i);
+});
+
+test('tapping a day expands its agenda inline, without leaving the screen', async ({ page }) => {
+  await seedCalendar(page);
+  await openParentCalendar(page);
+
+  await expect(page.locator('#p-calendar-agenda')).toContainText('Tap a day');
+
+  const busy = page.locator('#p-calendar-grid .cal-cell').filter({ has: page.locator('.cal-dot') }).first();
+  await busy.click();
+
+  // Same screen: the grid is still there, with the agenda under it.
+  await expect(page.locator('#p-calendar-grid')).toBeVisible();
+  const agenda = page.locator('#p-calendar-agenda');
+  await expect(agenda).not.toContainText('Tap a day');
+  const grid = await page.locator('#p-calendar-grid').boundingBox();
+  const box = await agenda.boundingBox();
+  expect(box.y).toBeGreaterThan(grid.y);
+
+  // Tapping the open day again closes it, so the grid never gets stuck open.
+  await busy.click();
+  await expect(agenda).toContainText('Tap a day');
 });

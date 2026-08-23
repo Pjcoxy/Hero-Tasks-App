@@ -291,21 +291,32 @@ It took three goes to get here, and the failures are the useful part:
    cut the picture in half to show four names.
 2. A separate splash screen that held for a beat then vanished — the artwork got
    about two seconds and was then gone.
-3. This: the artwork fills the screen and the faces dock along the bottom, so it
-   stays up for as long as it takes someone to choose.
+3. Artwork full-screen with the faces docked along the **bottom** — kept the
+   picture whole, but sat them over the foreground.
+4. Faces moved up into the **sky above the wordmark** — the artwork was
+   untouched, but loose circles floating on a picture read as decoration, not as
+   controls. Nothing anchored them and nothing said "this is the way in".
+5. A **solid panel** docked to the bottom — anchored, but it anchors by
+   covering: a fifth of the screen of flat white to hold four faces.
+6. This: a **frosted glass bar** on the bottom edge. 11% of the screen, and the
+   picture carries on through it.
 
-- **One row of round avatars** at the foot, not a grid of cards. A card needs
-  its own background and that background is a hole punched in the picture. A
-  face plus a name needs neither.
-- The strip they sit on is boots, backpack and map in the artwork. The logo, the
-  kids and the landscape are all above it and stay untouched.
-- The gradient behind the row **fades up** rather than starting hard, so it
-  reads as light falling off the foot of the picture instead of a panel laid on
-  top. `--scrim-strong` → `--scrim-soft` → transparent.
-- Whose face it is comes from the **ring**, not a card outline — kid colour for
-  a kid, brand for a parent.
-- The `Kid` / `Parent 👑` line is dropped here. At this size the face and the
-  name are the whole message, and a third line per person costs more picture.
+- **A surface is what anchors, not position.** An edge and a radius say "these
+  are controls" in a way position alone cannot. But the surface does not have to
+  be opaque to do that — glass anchors just as well and costs half the height.
+- **Dark glass, not light.** A white bar over the foot of this artwork — boots
+  and backpack in shadow — just turns grey. Dark tint with white labels keeps
+  the colour underneath.
+- `backdrop-filter` is progressive. Without it this is a plain translucent bar,
+  which is fine.
+- **Every person is the same kind of thing.** Same circle, same ring weight,
+  same name. A parent on a dark disc beside a kid's photo read as two different
+  categories rather than four ways into one app.
+- **Fixed width per tile, never `flex-basis: auto`.** Sized from content, an
+  emoji glyph is narrower than a photo — the circles come out different sizes
+  and the names land on four different baselines.
+- The prompt stays gone. Four faces in a bar are self-explanatory; the
+  `Kid` / `Parent 👑` line stays gone too, at a third line each.
 
 **Sizing by aspect ratio, not width.** The artwork is portrait, roughly 0.45
 wide-to-tall. A phone is close enough that `cover` crops almost nothing. Past
@@ -315,6 +326,59 @@ row on top of the wordmark. Wider than that, the whole picture is fitted with
 
 More people would shrink the row rather than wrap it. That is the right failure:
 a second row starts eating the picture again.
+
+### Calendar
+
+One month, arrowed through. A **"this week" strip pinned above it**, and tapping
+any day **expands its agenda inline underneath** — same screen, no mode to get
+back out of. That is what Google Calendar, Apple Calendar and Cozi all do.
+
+**Dots are coloured per person, never per activity type.** The kid colours are
+already on their avatars, their rings and their cards, so a dot means something
+before anyone reads a key. That is what removes the need for a legend — and a
+legend is a thing to learn before the screen is useful.
+
+- **One dot per person, not per item.** Five chores for one kid is one dot, and
+  a day showing four dots really does involve four people. Capped at four.
+- **Today is a ring, selection is a fill.** Both can be true of the same day and
+  they must not look like the same thing.
+- The week strip and the grid share a selection, so tapping in either highlights
+  both.
+- Tapping the open day closes it. A grid that can only be expanded is a grid
+  that gets stuck expanded.
+- **One fetch covers both** the grid and the strip: the range runs from the
+  start of the grid's first week to the end of its last, widened if the strip
+  has been walked outside the month. Two ranges would be two requests that could
+  disagree about a day on the boundary.
+- Day cells are `aspect-ratio: 1`, so the grid keeps its shape from a small
+  phone to a wide window.
+
+Use `isoDate(date)` for day keys, never `toISOString().slice(0, 10)` — that
+converts to UTC first, so an evening east of Greenwich lands on tomorrow.
+
+### Status pills, not paragraphs
+
+**Appy, not wordy.** A status is a colour and two words. Never a sentence, and
+never an explanation of what the absence of things means.
+
+| | |
+|---|---|
+| `.pill.neutral` | a count — `2 chores`, `0 requests` |
+| `.pill.good` | nothing needed — `All caught up` |
+| `.pill.warn` | something waiting — `1 pending` |
+
+`buildEmptyPill(text)` is the empty state for a parent section. The full
+`buildEmptyState()` — emoji, headline, explanatory sentence — is four lines to
+report zero, and Parent HQ says "nothing here" three times on one screen. Keep
+the full version for kid screens, where an empty day should feel like good news
+rather than a null.
+
+Two rules this settled:
+
+- **A filler subtitle is worse than no subtitle.** "Today's chores overview"
+  under every kid's name repeated the section heading and cost a line per kid.
+- **Where a person has a photo, use it.** An approval card drawing the emoji
+  fallback directly above cards showing the real face reads as a bug.
 
 ### Swipeable card row
 

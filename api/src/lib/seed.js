@@ -5,8 +5,8 @@ const { container } = require('./cosmos');
 const HOUSEHOLD_ID = 'default';
 
 const SEED_PEOPLE = [
-  { id: 'peter', name: 'Peter', emoji: '🧔', pin: '1234', role: 'parent' },
-  { id: 'tymanda', name: 'Tymanda', emoji: '👩', pin: '1234', role: 'parent' },
+  { id: 'peter', name: 'Peter', emoji: 'img:peter', pin: '1234', role: 'parent' },
+  { id: 'tymanda', name: 'Tymanda', emoji: 'img:tymanda', pin: '1234', role: 'parent' },
   { id: 'toby', name: 'Toby', emoji: 'img:toby', pin: '1234', role: 'kid' },
   { id: 'ollie', name: 'Ollie', emoji: 'img:ollie', pin: '1234', role: 'kid' },
 ];
@@ -30,6 +30,10 @@ const AVATAR_MIGRATIONS = [
   // only thing that moves an existing record.
   { id: 'toby', from: 'svg:3d-printer', to: 'img:toby' },
   { id: 'ollie', from: 'svg:quokka', to: 'img:ollie' },
+  // The grown-ups get faces too. Kids on photos beside parents on generic
+  // emoji read as two different kinds of account rather than four people.
+  { id: 'peter', from: '\u{1F9D4}', to: 'img:peter' },
+  { id: 'tymanda', from: '\u{1F469}', to: 'img:tymanda' },
 ];
 
 // The reward shop shipped with no rewards at all, so renderRewardShop() always
