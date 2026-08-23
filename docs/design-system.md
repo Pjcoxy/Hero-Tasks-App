@@ -295,7 +295,7 @@ not in scope there.
 **The artwork is the screen.** Signing in happens on top of it; there is no
 separate splash.
 
-It took three goes to get here, and the failures are the useful part:
+It took seven goes to get here, and the failures are the useful part:
 
 1. Artwork as a band at the top of the picker, tiles on a solid sheet below —
    cut the picture in half to show four names.
@@ -308,17 +308,29 @@ It took three goes to get here, and the failures are the useful part:
    controls. Nothing anchored them and nothing said "this is the way in".
 5. A **solid panel** docked to the bottom — anchored, but it anchors by
    covering: a fifth of the screen of flat white to hold four faces.
-6. This: a **frosted glass bar** on the bottom edge. 11% of the screen, and the
-   picture carries on through it.
+6. A **frosted glass bar** on the bottom edge — 11% of the screen instead of a
+   fifth, but still a box. Flat fill, blur boundary and a hairline along the
+   top: three separate edges for the eye to find.
+7. This: a **gradient scrim** that fades out upwards. No edge at all, 10% of the
+   screen, and the artwork runs unbroken to the bottom.
 
-- **A surface is what anchors, not position.** An edge and a radius say "these
-  are controls" in a way position alone cannot. But the surface does not have to
-  be opaque to do that — glass anchors just as well and costs half the height.
-- **Dark glass, not light.** A white bar over the foot of this artwork — boots
-  and backpack in shadow — just turns grey. Dark tint with white labels keeps
-  the colour underneath.
-- `backdrop-filter` is progressive. Without it this is a plain translucent bar,
-  which is fine.
+- **What draws a box is an edge, not opacity.** Attempts 5 and 6 both came back
+  as "takes up too much room" even though 6 was half the height and translucent.
+  Lowering the opacity of a panel does not stop it being a panel: a flat fill, a
+  blur boundary and a hairline top edge each give the eye a line to find. A
+  gradient has none, so it reads as shading on the picture rather than a surface
+  parked on it. Reach for less edge before less opacity.
+- **What anchors is the rings, not the bar.** Attempt 4 failed because loose
+  circles in the sky read as decoration — but the fix was a coloured ring on
+  each face plus a row along the bottom edge, not the panel that came with it.
+  Once the rings were there the panel was only paying for itself in contrast,
+  and a scrim buys that more cheaply.
+- **Dark, not light.** A white scrim over the foot of this artwork — boots and
+  backpack in shadow — just turns grey. Dark tint with white labels keeps the
+  colour underneath.
+- **The names carry their own contrast.** With a thin scrim there is no plate
+  behind them, so `text-shadow: var(--text-scrim)` does that work. Without it
+  they break up over the bright patches at the foot of the picture.
 - **Every person is the same kind of thing.** Same circle, same ring weight,
   same name. A parent on a dark disc beside a kid's photo read as two different
   categories rather than four ways into one app.

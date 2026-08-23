@@ -51,10 +51,6 @@
      opaque: the picture should still read through the foot of the screen. */
   --scrim-strong: rgba(20,12,52,0.82);
   --scrim-soft:   rgba(20,12,52,0.45);
-  /* Frosted glass for a bar that has to sit ON artwork: enough surface to read
-     as a control strip, sheer enough that the picture carries on through it. */
-  --glass:        rgba(20,12,52,0.42);
-  --glass-edge:   rgba(255,255,255,0.18);
   /* Colour — per-kid */
   --kid-1: #0ea5a5;
   --kid-2: #f0873a;
@@ -169,11 +165,14 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
    bar, which is fine. */
 .who-sheet {
   flex: none;
-  padding: var(--space-3) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-3));
-  background: var(--glass);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border-top: 1px solid var(--glass-edge);
+  padding: var(--space-2) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-2));
+  /* A scrim that fades out upwards, not a panel. The frosted bar this replaced
+     had a flat fill, a blur and a hairline along its top, and all three of them
+     drew an edge - so it read as a box parked on the artwork however low its
+     opacity went. A gradient has no edge to see: it is dark enough under the
+     names to hold them and gone by the time it reaches the picture. The rings
+     round the faces do the anchoring the panel used to do. */
+  background: linear-gradient(to top, var(--scrim-soft), transparent);
 }
 
 /* One row, however many people. Four fits a small phone comfortably; a fifth
@@ -227,6 +226,8 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   /* White on dark glass. A light bar over the foot of this artwork - which is
      boots and backpack in shadow - just turns grey. */
   color: var(--on-brand);
+  /* Its own contrast, because the scrim behind it is thin by design. */
+  text-shadow: var(--text-scrim);
   line-height: var(--leading-tight);
 }
 /* The 'Kid' / 'Parent 👑' line stays off. Four people in one household do not
