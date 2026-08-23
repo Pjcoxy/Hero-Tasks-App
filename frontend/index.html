@@ -285,8 +285,8 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   padding: var(--space-5) var(--space-5) calc(var(--space-7) + var(--space-3));
   text-align: center;
 }
-.k-level-text { font-size: var(--text-lg); font-weight: var(--weight-bold); line-height: var(--leading-tight); }
-.k-streak {
+.k-goal-title { font-size: var(--text-lg); font-weight: var(--weight-bold); line-height: var(--leading-tight); }
+.k-goal-balance {
   display: inline-block; margin-top: var(--space-2);
   background: var(--on-brand-faint); border-radius: var(--radius-full);
   padding: var(--space-1) var(--space-3);
@@ -1071,8 +1071,8 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
     <!-- HOME TAB -->
     <div id="tab-home" class="tab-panel">
       <div class="kid-home-hero" id="k-home-hero">
-        <div class="k-level-text" id="k-level"></div>
-        <span class="k-streak" id="k-streak"></span>
+        <div class="k-goal-title" id="k-goal-title"></div>
+        <span class="k-goal-balance" id="k-goal-balance"></span>
         <div class="progress-wrap">
           <div class="progress-bar"><div class="progress-fill" id="k-progress-fill"></div></div>
           <div class="progress-lbl" id="k-progress-lbl"></div>
@@ -1503,18 +1503,6 @@ function setAvatar(el, value, color) {
   el.textContent = value || '❓';
 }
 
-const LEVELS = [
-  { pts: 0,   title: 'Egg',               emoji: '🥚' },
-  { pts: 25,  title: 'Hatchling',         emoji: '🐣' },
-  { pts: 60,  title: 'Busy Bee',          emoji: '🐝' },
-  { pts: 110, title: 'Ninja in Training', emoji: '🥷' },
-  { pts: 170, title: 'Chore Ninja',       emoji: '⚡' },
-  { pts: 250, title: 'Superstar',         emoji: '🌟' },
-  { pts: 350, title: 'Rocketeer',         emoji: '🚀' },
-  { pts: 480, title: 'Legend',            emoji: '🏆' },
-  { pts: 650, title: 'MEGA LEGEND',       emoji: '👑' },
-];
-
 const CHEERS = [
   'BOOM! 💥', 'You legend! 🙌', 'Chore-tastic! ✨', 'Nailed it! 🔨',
   'Super effort! 🦸', 'High five! ✋', 'Crushing it! 💪', 'Woohoo! 🎉'
@@ -1689,15 +1677,6 @@ function cycleCompletion(task) {
   return live[0] || null;
 }
 
-function levelFor(points) {
-  let lvl = LEVELS[0], next = null;
-  for (let i = 0; i < LEVELS.length; i++) {
-    if (points >= LEVELS[i].pts) lvl = LEVELS[i];
-    else { next = LEVELS[i]; break; }
-  }
-  return { lvl, next };
-}
-
 function buildEmptyState(emoji, line1, line2) {
   return '<div class="empty">'
     + '<span class="empty-emoji">' + emoji + '</span>'
@@ -1808,26 +1787,12 @@ function renderKid(kid) {
   document.getElementById('screen-kid').style.setProperty('--kid-color', kidColorVal);
   syncKidVoiceTrigger();
 
-  var st = state.stats[kid.id] || { points: 0, balance: 0, streak: 0 };
-  var lf = levelFor(st.points);
-  var lvl = lf.lvl, next = lf.next;
+  var st = state.stats[kid.id] || { points: 0, balance: 0 };
   var balance = typeof st.balance === 'number' ? st.balance : st.points;
 
   setAvatar(document.getElementById('k-avatar'), kid.emoji, kidColorVal);
   document.getElementById('k-name').textContent = kid.name;
-  document.getElementById('k-level').textContent = lvl.emoji + ' ' + lvl.title;
   animatePoints(balance);
-  document.getElementById('k-streak').textContent = st.streak > 0 ? '🔥 ' + st.streak + ' day streak' : '🔥 Start a streak today!';
-
-  if (next) {
-    var span = next.pts - lvl.pts;
-    var pct  = Math.min(100, Math.round(((st.points - lvl.pts) / span) * 100));
-    document.getElementById('k-progress-lbl').textContent = (next.pts - st.points) + ' points to become ' + next.emoji + ' ' + next.title + '!';
-    document.getElementById('k-progress-fill').style.width = pct + '%';
-  } else {
-    document.getElementById('k-progress-lbl').textContent = '👑 Maximum level reached. Absolute royalty.';
-    document.getElementById('k-progress-fill').style.width = '100%';
-  }
 
   var mine = state.tasks.filter(function(t) { return t.kidId === kid.id; });
   renderTaskList('k-weekly', mine.filter(function(t) { return t.cycle === 'weekly'; }),
@@ -1840,7 +1805,7 @@ function renderKid(kid) {
   renderTaskList('k-oneoff', oneoffs, '⭐', 'No one-off missions.', '');
 
   renderRewardShop(kid, balance);
-  renderNextGoal(balance);
+  renderRewardProgress(balance);
   renderRedemptions(kid);
   renderRecentActivity(kid);
   renderKidCalendar(kid);
@@ -2612,43 +2577,72 @@ function renderTaskList(elId, tasks, emptyEmoji, emptyLine1, emptyLine2) {
   }).join('');
 }
 
-// The nearest goal, shown where kids actually land.
+// The kid Home hero: how close you are to the next real prize.
 //
-// "N more points to go" already existed - but only inside the Rewards tab,
-// which they have to go looking for. On Home it is the thing that makes a chore
-// feel worth doing.
+// This REPLACED the pet ladder (Egg -> Hatchling -> ... -> MEGA LEGEND) and the
+// daily streak badge. Those were invented goals: hatching an egg buys nothing,
+// and a broken streak only ever punishes. The prizes in the Rewards shop are
+// the thing the kids actually want, so the hero now measures distance to one of
+// those instead. Points still accrue exactly as before - only what the screen
+// counts toward has changed.
 //
-// Deliberately the CHEAPEST reward they cannot yet afford, not the dearest:
-// "80 more points" reads as hopeless to a seven-year-old, "5 more points" reads
-// as nearly there. Takes the same balance renderRewardShop() is given, so the
-// two screens can never disagree.
-function renderNextGoal(balance) {
-  var el = document.getElementById('k-next-goal');
-  if (!el) return;
+// The target is deliberately the CHEAPEST reward they cannot yet afford, not
+// the dearest: "80 more points" reads as hopeless to a seven-year-old, "5 more
+// points" reads as nearly there. Takes the same balance renderRewardShop() is
+// given, so the two screens can never disagree.
+function renderRewardProgress(balance) {
+  var titleEl = document.getElementById('k-goal-title');
+  var balanceEl = document.getElementById('k-goal-balance');
+  var fill = document.getElementById('k-progress-fill');
+  var lbl = document.getElementById('k-progress-lbl');
+  var nextEl = document.getElementById('k-next-goal');
+  if (!titleEl || !fill || !lbl) return;
+
+  balanceEl.textContent = '\u2B50 ' + balance + ' point' + (balance === 1 ? '' : 's') + ' to spend';
 
   var rewards = (state.rewards || []).filter(function(r) { return r.active !== false; });
   if (rewards.length === 0) {
-    el.classList.add('hidden');
-    el.innerHTML = '';
+    titleEl.textContent = '\u2B50 Keep earning points!';
+    fill.style.width = '0%';
+    lbl.textContent = 'No prizes in the shop yet \u2014 ask your grown-up to add some.';
+    nextEl.classList.add('hidden');
+    nextEl.innerHTML = '';
     return;
   }
 
-  var affordable = rewards.filter(function(r) { return r.cost <= balance; });
-  if (affordable.length > 0) {
-    el.classList.remove('hidden');
-    el.innerHTML = '<span class="next-goal-title">🎉 You can claim a reward!</span>'
-      + ' <span class="next-goal-gap">Have a look in Rewards.</span>';
+  var sorted = rewards.slice().sort(function(a, b) { return a.cost - b.cost; });
+  var next = sorted.filter(function(r) { return r.cost > balance; })[0];
+
+  if (!next) {
+    // Everything in the shop is already within reach - name the best one.
+    var best = sorted[sorted.length - 1];
+    titleEl.textContent = '\uD83C\uDF89 You can get ' + best.title + '!';
+    fill.style.width = '100%';
+    lbl.textContent = 'Head to Rewards to claim it.';
+    nextEl.classList.add('hidden');
+    nextEl.innerHTML = '';
     return;
   }
-
-  var next = rewards.filter(function(r) { return r.cost > balance; })
-    .sort(function(a, b) { return a.cost - b.cost; })[0];
-  if (!next) { el.classList.add('hidden'); el.innerHTML = ''; return; }
 
   var shortBy = next.cost - balance;
-  el.classList.remove('hidden');
-  el.innerHTML = '<span class="next-goal-title">🎁 ' + esc(next.title) + '</span>'
-    + ' <span class="next-goal-gap">— ' + shortBy + ' more point' + (shortBy === 1 ? '' : 's') + '!</span>';
+  var pct = next.cost > 0 ? Math.min(100, Math.round((balance / next.cost) * 100)) : 0;
+  titleEl.textContent = '\uD83C\uDF81 ' + next.title;
+  fill.style.width = pct + '%';
+  lbl.textContent = shortBy + ' more point' + (shortBy === 1 ? '' : 's') + ' to go!';
+
+  // Anything already affordable is a prize they can claim right now, so say so
+  // rather than letting them save past it without noticing.
+  var affordable = sorted.filter(function(r) { return r.cost <= balance; });
+  if (affordable.length > 0) {
+    var claimable = affordable[affordable.length - 1];
+    nextEl.classList.remove('hidden');
+    nextEl.innerHTML = '<span class="next-goal-title">\uD83C\uDF89 You can already get '
+      + esc(claimable.title) + '</span>'
+      + ' <span class="next-goal-gap">Claim it in Rewards, or keep saving.</span>';
+  } else {
+    nextEl.classList.add('hidden');
+    nextEl.innerHTML = '';
+  }
 }
 
 function renderRewardShop(kid, balance) {
@@ -3533,7 +3527,7 @@ async function redeemKidReward(rewardId, cost) {
   var syntheticId = '_opt_' + rewardId + '_' + Date.now();
   var prevRedemptions = (state.redemptions || []).slice();
   var prevStats = JSON.parse(JSON.stringify(state.stats || {}));
-  var kidStats = prevStats[session.personId] || { points: 0, balance: 0, streak: 0 };
+  var kidStats = prevStats[session.personId] || { points: 0, balance: 0 };
   state.redemptions = prevRedemptions.concat([{
     id: syntheticId, rewardId: rewardId, kidId: session.personId,
     title: rewardTitle, cost: cost, status: reward && !reward.needsApproval ? 'approved' : 'pending',

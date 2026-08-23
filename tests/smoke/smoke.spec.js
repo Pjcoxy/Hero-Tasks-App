@@ -160,11 +160,24 @@ test('cancelling the in-app dialog does nothing', async ({ page }) => {
 test('the kid Home screen names a real reward and how far away it is', async ({ page }) => {
   await pickPerson(page, 'Ollie');
 
-  const goal = page.locator('#k-next-goal');
-  await expect(goal).toBeVisible();
   // Cheapest unaffordable reward first - a nearby goal, not a hopeless one.
-  await expect(goal).toContainText('A player for your soccer game');
-  await expect(goal).toContainText(/\d+ more points?/);
+  await expect(page.locator('#k-goal-title')).toContainText('A player for your soccer game');
+  await expect(page.locator('#k-progress-lbl')).toContainText(/\d+ more points? to go/);
+  await expect(page.locator('#k-goal-balance')).toContainText(/\d+ points? to spend/);
+});
+
+// #9. The hero used to count toward a pet ladder (Egg -> Hatchling -> ... ->
+// MEGA LEGEND) and a daily streak. Neither buys anything, so neither motivated
+// anyone. If any of this reappears, the incentive path has been undone.
+test('the pet ladder and the streak badge are gone from the kid Home screen', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+
+  const home = page.locator('#tab-home');
+  await expect(home).not.toContainText(/Egg|Hatchling|Busy Bee|Chore Ninja|MEGA LEGEND/);
+  await expect(home).not.toContainText(/streak/i);
+  await expect(home).not.toContainText(/points to become/i);
+  await expect(page.locator('#k-streak')).toHaveCount(0);
+  await expect(page.locator('#k-level')).toHaveCount(0);
 });
 
 test('the rewards shop is not empty', async ({ page }) => {

@@ -1,7 +1,7 @@
 {
   "name": "Hero Tasks",
   "short_name": "Hero Tasks",
-  "description": "Family chore and task app with points, levels and streaks",
+  "description": "Family chore and task app — earn points, save up for real prizes",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f7f5ff",
