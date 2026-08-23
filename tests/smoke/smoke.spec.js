@@ -671,8 +671,10 @@ test('the parent approval list goes multi-column on a wide screen', async ({ pag
 // wrong path leaves an <img> that renders as nothing, and every source-level
 // check still passes because the markup is correct. These assert the bytes
 // actually arrived by reading naturalWidth.
-test('the kids have real photo avatars on the picker, and they load', async ({ page }) => {
-  for (const name of ['Toby', 'Ollie']) {
+test('everyone has a real photo avatar on the picker, and they load', async ({ page }) => {
+  // All four, not just the kids. Kids on photos beside parents on generic emoji
+  // read as two different kinds of account rather than four people.
+  for (const name of ['Peter', 'Tymanda', 'Toby', 'Ollie']) {
     const tile = page.locator('.who-tile').filter({ hasText: name });
     const img = tile.locator('img.avatar-photo');
     await expect(img).toHaveCount(1);
@@ -720,6 +722,8 @@ test('an existing household is migrated onto the photo avatars', async ({ page }
   });
   expect(emojis.toby).toBe('img:toby');
   expect(emojis.ollie).toBe('img:ollie');
+  expect(emojis.peter).toBe('img:peter');
+  expect(emojis.tymanda).toBe('img:tymanda');
 });
 
 // App icons. A PWA icon fails silently - the launcher just shows a letter or a
