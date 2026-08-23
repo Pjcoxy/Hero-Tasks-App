@@ -314,6 +314,21 @@ It took seven goes to get here, and the failures are the useful part:
 7. This: a **gradient scrim** that fades out upwards. No edge at all, 10% of the
    screen, and the artwork runs unbroken to the bottom.
 
+**The artwork is fitted, never cropped.** It is 720×1604 — 0.449 wide to tall,
+which is *narrower than any real phone*: about 0.46 installed, 0.53–0.56 once
+browser chrome eats the height. `cover` therefore scales it to the width and
+pushes the surplus height off the bottom, and anchored `center top` the bottom
+is all it ever takes — 3% on a tall installed phone, **20% on an iPhone SE**.
+The bottom is the payload: the ball, the boots, the whole foreground. No
+`cover` anchor survives that, because a picture with ~8% expendable sky above
+and ~9% of ground below has nothing to give when a fifth has to go.
+
+So `background-size: contain` at every ratio. The bars that leaves on a squarer
+screen are filled by `#screen-who::before` — an over-scanned, blurred copy of
+the artwork — so the picture's own colours carry to the edge instead of a slab
+of flat brand purple. The blur is decoration; without it the fallback is the
+brand colour, which is what shipped before.
+
 - **What draws a box is an edge, not opacity.** Attempts 5 and 6 both came back
   as "takes up too much room" even though 6 was half the height and translucent.
   Lowering the opacity of a panel does not stop it being a panel: a flat fill, a

@@ -142,27 +142,60 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
    No separate splash screen any more. This one is the splash, and it holds for
    as long as it takes someone to choose, rather than a timed couple of
    seconds. */
-#screen-who {
-  background: var(--brand) url('img/hero-splash.webp') center top / cover no-repeat;
-  justify-content: flex-end;
-}
-/* The artwork is portrait, about 0.45 wide-to-tall. A phone is close enough
-   that `cover` crops almost nothing. Anything squarer or landscape is not:
-   `cover` there zooms into the middle of the logo and the sign-in row lands on
-   top of the wordmark. Past 3/5 the whole picture is fitted instead and the
-   brand colour flanks it - a smaller picture, but an intact one. */
-@media (min-aspect-ratio: 3/5) {
-  #screen-who { background-size: contain; }
-}
-/* A frosted bar, docked to the bottom edge.
-   Loose circles floating on the artwork read as decoration rather than as the
-   way in - nothing anchored them. But a solid panel is a slab: it anchors by
-   covering, and takes a fifth of the screen to hold four faces.
+/* The whole picture, on every screen. The artwork is 720x1604 - 0.449 wide to
+   tall - which is NARROWER than almost every phone: 0.46 installed, 0.53-0.56
+   once browser chrome eats the height. `cover` therefore scales it to the width
+   and pushes the surplus height off the bottom, and anchored `center top` the
+   bottom is all it ever takes: 3% on a tall installed phone, 20% on an iPhone
+   SE. The bottom is the payload - the ball, the boots, the foreground - so the
+   crop landed squarely on the best part and cut the kids off at the chest.
+   There is no `cover` anchor that survives this. Dropping a fifth of a picture
+   that only has ~8% expendable sky at the top and ~9% of ground at the bottom
+   means something real goes whichever end you take it from.
 
-   Glass does the same job for less. There is still a surface with an edge, so
-   it still reads as a strip of controls; the picture just carries on through
-   it. Backdrop blur is progressive - without support it is a plain translucent
-   bar, which is fine. */
+   So: `contain`, always. The picture is never cropped at any aspect ratio.
+   What that costs is bars down the sides on a squarer screen, and ::before
+   pays for them with a blurred, over-scanned copy of the artwork itself -
+   the picture's own colours carry to the edge rather than a slab of flat
+   brand purple. Blur is decoration: without it the fallback is the brand
+   colour underneath, which is what shipped before. */
+#screen-who {
+  background: var(--brand);
+  justify-content: flex-end;
+  overflow: hidden;
+}
+#screen-who::before,
+#screen-who::after {
+  content: '';
+  position: absolute;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+#screen-who::before {
+  /* Over-scanned past the edges so the blur has no soft border of its own. */
+  inset: -6%;
+  background-image: url('img/hero-splash.webp');
+  background-size: cover;
+  filter: blur(28px);
+}
+#screen-who::after {
+  inset: 0;
+  background-image: url('img/hero-splash.webp');
+  background-size: contain;
+}
+/* Above both pseudo-elements: they are painted in the same stacking context. */
+#screen-who > * { position: relative; z-index: 1; }
+/* A scrim at the bottom edge, not a bar.
+   Loose circles floating on the artwork read as decoration rather than as the
+   way in. A solid panel fixed that by covering - a fifth of the screen to hold
+   four faces - and frosted glass halved the height but kept the problem: a
+   flat fill, a blur boundary and a hairline top edge each draw a line, and a
+   line is what makes it a box.
+
+   What actually anchors the faces is the coloured ring on each one plus the
+   row sitting on the bottom edge. Given those, the surface only had to buy
+   contrast for the names, and a gradient that fades out upwards buys it with
+   no edge at all. */
 .who-sheet {
   flex: none;
   padding: var(--space-2) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-2));
