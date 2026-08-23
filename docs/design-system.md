@@ -295,6 +295,32 @@ Keep the splash under ~200KB. It is the first paint on a phone, and this one is
 720px wide at WebP q76 — a bigger source buys nothing behind a `cover`
 background.
 
+### The app icon
+
+The shield and star from the Hero Tasks artwork. It is **redrawn, not cropped**:
+in the artwork the shield's bottom point sits behind the wordmark, so there is
+no clean cut-out. Colours are sampled from the artwork so it reads as the same
+mark.
+
+`scripts/make-icons.py` regenerates every PNG and emits the SVG from one
+geometry definition, so the two cannot drift. It is a one-off tool run by hand —
+there is no build step here and this does not add one.
+
+Three platform rules that each fail silently:
+
+- **`purpose: "any"`** (`icon-192`, `icon-512`) — rounded square with
+  **transparent** corners. Filling them leaves black corners on any launcher
+  that does not mask.
+- **`purpose: "maskable"`** — **full-bleed square**, mark inside the middle 80%.
+  The OS crops to its own shape, so transparent corners become holes and a mark
+  near the edge gets clipped.
+- **`apple-touch-icon`** (180px) — **no transparency at all.** iOS composites on
+  black and rounds it itself, so transparent corners come out black.
+
+A broken icon never looks broken from inside the app — the launcher just shows a
+letter. The smoke suite checks every icon the manifest declares exists and is
+the size it claims.
+
 ### Swipeable card row
 
 Used for the kid Home prize banner. Native CSS `scroll-snap`, never a carousel

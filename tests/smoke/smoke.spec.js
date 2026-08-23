@@ -712,3 +712,45 @@ test('an existing household is migrated onto the photo avatars', async ({ page }
   expect(emojis.toby).toBe('img:toby');
   expect(emojis.ollie).toBe('img:ollie');
 });
+
+// App icons. A PWA icon fails silently - the launcher just shows a letter or a
+// generic glyph, and nothing in the app looks wrong. These check the manifest
+// still points at files that exist and are the size it claims.
+test('every icon the manifest declares actually exists at its stated size', async ({ page }) => {
+  const manifest = await page.evaluate(async () => (await fetch('manifest.json')).json());
+  expect(manifest.icons.length).toBeGreaterThanOrEqual(4);
+
+  for (const icon of manifest.icons) {
+    const res = await page.evaluate(async (src) => {
+      const r = await fetch(src);
+      return { status: r.status, type: r.headers.get('content-type') };
+    }, icon.src);
+    expect(res.status, `${icon.src} is missing`).toBe(200);
+
+    if (icon.sizes === 'any') continue;
+    const [w, h] = icon.sizes.split('x').map(Number);
+    const actual = await page.evaluate((src) => new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve([img.naturalWidth, img.naturalHeight]);
+      img.onerror = () => resolve([0, 0]);
+      img.src = src;
+    }), icon.src);
+    expect(actual, `${icon.src} is not ${icon.sizes}`).toEqual([w, h]);
+  }
+
+  // A maskable icon must be full-bleed - the OS crops it to its own shape, so
+  // transparent corners come out as holes.
+  expect(manifest.icons.some((i) => i.purpose === 'maskable')).toBe(true);
+});
+
+test('the apple touch icon exists and is the size iOS expects', async ({ page }) => {
+  const href = await page.locator('link[rel="apple-touch-icon"]').getAttribute('href');
+  expect(href).toBeTruthy();
+  const size = await page.evaluate((src) => new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve([img.naturalWidth, img.naturalHeight]);
+    img.onerror = () => resolve([0, 0]);
+    img.src = src;
+  }), href);
+  expect(size).toEqual([180, 180]);
+});
