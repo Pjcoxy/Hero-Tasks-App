@@ -125,7 +125,10 @@ check(/id="k-voice-reminder-btn"/.test(html), 'kid Home tab includes a voice rem
 check(/id="voice-reminder-modal"/.test(html), 'voice reminder confirmation modal exists');
 check(/window\.SpeechRecognition \|\| window\.webkitSpeechRecognition/.test(html), 'voice reminder flow feature-detects SpeechRecognition support');
 check(/action:\s*'validateVoiceNote'/.test(html), 'voice reminder flow calls validateVoiceNote');
-check(/action:\s*'saveVoiceReminder'/.test(html), 'voice reminder flow calls saveVoiceReminder');
+check(/action:\s*'saveVoicePlan'/.test(html), 'voice capture flow calls saveVoicePlan');
+check(/type:\s*voiceReminderDraft\.type/.test(html), 'voice capture flow sends the chosen item type');
+check(/id="voice-type-choice-reminder"/.test(html) && /id="voice-type-choice-task"/.test(html) && /id="voice-type-choice-event"/.test(html), 'voice capture sheet offers reminder/task/event pills');
+check(/function chooseVoiceReminderType\(typeKey\)/.test(html), 'voice capture sheet lets the kid change the item type');
 check(/This weekend/.test(html) && /No specific time/.test(html), 'voice reminder flow includes low-confidence when choice pills');
 const kidTabButtons = html.match(/id="tabbtn-(home|missions|rewards|leaderboard|calendar)"/g) || [];
 check(kidTabButtons.length === 5, `kid nav exposes 5 tab buttons (${kidTabButtons.length} found)`);
