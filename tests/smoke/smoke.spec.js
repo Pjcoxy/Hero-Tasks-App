@@ -199,3 +199,48 @@ test('the old daily-only Missions section is gone from Home', async ({ page }) =
   await page.getByRole('button', { name: /missions/i }).first().click();
   await expect(page.locator('#k-weekly')).toBeVisible();
 });
+
+// #128. The capture sheet used to post `action: 'saveVoiceReminder'`, which is
+// not in hero.js's ROUTES table at all - every save returned "Unknown action".
+// Source-level checks could not see that: the string was present, the route was
+// not. This drives the real sheet against the real route table, so the two have
+// to agree.
+//
+// SpeechRecognition is removed first, deliberately. Whether a headless Chromium
+// exposes it varies by build - where it does, start() waits on a speech service
+// the runner cannot reach and the sheet never opens, so the test would pass or
+// hang depending on the machine. Removing it pins the flow to its typed
+// fallback: the documented path for a browser that cannot record, and the one
+// that exercises everything this test is actually about.
+test('the voice capture sheet lets the kid pick the item type and saves it', async ({ page }) => {
+  await page.addInitScript(() => {
+    delete window.SpeechRecognition;
+    delete window.webkitSpeechRecognition;
+  });
+  await page.reload();
+  await pickPerson(page, 'Ollie');
+
+  await page.locator('#k-voice-reminder-btn').click();
+  await expect(page.locator('#voice-reminder-modal')).toBeVisible();
+
+  await page.locator('#voice-transcript-input').fill('soccer training on Saturday');
+  await page.getByRole('button', { name: /check it/i }).click();
+
+  // Type pills only appear once the sheet has something to confirm.
+  await expect(page.locator('#voice-type-choices')).toBeVisible();
+  await expect(page.locator('#voice-type-choice-reminder')).toBeVisible();
+  await expect(page.locator('#voice-type-choice-task')).toBeVisible();
+  await expect(page.locator('#voice-type-choice-event')).toBeVisible();
+
+  // Exactly one is selected at a time, and the kid's choice sticks.
+  await page.locator('#voice-type-choice-event').click();
+  await expect(page.locator('#voice-type-choice-event')).toHaveClass(/active/);
+  await expect(page.locator('#voice-type-choices .choice-pill.active')).toHaveCount(1);
+
+  await page.getByRole('button', { name: /^confirm$/i }).click();
+
+  // The save has to actually land. An unknown action leaves the sheet open with
+  // an error, so a closed sheet is the assertion that matters here.
+  await expect(page.locator('#voice-reminder-modal')).toBeHidden();
+  await expect(page.locator('#toast')).toContainText(/Event saved/i);
+});

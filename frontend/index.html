@@ -941,13 +941,15 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   color: var(--ink-muted);
   margin-top: var(--space-2);
 }
-.voice-when-choices {
+.voice-when-choices,
+.voice-type-choices {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-3);
 }
-.voice-when-choices .choice-pill {
+.voice-when-choices .choice-pill,
+.voice-type-choices .choice-pill {
   background: var(--surface);
 }
 
@@ -1374,6 +1376,15 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
       <div id="voice-transcript-help" class="voice-help hidden"></div>
     </div>
     <div id="voice-reminder-fields" class="hidden">
+      <div class="field voice-field" id="voice-type-field">
+        <label>What kind of thing is this?</label>
+        <div id="voice-type-choices" class="voice-type-choices">
+          <button class="choice-pill" id="voice-type-choice-reminder" type="button" onclick="chooseVoiceReminderType('reminder')">Reminder</button>
+          <button class="choice-pill" id="voice-type-choice-task" type="button" onclick="chooseVoiceReminderType('task')">Task</button>
+          <button class="choice-pill" id="voice-type-choice-event" type="button" onclick="chooseVoiceReminderType('event')">Event</button>
+        </div>
+        <div id="voice-type-help" class="voice-help hidden"></div>
+      </div>
       <div class="field voice-field" id="voice-what-field">
         <label for="voice-what-input">What should I remind you about?</label>
         <input id="voice-what-input" type="text" autocomplete="off" oninput="updateVoiceReminderWhat(this.value)">
@@ -1524,6 +1535,11 @@ let kidCalendarItems = [];
 let kidCalendarLoading = false;
 let parentTab = 'approvals';
 const VOICE_REMINDER_CONFIRMATION_THRESHOLD = 0.6;
+const VOICE_REMINDER_TYPE_CHOICES = {
+  reminder: { label: 'Reminder', help: 'A nudge — I\u2019ll remind you about it.' },
+  task: { label: 'Task', help: 'Something to do and tick off.' },
+  event: { label: 'Event', help: 'Something happening at a set time.' },
+};
 const VOICE_REMINDER_WHEN_CHOICES = {
   today: { value: 'Today', label: 'Today' },
   tomorrow: { value: 'Tomorrow', label: 'Tomorrow' },
@@ -3130,7 +3146,8 @@ function newVoiceReminderDraft(overrides) {
     when: '',
     suggestedWhoId: session ? session.personId : null,
     selectedWhenChoice: '',
-    flags: { transcript: false, what: false, when: false, who: false },
+    type: 'reminder',
+    flags: { transcript: false, what: false, when: false, who: false, type: false },
     showWhenChoices: false,
     status: '',
   }, overrides || {});
@@ -3205,6 +3222,8 @@ function renderVoiceReminderModal() {
   var primary = document.getElementById('voice-reminder-primary');
   var secondary = document.getElementById('voice-reminder-secondary');
   var whenChoices = document.getElementById('voice-when-choices');
+  var typeField = document.getElementById('voice-type-field');
+  var typeHelp = document.getElementById('voice-type-help');
   var whatHelp = document.getElementById('voice-what-help');
   var whenHelp = document.getElementById('voice-when-help');
   var whoHelp = document.getElementById('voice-who-help');
@@ -3213,6 +3232,7 @@ function renderVoiceReminderModal() {
   whatField.classList.toggle('attention', !!voiceReminderDraft.flags.what);
   whenField.classList.toggle('attention', !!voiceReminderDraft.flags.when);
   whoField.classList.toggle('attention', !!voiceReminderDraft.flags.who);
+  typeField.classList.toggle('attention', !!voiceReminderDraft.flags.type);
 
   status.textContent = voiceReminderDraft.status || '';
   status.classList.toggle('hidden', !voiceReminderDraft.status);
@@ -3236,6 +3256,15 @@ function renderVoiceReminderModal() {
     var btn = document.getElementById('voice-when-choice-' + key);
     if (btn) btn.classList.toggle('active', voiceReminderDraft.selectedWhenChoice === key);
   });
+
+  Object.keys(VOICE_REMINDER_TYPE_CHOICES).forEach(function(key) {
+    var btn = document.getElementById('voice-type-choice-' + key);
+    if (btn) btn.classList.toggle('active', voiceReminderDraft.type === key);
+  });
+  typeHelp.textContent = voiceReminderDraft.flags.type
+    ? 'I wasn\u2019t sure which one this is \u2014 tap the right one.'
+    : (VOICE_REMINDER_TYPE_CHOICES[voiceReminderDraft.type] || {}).help || '';
+  typeHelp.classList.toggle('hidden', !typeHelp.textContent);
 
   whatHelp.textContent = voiceReminderDraft.flags.what ? 'This bit needs a quick check.' : '';
   whenHelp.textContent = voiceReminderDraft.flags.when
@@ -3369,6 +3398,13 @@ function chooseVoiceReminderWhen(choiceKey) {
   updateVoiceReminderWhen(voiceReminderDraft.when);
 }
 
+function chooseVoiceReminderType(typeKey) {
+  if (!voiceReminderDraft || !VOICE_REMINDER_TYPE_CHOICES[typeKey]) return;
+  voiceReminderDraft.type = typeKey;
+  voiceReminderDraft.flags.type = false;
+  renderVoiceReminderModal();
+}
+
 function applyVoiceReminderValidation(result) {
   var intent = result && result.intent ? result.intent : {};
   var confidence = result && result.confidence ? result.confidence : {};
@@ -3383,8 +3419,11 @@ function applyVoiceReminderValidation(result) {
   voiceReminderDraft.when = String(intent.when || '').trim();
   voiceReminderDraft.suggestedWhoId = suggestedWhoId;
   voiceReminderDraft.selectedWhenChoice = voiceReminderChoiceKey(voiceReminderDraft.when);
+  var suggestedType = String(intent.type || '').trim().toLowerCase();
+  voiceReminderDraft.type = VOICE_REMINDER_TYPE_CHOICES[suggestedType] ? suggestedType : 'reminder';
   voiceReminderDraft.flags = {
     transcript: parseFallback,
+    type: parseFallback || Number(confidence.type) < VOICE_REMINDER_CONFIRMATION_THRESHOLD,
     what: parseFallback || Number(confidence.what) < VOICE_REMINDER_CONFIRMATION_THRESHOLD,
     when: parseFallback || Number(confidence.when) < VOICE_REMINDER_CONFIRMATION_THRESHOLD,
     who: parseFallback || Number(confidence.who) < VOICE_REMINDER_CONFIRMATION_THRESHOLD || suggestedWhoId !== session.personId,
@@ -3446,10 +3485,11 @@ async function handleVoiceReminderPrimary() {
   var result;
   try {
     result = await api({
-      action: 'saveVoiceReminder',
+      action: 'saveVoicePlan',
       personId: session.personId,
       pin: session.pin,
       kidId: session.personId,
+      type: voiceReminderDraft.type,
       title: title,
       when: when || null,
       transcript: voiceReminderDraft.transcript,
@@ -3467,8 +3507,9 @@ async function handleVoiceReminderPrimary() {
     renderVoiceReminderModal();
     return;
   }
+  var savedType = VOICE_REMINDER_TYPE_CHOICES[voiceReminderDraft.type] || VOICE_REMINDER_TYPE_CHOICES.reminder;
   closeVoiceReminder();
-  toast('Voice reminder saved! 🎤');
+  toast(savedType.label + ' saved! 🎤');
 }
 
 function handleVoiceReminderSecondary() {
