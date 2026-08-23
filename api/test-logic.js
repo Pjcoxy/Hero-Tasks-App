@@ -1640,6 +1640,64 @@ async function main() {
   );
   console.log('\u2713 deleteMyItem removes the owner\u2019s own item');
 
+  // -------------------------------------------------------------------------
+  // Manual reordering (#123)
+  // -------------------------------------------------------------------------
+  const mineNow = (await ROUTES.myItems({ personId: 'toby', pin: '1234', kidId: 'toby' })).items;
+  assert.ok(mineNow.length >= 2, 'need at least two items to reorder');
+  const reversed = mineNow.map((item) => item.id).reverse();
+
+  const reordered = await ROUTES.reorderMyItems({
+    personId: 'toby', pin: '1234', kidId: 'toby', itemIds: reversed,
+  });
+  assert.strictEqual(reordered.ok, true, 'reorderMyItems should succeed');
+  assert.deepStrictEqual(
+    reordered.items.map((item) => item.id), reversed,
+    'items come back in the order that was sent',
+  );
+  console.log('\u2713 reorderMyItems rewrites the order');
+
+  // A partial list would silently renumber some rows and leave the rest
+  // colliding, so it has to be rejected outright rather than half-applied.
+  const partial = await ROUTES.reorderMyItems({
+    personId: 'toby', pin: '1234', kidId: 'toby', itemIds: [reversed[0]],
+  });
+  assert.strictEqual(partial.ok, false, 'a partial id list is rejected');
+  console.log('\u2713 reorderMyItems rejects a partial id list');
+
+  const foreign = await ROUTES.reorderMyItems({
+    personId: 'toby', pin: '1234', kidId: 'toby',
+    itemIds: reversed.slice(0, -1).concat(['not-my-item']),
+  });
+  assert.strictEqual(foreign.ok, false, 'an unknown id is rejected');
+  console.log('\u2713 reorderMyItems rejects an id that is not yours');
+
+  // Chore reordering: a kid may change the order and nothing else.
+  const tobyChores = (await ROUTES.state()).tasks.filter((t) => t.kidId === 'toby');
+  assert.ok(tobyChores.length >= 2, 'need at least two chores to reorder');
+  const choreIds = tobyChores.map((t) => t.id);
+  const flipped = [choreIds[1], choreIds[0]].concat(choreIds.slice(2));
+  const beforeTitles = new Map(tobyChores.map((t) => [t.id, t.title]));
+  const beforePoints = new Map(tobyChores.map((t) => [t.id, t.points]));
+
+  await ROUTES.reorderTasks({ personId: 'toby', pin: '1234', kidId: 'toby', taskIds: flipped });
+  const afterChores = (await ROUTES.state()).tasks.filter((t) => t.kidId === 'toby');
+  const byId = new Map(afterChores.map((t) => [t.id, t]));
+  assert.strictEqual(byId.get(flipped[0]).order, 0, 'first sent id gets order 0');
+  assert.strictEqual(byId.get(flipped[1]).order, 1, 'second sent id gets order 1');
+  for (const id of choreIds) {
+    assert.strictEqual(byId.get(id).title, beforeTitles.get(id), 'title must not change');
+    assert.strictEqual(byId.get(id).points, beforePoints.get(id), 'points must not change');
+    assert.strictEqual(byId.get(id).kidId, 'toby', 'kidId must not change');
+  }
+  console.log('\u2713 reorderTasks writes order and leaves title/points/kidId alone');
+
+  const crossChores = await ROUTES.reorderTasks({
+    personId: 'ollie', pin: '1234', kidId: 'ollie', taskIds: flipped,
+  });
+  assert.strictEqual(crossChores.ok, false, 'another kid cannot reorder these tasks');
+  console.log('\u2713 reorderTasks refuses another kid\u2019s task ids');
+
   console.log('\nALL LOGIC TESTS PASSED');
 }
 

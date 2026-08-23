@@ -963,6 +963,11 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 }
 .icon-btn:active { transform: scale(0.94); }
 .icon-btn[disabled] { opacity: 0.35; cursor: default; }
+.move-controls { display: flex; flex-direction: column; gap: var(--space-1); }
+.move-controls .icon-btn {
+  width: 44px; height: 34px; min-width: 44px;
+  font-size: var(--text-xs); line-height: 1;
+}
 
 /* Bottom sheet. .modal-bg centres its child; this pins it to the bottom, which
    is where a thumb is. */
@@ -2670,7 +2675,17 @@ function renderTaskList(elId, tasks, emptyEmoji, emptyLine1, emptyLine2) {
     el.innerHTML = emptyLine1 ? buildEmptyState(emptyEmoji, emptyLine1, emptyLine2) : '';
     return;
   }
-  el.innerHTML = tasks.map(function(t) {
+  // The kid's own order wins. Chores predating this feature all carry order 0,
+  // so createdAt breaks the tie and they keep the arrangement they always had.
+  tasks = tasks.slice().sort(function(a, b) {
+    var byOrder = (a.order || 0) - (b.order || 0);
+    if (byOrder !== 0) return byOrder;
+    return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+  });
+  // Only a kid may reorder, and only their own list. The parent's task views
+  // render through their own markup, so this stays out of Parent HQ entirely.
+  var canReorder = session && session.role === 'kid';
+  el.innerHTML = tasks.map(function(t, idx) {
     var c = cycleCompletion(t);
     var cls = c ? (c.status === 'approved' ? 'done-approved' : c.status === 'queued' ? 'done-queued' : 'done-pending') : '';
     var tickIcon = c ? (c.status === 'approved' ? '✅' : c.status === 'queued' ? '📡' : '⏳') : '';
@@ -2689,8 +2704,10 @@ function renderTaskList(elId, tasks, emptyEmoji, emptyLine1, emptyLine2) {
       + (sub ? '<div class="sub">' + sub + '</div>' : '')
       + '</div>'
       + '<span class="pts-badge">+' + t.points + '</span>'
+      + (canReorder ? moveControlsHtml('moveTask', idx, tasks.length, elId) : '')
       + '</div>';
   }).join('');
+  taskListOrder[elId] = tasks.map(function(t) { return t.id; });
 }
 
 // The kid Home hero: a swipeable row of every prize, and how far off each one is.
@@ -2878,6 +2895,28 @@ function filterMyList(category) {
   renderMyList();
 }
 
+// Up/down controls. Reordering is organisation, not achievement, so there is no
+// toast, no confetti and no vibration here (design-system.md reserves those for
+// completing a chore). First-up and last-down are inert rather than an error.
+function moveControlsHtml(handler, index, total, listId) {
+  var lead = listId === undefined ? '' : "'" + listId + "', ";
+  return '<div class="move-controls">'
+    + '<button class="icon-btn" aria-label="Move up" ' + (index === 0 ? 'disabled' : '')
+    +   ' onclick="' + handler + '(' + lead + index + ', -1)">\u25B2</button>'
+    + '<button class="icon-btn" aria-label="Move down" ' + (index === total - 1 ? 'disabled' : '')
+    +   ' onclick="' + handler + '(' + lead + index + ', 1)">\u25BC</button>'
+    + '</div>';
+}
+
+function reorderedCopy(list, index, delta) {
+  var target = index + delta;
+  if (target < 0 || target >= list.length) return null;
+  var next = list.slice();
+  var moved = next.splice(index, 1)[0];
+  next.splice(target, 0, moved);
+  return next;
+}
+
 function renderMyList() {
   var el = document.getElementById('k-mylist');
   if (!el) return;
@@ -2900,7 +2939,7 @@ function renderMyList() {
     return;
   }
 
-  el.innerHTML = visible.map(function(item) {
+  el.innerHTML = visible.map(function(item, idx) {
     var done = item.status === 'done';
     return '<div class="task mylist-item' + (done ? ' done dimmed' : '') + '" id="k-myitem-' + item.id + '">'
       + '<button class="tick' + (done ? ' done' : '') + '" onclick="toggleMyItem(\'' + item.id + '\')"'
@@ -2911,6 +2950,7 @@ function renderMyList() {
       +     myItemLabel(MY_ITEM_TYPES, item.type) + '</div>'
       + '</div>'
       + '<div class="mylist-actions">'
+      +   moveControlsHtml('moveMyItem', idx, visible.length)
       +   '<button class="icon-btn" onclick="deleteMyItemCard(\'' + item.id + '\')" aria-label="Delete">🗑️</button>'
       + '</div>'
       + '</div>';
@@ -3000,6 +3040,87 @@ async function toggleMyItem(itemId) {
   if (!res || res.ok === false) {
     myItems = prev; renderMyList(); toast((res && res.error) || 'Could not update that.');
   }
+}
+
+// Which ids each rendered list is showing, so a move knows what it is moving.
+var taskListOrder = {};
+
+async function moveTask(listId, index, delta) {
+  var visibleIds = taskListOrder[listId] || [];
+  var movedVisible = reorderedCopy(visibleIds, index, delta);
+  if (!movedVisible) return;
+
+  // The API requires every one of this kid's chore ids, not just the list on
+  // screen - Missions splits them across weekly and one-off, and daily chores
+  // are not in either. So splice the reordered sublist back into the full set.
+  var mine = (state.tasks || [])
+    .filter(function(t) { return t.kidId === session.personId; })
+    .slice()
+    .sort(function(a, b) {
+      var byOrder = (a.order || 0) - (b.order || 0);
+      if (byOrder !== 0) return byOrder;
+      return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+    });
+
+  var cursor = 0;
+  var fullIds = mine.map(function(t) {
+    return visibleIds.indexOf(t.id) === -1 ? t.id : movedVisible[cursor++];
+  });
+
+  var prevTasks = (state.tasks || []).slice();
+  var rank = {};
+  fullIds.forEach(function(id, i) { rank[id] = i; });
+  state.tasks = (state.tasks || []).map(function(t) {
+    return rank[t.id] === undefined ? t : Object.assign({}, t, { order: rank[t.id] });
+  });
+  render();
+
+  var res;
+  try {
+    res = await api({
+      action: 'reorderTasks', personId: session.personId, pin: session.pin, kidId: session.personId,
+      taskIds: fullIds,
+    });
+  } catch (e) {
+    state.tasks = prevTasks; render(); toast('Connection problem — try again.'); return;
+  }
+  if (!res || res.ok === false) {
+    state.tasks = prevTasks; render(); toast((res && res.error) || 'Could not move that.'); return;
+  }
+  if (res.tasks) { state = res; render(); }
+}
+
+async function moveMyItem(index, delta) {
+  // Reorder against the filtered view the kid is looking at, then send the full
+  // list: the API requires every id, and a filtered subset would be rejected.
+  var visible = myItems.filter(function(item) {
+    return myItemsFilter === 'all' || item.category === myItemsFilter;
+  });
+  var movedVisible = reorderedCopy(visible, index, delta);
+  if (!movedVisible) return;
+
+  var prev = myItems.slice();
+  var visibleIds = visible.map(function(item) { return item.id; });
+  var cursor = 0;
+  var next = myItems.map(function(item) {
+    return visibleIds.indexOf(item.id) === -1 ? item : movedVisible[cursor++];
+  });
+  myItems = next;
+  renderMyList();
+
+  var res;
+  try {
+    res = await api({
+      action: 'reorderMyItems', personId: session.personId, pin: session.pin, kidId: session.personId,
+      itemIds: next.map(function(item) { return item.id; }),
+    });
+  } catch (e) {
+    myItems = prev; renderMyList(); toast('Connection problem — try again.'); return;
+  }
+  if (!res || res.ok === false) {
+    myItems = prev; renderMyList(); toast((res && res.error) || 'Could not move that.'); return;
+  }
+  if (Array.isArray(res.items)) { myItems = res.items; renderMyList(); }
 }
 
 async function deleteMyItemCard(itemId) {

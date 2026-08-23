@@ -147,6 +147,10 @@ async function getState() {
       points: t.points,
       cycle: t.cycle,
       dueBy: t.dueBy || null,
+      // Chores created before reordering existed have no order field. Falling
+      // back to 0 here keeps them ahead of nothing in particular rather than
+      // sorting as undefined, which would scatter them unpredictably.
+      order: t.order ?? 0,
       createdAt: t.createdAt,
     })),
     completions: completions.map((c) => ({
@@ -445,9 +449,50 @@ async function addTask(req) {
     // defines "when", and a recurring due-time is a separate feature (ties into
     // reminders, issue #11) rather than a natural extension of this field.
     dueBy: req.cycle === 'oneoff' && req.dueBy ? req.dueBy : null,
+    // New chores go to the end of that kid's list, so adding one never
+    // reshuffles an order the kid set themselves.
+    order: await nextChoreOrder(req.kidId),
     createdAt: todayStr(),
     active: true,
   });
+  return getState();
+}
+
+async function nextChoreOrder(kidId) {
+  const chores = await queryHousehold('chores');
+  const mine = chores.filter((c) => c.active !== false && c.kidId === kidId);
+  return mine.length ? Math.max(...mine.map((c) => c.order ?? 0)) + 1 : 0;
+}
+
+// Reordering is the one thing a kid may change about a chore a parent set them.
+// It writes `order` and nothing else - title, points, cycle and kidId stay
+// behind updateTask's requireParent gate. Reading the doc and assigning a
+// single field (rather than spreading the request over it) is what makes that
+// true by construction rather than by remembering to check.
+async function reorderTasks(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
+  const ids = Array.isArray(req.taskIds) ? req.taskIds.map(String) : null;
+  if (!ids) return { ok: false, error: 'taskIds must be an array' };
+
+  const chores = container('chores');
+  const all = await queryHousehold('chores');
+  const mine = all.filter((c) => c.active !== false && c.kidId === req.kidId);
+
+  // The id set must match this kid's chores exactly. That rejects a foreign id
+  // and a partial list in one check - a partial list would silently renumber
+  // only some rows and leave the rest colliding.
+  const mineIds = mine.map((c) => String(c.id)).sort();
+  const sent = [...ids].sort();
+  if (mineIds.length !== sent.length || mineIds.some((id, i) => id !== sent[i])) {
+    return { ok: false, error: 'taskIds must list exactly your own tasks' };
+  }
+
+  await Promise.all(ids.map(async (id, index) => {
+    const chore = mine.find((c) => String(c.id) === id);
+    if (chore.order === index) return;
+    chore.order = index;
+    await chores.item(chore.id, HOUSEHOLD_ID).replace(chore);
+  }));
   return getState();
 }
 
@@ -1197,6 +1242,28 @@ async function updateMyItem(req) {
   return { ok: true, item: doc };
 }
 
+async function reorderMyItems(req) {
+  await requireSelf(req.personId, req.pin, req.kidId);
+  const ids = Array.isArray(req.itemIds) ? req.itemIds.map(String) : null;
+  if (!ids) return { ok: false, error: 'itemIds must be an array' };
+
+  const mine = await readMyItems(req.kidId);
+  const mineIds = mine.map((doc) => String(doc.id)).sort();
+  const sent = [...ids].sort();
+  if (mineIds.length !== sent.length || mineIds.some((id, i) => id !== sent[i])) {
+    return { ok: false, error: 'itemIds must list exactly your own items' };
+  }
+
+  const planningItems = container('planningItems');
+  await Promise.all(ids.map(async (id, index) => {
+    const doc = mine.find((entry) => String(entry.id) === id);
+    if (doc.order === index) return;
+    doc.order = index;
+    await planningItems.item(doc.id, HOUSEHOLD_ID).replace(doc);
+  }));
+  return { ok: true, items: await readMyItems(req.kidId) };
+}
+
 async function deleteMyItem(req) {
   await requireSelf(req.personId, req.pin, req.kidId);
   const planningItems = container('planningItems');
@@ -1282,6 +1349,8 @@ const ROUTES = {
   addMyItem,
   updateMyItem,
   deleteMyItem,
+  reorderMyItems,
+  reorderTasks,
 };
 
 app.http('hero', {
