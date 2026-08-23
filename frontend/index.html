@@ -1897,11 +1897,18 @@ var SVG_AVATAR_FALLBACK = {
 // `fallback` is what every text-only context gets - <option> labels, prompt
 // lists, the parent kid-mark. Those cannot hold an <img>, and an avatar that
 // renders as nothing there would be worse than an emoji.
+//
+// The `?v=` suffix is a cache-buster. Replacing someone's photo keeps the
+// same filename, so without it a phone that already holds the old face can go
+// on showing it from the HTTP cache after a deploy. Bump the number on a file
+// whenever its bytes change. It is written out per line rather than shared
+// through a constant so this object stays self-contained - check-frontend.js
+// lifts it into a sandbox on its own.
 var IMG_AVATARS = {
-  toby:    { tile: 'img/avatar-toby.webp',    head: 'img/head-toby.webp',    fallback: '\u{1F5A8}\uFE0F' },
-  ollie:   { tile: 'img/avatar-ollie.webp',   head: 'img/head-ollie.webp',   fallback: '\u{1F43E}' },
-  peter:   { tile: 'img/avatar-peter.webp',   head: 'img/head-peter.webp',   fallback: '\u{1F9D4}' },
-  tymanda: { tile: 'img/avatar-tymanda.webp', head: 'img/head-tymanda.webp', fallback: '\u{1F469}' },
+  toby:    { tile: 'img/avatar-toby.webp?v=1',    head: 'img/head-toby.webp?v=1',    fallback: '\u{1F5A8}\uFE0F' },
+  ollie:   { tile: 'img/avatar-ollie.webp?v=1',   head: 'img/head-ollie.webp?v=1',   fallback: '\u{1F43E}' },
+  peter:   { tile: 'img/avatar-peter.webp?v=1',   head: 'img/head-peter.webp?v=1',   fallback: '\u{1F9D4}' },
+  tymanda: { tile: 'img/avatar-tymanda.webp?v=2', head: 'img/head-tymanda.webp?v=2', fallback: '\u{1F469}' },
 };
 
 function imgAvatar(value) {
