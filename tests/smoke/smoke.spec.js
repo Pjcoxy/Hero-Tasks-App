@@ -776,7 +776,9 @@ test('the sign-in screen is the artwork, with the faces on it', async ({ page })
   const screen = page.locator('#screen-who');
   await expect(screen).toBeVisible();
 
-  const bg = await screen.evaluate((el) => getComputedStyle(el).backgroundImage);
+  // The artwork is painted by ::after, with ::before behind it as a blurred
+  // fill for the letterbox, so read the pseudo-element and not the box.
+  const bg = await screen.evaluate((el) => getComputedStyle(el, '::after').backgroundImage);
   expect(bg).toContain('hero-splash.webp');
 
   // Four faces, in one row, at the foot of the screen - not a grid of cards
@@ -836,14 +838,45 @@ test('there is no separate splash screen to sit through', async ({ page }) => {
   await expect(page.locator('.who-tile').first()).toBeVisible({ timeout: 3000 });
 });
 
-test('the artwork survives a landscape window instead of zooming into the logo', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
-  const size = await page.locator('#screen-who').evaluate((el) => getComputedStyle(el).backgroundSize);
-  expect(size).toBe('contain');
+// This one shipped cropped, and the test it replaces is why. The artwork is
+// 0.449 wide-to-tall - narrower than any real phone - so `cover` scaled it to
+// the width and pushed the surplus height off the bottom, which is where the
+// ball, the boots and the foreground are. 3% lost on a tall installed phone,
+// 20% on an iPhone SE. The old test asserted `cover` at 412x915, and 412x915 is
+// 0.450: the single viewport where that crop is invisible. Walking one point is
+// not coverage when the failure is a function of the ratio - walk the range.
+test('the artwork is never cropped, on any screen', async ({ page }) => {
+  const VIEWS = [
+    [375, 667, 'iPhone SE'],
+    [390, 720, 'iPhone, browser chrome'],
+    [412, 780, 'Android, browser chrome'],
+    [360, 740, 'Galaxy, installed'],
+    [390, 844, 'iPhone, installed'],
+    [412, 915, 'Pixel, installed'],
+    [768, 1024, 'tablet'],
+    [1280, 800, 'laptop, landscape'],
+  ];
+  for (const [width, height, name] of VIEWS) {
+    await page.setViewportSize({ width, height });
+    const size = await page.locator('#screen-who').evaluate(
+      (el) => getComputedStyle(el, '::after').backgroundSize);
+    expect(size, `${name} (${width}x${height}) should show the whole picture`)
+      .toBe('contain');
+  }
+});
 
-  await page.setViewportSize({ width: 412, height: 915 });
-  const phone = await page.locator('#screen-who').evaluate((el) => getComputedStyle(el).backgroundSize);
-  expect(phone).toBe('cover');
+// `contain` leaves bars on a squarer screen. They are filled with a blurred,
+// over-scanned copy of the artwork so its own colours reach the edge, rather
+// than a slab of flat brand purple beside the picture.
+test('the letterbox is filled with the artwork, not a flat slab', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  const fill = await page.locator('#screen-who').evaluate((el) => {
+    const s = getComputedStyle(el, '::before');
+    return { image: s.backgroundImage, size: s.backgroundSize, filter: s.filter };
+  });
+  expect(fill.image, 'the fill should be the artwork itself').toContain('hero-splash.webp');
+  expect(fill.size).toBe('cover');
+  expect(fill.filter, 'the fill should be blurred, not a second sharp copy').toContain('blur');
 });
 
 // #183 capped these with max-width and auto margins. .who-sheet is a flex item
