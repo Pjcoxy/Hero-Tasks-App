@@ -127,39 +127,27 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 
 /* ─── Who screen ──────────────────────────────────────────────────────── */
 .who-band {
-  /* The gradient stays underneath as the fallback: if the artwork 404s or is
-     still loading, this is a branded band rather than a white gap. */
-  background:
-    url('img/hero-splash.webp') top center / cover no-repeat,
-    linear-gradient(155deg, var(--brand) 0%, var(--brand-soft) 100%);
+  background: linear-gradient(155deg, var(--brand) 0%, var(--brand-soft) 100%);
   padding: calc(env(safe-area-inset-top, 0px) + var(--space-7)) var(--space-5) calc(var(--space-7) + var(--space-4));
   text-align: center;
   color: var(--on-brand);
   flex-shrink: 0;
-  /* Tall enough to show the logo and the kids beneath it. Capped in vh so a
-     short landscape window does not give the band the whole screen. */
-  min-height: 46vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  position: relative;
 }
-/* The artwork carries its own title, so the band's own wordmark is hidden
-   rather than deleted - it is the fallback when the image cannot load. */
-.who-band-emoji, .who-band h1 { display: none; }
-.who-band p  {
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
-  margin-top: var(--space-2);
-  position: relative;
-  /* A scrim, not a solid bar: the prompt has to stay legible wherever the
-     artwork happens to be light, without hiding the picture. */
-  text-shadow: var(--text-scrim);
-}
-@media (min-width: 64rem) {
-  /* A portrait image cropped to a wide band shows very little, and the picker
-     is what matters on desktop - give the band less of the screen. */
-  .who-band { min-height: 32vh; }
+.who-band-emoji { font-size: var(--text-3xl); line-height: 1; }
+.who-band h1 { font-size: var(--text-2xl); font-weight: var(--weight-bold); margin-top: var(--space-3); line-height: var(--leading-tight); }
+.who-band p  { font-size: var(--text-base); opacity: 0.9; margin-top: var(--space-2); }
+
+/* ─── Splash ──────────────────────────────────────────────────────────────
+   The artwork on its own screen, edge to edge, with nothing over it. It is a
+   held frame, not a page: the picker that follows is where anything is done.
+
+   The brand colour sits underneath so a slow or failed image is a branded
+   screen rather than white. `contain` rather than `cover` because this is a
+   picture with a composed edge - cropping the logo off a tall phone to fill
+   the corners would be worse than letterboxing it. */
+.screen-splash {
+  background: var(--brand) url('img/hero-splash.webp') center / contain no-repeat;
+  cursor: pointer;
 }
 
 .who-sheet {
@@ -1148,6 +1136,11 @@ button.parent-list-row:active { transform: scale(0.99); }
 .home-content-sheet,
 .parent-panel,
 .who-sheet {
+  /* width:100% is load-bearing, not belt-and-braces. .who-sheet is a flex item
+     in a column container, and auto cross-axis margins override align-self:
+     stretch - so max-width + auto margins alone collapsed it to its content
+     width, leaving a 273px picker on a 412px phone. */
+  width: 100%;
   max-width: calc(var(--shell-max) + var(--space-4) * 2);
   margin-left: auto;
   margin-right: auto;
@@ -1278,6 +1271,8 @@ button.parent-list-row:active { transform: scale(0.99); }
 <!-- ════════════════════════════════════════════════════════════════════ -->
 <!-- WHO SCREEN                                                           -->
 <!-- ════════════════════════════════════════════════════════════════════ -->
+<div id="screen-splash" class="screen screen-splash hidden" onclick="dismissSplash()" role="img" aria-label="Hero Tasks"></div>
+
 <div id="screen-who" class="screen">
   <div class="who-band">
     <div class="who-band-emoji">🦸</div>
@@ -1999,8 +1994,37 @@ function buildEmptyState(emoji, line1, line2) {
     + '</div>';
 }
 
+// The splash is a held frame on launch, not a page. It stays until the app has
+// something to show AND a minimum beat has passed, so it never flashes on a
+// fast connection, and a tap skips it. Once dismissed it does not come back -
+// render() runs on every poll and a splash reappearing mid-use would be absurd.
+var splashPending = true;
+var splashMinElapsed = false;
+
+function dismissSplash() {
+  if (!splashPending) return;
+  splashPending = false;
+  render();
+}
+
+function startSplash() {
+  var el = document.getElementById('screen-splash');
+  if (el) el.classList.remove('hidden');
+  setTimeout(function() {
+    splashMinElapsed = true;
+    if (state) dismissSplash();
+  }, 1400);
+  // A backstop: if the first load never resolves, the splash must not become a
+  // dead end. The picker behind it renders its own error or empty state.
+  setTimeout(dismissSplash, 6000);
+}
+
 function render() {
   if (!state) return;
+  if (splashPending) {
+    if (!splashMinElapsed) { show('screen-splash'); return; }
+    splashPending = false;
+  }
   renderWho();
   const person = session && state.people.find(p => p.id === session.personId);
   if (!person) {
@@ -2018,7 +2042,7 @@ function render() {
 }
 
 function show(id) {
-  ['screen-who', 'screen-kid', 'screen-parent'].forEach(function(s) {
+  ['screen-splash', 'screen-who', 'screen-kid', 'screen-parent'].forEach(function(s) {
     var el = document.getElementById(s);
     var showing = s === id;
     el.classList.toggle('hidden', !showing);
@@ -4923,6 +4947,7 @@ function toast(msg) {
   toastTimer = setTimeout(function() { el.classList.add('hidden'); }, 2500);
 }
 
+startSplash();
 refresh();
 setInterval(refresh, 60000);
 document.addEventListener('visibilitychange', function() { if (!document.hidden) refresh(); });
