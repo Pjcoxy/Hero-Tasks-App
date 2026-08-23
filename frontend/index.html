@@ -322,6 +322,21 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   100%    { box-shadow: var(--shadow-1); }
 }
 .arriving { animation: reward-arrive 1.6s var(--ease-out); }
+
+/* A grown-up's note on a decision, shown on the kid's own card. */
+.decision-note {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  color: var(--ink);
+}
+.decision-note.needs-fixing {
+  background: var(--warning-wash);
+  color: var(--warning);
+}
 .goal-card-title {
   font-size: var(--text-base);
   font-weight: var(--weight-bold);
@@ -3252,11 +3267,18 @@ function renderRecentActivity(kid) {
       ? 'Nice job! ✅ +' + pts + ' pts'
       : '❌ Not quite — you can try again';
     var dateStr = c.decidedAt ? formatRewardDate(c.decidedAt) : (c.date || '');
+    // The grown-up's note. Read-only on purpose: it is a message about a
+    // decision already made, not the start of an argument.
+    var note = c.comment
+      ? '<div class="decision-note' + (isApproved ? '' : ' needs-fixing') + '">'
+        + (isApproved ? '💬 ' : '🔧 ') + esc(c.comment) + '</div>'
+      : '';
     return '<div class="task ' + cls + '">'
       + '<div class="tick" style="border-color:var(' + (isApproved ? '--success' : '--danger') + ');background:var(' + (isApproved ? '--success-wash' : '--danger-wash') + ');pointer-events:none" aria-hidden="true">' + icon + '</div>'
       + '<div class="info">'
       + '<div class="title">' + title + '</div>'
       + '<div class="sub">' + sub + (dateStr ? ' · ' + dateStr : '') + '</div>'
+      + note
       + '</div>'
       + '</div>';
   }).join('');
@@ -3296,6 +3318,7 @@ function renderParent(person) {
         + '</div>'
         + '<div class="approve-row">'
         + '<button class="btn green small" onclick="parentApprove(\'' + c.id + '\', ' + isExtra + ')">✓ Approve' + (isExtra ? ' & set points' : '') + '</button>'
+        + '<button class="btn ghost small" onclick="parentApproveWithNote(\'' + c.id + '\', ' + isExtra + ')" aria-label="Approve with a note">💬 With note</button>'
         + '<button class="btn red-ghost small" onclick="parentReject(\'' + c.id + '\')">✗ Nope</button>'
         + '</div>'
         + '</div>';
@@ -4385,18 +4408,43 @@ async function parentAddAdultAction(itemId) {
   }, 'Adult action added.');
 }
 
+// Approve with no note. The fast path stays one tap - most approvals have
+// nothing to say, and making every one of them go through a dialog would tax
+// the common case to serve the rare one.
 async function parentApprove(completionId, isExtra) {
   var points;
   if (isExtra) {
-    points = prompt('How many points is this worth?', '5');
+    // Was a raw prompt(), which shows the Azure hostname in the browser's own
+    // dialog. Same bug that was fixed for the kid's 'I did something extra'.
+    points = await askText('How many points is this worth?', '5', 'Approve');
     if (points === null) return;
   }
+  await submitApproval(completionId, points, '');
+}
+
+// Approve and say something. The note is read-only for the kid: it is a message
+// about a decision already made, not a thread.
+async function parentApproveWithNote(completionId, isExtra) {
+  var points;
+  if (isExtra) {
+    points = await askText('How many points is this worth?', '5', 'Next');
+    if (points === null) return;
+  }
+  var comment = await askText('Add a note for them (optional)', '', 'Approve');
+  if (comment === null) return;
+  await submitApproval(completionId, points, comment);
+}
+
+async function submitApproval(completionId, points, comment) {
   var prevCompletions = state.completions.slice();
   state.completions = prevCompletions.filter(function(c) { return c.id !== completionId; });
   render();
   var res;
   try {
-    res = await api({ action: 'approve', parentId: session.personId, parentPin: session.pin, completionId, points });
+    res = await api({
+      action: 'approve', parentId: session.personId, parentPin: session.pin,
+      completionId: completionId, points: points, comment: comment,
+    });
   } catch (e) {
     state.completions = prevCompletions; render(); toast('Connection problem — try again.'); return;
   }
@@ -4405,18 +4453,31 @@ async function parentApprove(completionId, isExtra) {
   }
 }
 
+// Declining always asks why. A red cross with no reason leaves the kid with
+// nothing to act on, so there is no path here that skips it - the API refuses
+// an empty comment too, so this is a courtesy, not the only guard.
 async function parentReject(completionId) {
+  var comment = await askText('What do they need to do to get this approved?', '', 'Send it back');
+  if (comment === null) return;
+  if (!String(comment).trim()) {
+    toast('Tell them what to fix first.');
+    return;
+  }
+
   var prevCompletions = state.completions.slice();
   state.completions = prevCompletions.filter(function(c) { return c.id !== completionId; });
   render();
   var res;
   try {
-    res = await api({ action: 'reject', parentId: session.personId, parentPin: session.pin, completionId });
+    res = await api({
+      action: 'reject', parentId: session.personId, parentPin: session.pin,
+      completionId: completionId, comment: comment,
+    });
   } catch (e) {
     state.completions = prevCompletions; render(); toast('Connection problem — try again.'); return;
   }
   if (res && res.ok === false) {
-    state.completions = prevCompletions; render(); toast(res.error || 'Could not reject.'); return;
+    state.completions = prevCompletions; render(); toast(res.error || 'Could not send that back.'); return;
   }
 }
 

@@ -161,6 +161,7 @@ async function getState() {
       points: c.points || 0,
       date: c.date,
       status: c.status,
+      comment: c.comment || null,
       createdAt: c.createdAt,
       decidedAt: c.decidedAt || null,
     })),
@@ -860,6 +861,15 @@ async function validateVoiceNote(req) {
   return { ok: true, available, intent, confidence, needsConfirmation };
 }
 
+// A parent's note on a decision. Trimmed, and capped so one pasted essay cannot
+// distort every kid card that renders it.
+const DECISION_COMMENT_MAX = 280;
+
+function normaliseDecisionComment(value) {
+  const text = String(value == null ? '' : value).trim();
+  return text ? text.slice(0, DECISION_COMMENT_MAX) : '';
+}
+
 async function approve(req) {
   await requireParent(req.parentId, req.parentPin);
   const completions = container('completions');
@@ -872,6 +882,7 @@ async function approve(req) {
       completion.points = Number(req.points);
     }
     completion.status = 'approved';
+    completion.comment = normaliseDecisionComment(req.comment);
     completion.decidedAt = new Date().toISOString();
     await completions.item(req.completionId, HOUSEHOLD_ID).replace(completion);
     const quietHours = await getHouseholdQuietHours();
@@ -892,13 +903,22 @@ async function reject(req) {
     .read()
     .catch(() => ({ resource: null }));
   if (completion) {
+    // Required on a decline, unlike approve. A rejection with no reason leaves
+    // the kid with a red cross and no idea what to change, which is the whole
+    // problem this solves - so it is enforced here, not only in the UI.
+    const comment = normaliseDecisionComment(req.comment);
+    if (!comment) return { ok: false, error: 'Tell them what to do to get it approved' };
+
     completion.status = 'rejected';
+    completion.comment = comment;
     completion.decidedAt = new Date().toISOString();
     await completions.item(req.completionId, HOUSEHOLD_ID).replace(completion);
     const quietHours = await getHouseholdQuietHours();
     await sendPushIfAllowed(completion.kidId, {
+      // The reason travels in the notification too - reading it on the lock
+      // screen is the fastest way for the kid to know what to fix.
       title: 'Chore reviewed',
-      body: `${completion.title} needs another try — give it another go!`,
+      body: `${completion.title}: ${comment}`,
       url: '/',
     }, quietHours);
   }
