@@ -173,3 +173,29 @@ test('the rewards shop is not empty', async ({ page }) => {
   await expect(page.locator('#k-rewards')).not.toContainText('No rewards in the shop yet');
   await expect(page.locator('#k-rewards')).toContainText("Ice cream from McDonald's");
 });
+
+// The Home tab's Today / This Week glance. It replaces "Today's Missions",
+// which only ever filtered to daily chores - one-off and weekly chores due
+// today, and every event or reminder, were absent because they only come from
+// the calendar action.
+test('the kid Home screen shows a Today and a This Week section', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+
+  await expect(page.getByRole('heading', { name: /^📅 Today$/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /This Week/ })).toBeVisible();
+
+  // Both must resolve to real content or a real empty state - never a permanent
+  // skeleton, which is what a broken fetch looks like.
+  await expect(page.locator('#k-glance-today')).not.toBeEmpty();
+  await expect(page.locator('#k-glance-week')).not.toBeEmpty();
+  await expect(page.locator('#k-glance-today .glance-skel')).toHaveCount(0);
+  await expect(page.locator('#k-glance-week .glance-skel')).toHaveCount(0);
+});
+
+test('the old daily-only Missions section is gone from Home', async ({ page }) => {
+  await pickPerson(page, 'Ollie');
+  await expect(page.locator('#tab-home')).not.toContainText("Today's Missions");
+  // The Missions tab keeps its own weekly and one-off lists.
+  await page.getByRole('button', { name: /missions/i }).first().click();
+  await expect(page.locator('#k-weekly')).toBeVisible();
+});

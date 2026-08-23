@@ -872,6 +872,23 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .modal { background: var(--surface); border-radius: var(--radius-lg); padding: var(--space-6); width: 100%; max-width: 320px; text-align: center; box-shadow: var(--shadow-3); display: flex; flex-direction: column; gap: var(--space-3); }
 .modal h3 { margin-bottom: var(--space-3); font-size: var(--text-lg); font-weight: var(--weight-bold); }
 .pin-input { font-size: var(--text-2xl); text-align: center; letter-spacing: 0.4em; width: 100%; padding: var(--space-3); border: 2px solid var(--border); border-radius: var(--radius-md); font-family: inherit; color: var(--ink); background: var(--surface-sunken); }
+.glance-skel {
+  height: 4.5rem;
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+  margin-bottom: var(--space-2);
+}
+.glance-day-label {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  font-weight: var(--weight-medium);
+  margin: var(--space-3) 0 var(--space-2);
+}
+.glance-prep {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  margin-top: var(--space-1);
+}
 .next-goal {
   margin-top: var(--space-3);
   padding-top: var(--space-3);
@@ -1061,8 +1078,10 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
         <div class="next-goal hidden" id="k-next-goal"></div>
       </div>
       <div class="home-content-sheet">
-        <h2 class="section-title">📅 Today's Missions</h2>
-        <div id="k-daily"></div>
+        <h2 class="section-title">📅 Today</h2>
+        <div id="k-glance-today"></div>
+        <h2 class="section-title">🗓️ This Week</h2>
+        <div id="k-glance-week"></div>
         <div class="kid-home-actions">
           <button class="btn ghost" onclick="addExtraPrompt()">➕ I did something extra!</button>
           <button class="btn voice-trigger" id="k-voice-reminder-btn" onclick="openVoiceReminderFlow()">🎤 Add a voice reminder</button>
@@ -1795,8 +1814,6 @@ function renderKid(kid) {
   }
 
   var mine = state.tasks.filter(function(t) { return t.kidId === kid.id; });
-  renderTaskList('k-daily', mine.filter(function(t) { return t.cycle === 'daily'; }),
-    '😎', 'No daily missions today!', 'Enjoy the freedom.');
   renderTaskList('k-weekly', mine.filter(function(t) { return t.cycle === 'weekly'; }),
     '🗓️', 'Nothing weekly right now.', 'Check back with your grown-up!');
   var oneoffs = mine.filter(function(t) { return t.cycle === 'oneoff'; }).filter(function(t) {
@@ -1811,6 +1828,12 @@ function renderKid(kid) {
   renderRedemptions(kid);
   renderRecentActivity(kid);
   renderKidCalendar(kid);
+  renderKidGlance(kid);
+  // Reuses loadKidCalendar()/kidCalendarItems from #158 rather than adding a
+  // second loader for the same range and the same kid. Two loaders would double
+  // the API calls and let the Home glance and the Calendar tab disagree about
+  // what falls on a given day.
+  loadKidCalendar(kid);
 
   var ranked = kidsOnly()
     .map(function(k) { return Object.assign({}, k, { pts: (state.stats[k.id] || {}).points || 0 }); })
@@ -1882,6 +1905,119 @@ function switchCalendarView(view) {
     // Refetch, not just re-render: each view spans a different date range.
     if (kid) loadKidCalendar(kid);
   }
+}
+
+// The Home tab's "Today" and "This Week" glance.
+//
+// Note on the issue that asked for this (#135): its background says the Home
+// tab "misses one-off chores due today, weekly chores due today". That was not
+// true - k-daily, k-weekly and k-oneoff all rendered, so a kid could already
+// see every chore assigned to them. What was genuinely missing is a DUE-TODAY
+// filter, one merged view, and events/reminders, which only the calendar action
+// returns. This is a presentation change, not a recovery of hidden chores.
+//
+// Chores here delegate to exactly the same completion logic and the same
+// doTask/undoTask flow renderTaskList uses. There is deliberately no second
+// implementation of "complete" - two would drift.
+function glanceChoreCard(item) {
+  var task = (state.tasks || []).find(function(t) { return t.id === item.taskId; });
+  if (!task) return '';
+  var c = cycleCompletion(task);
+  var cls = c ? (c.status === 'approved' ? 'done-approved' : c.status === 'queued' ? 'done-queued' : 'done-pending') : '';
+  var tickIcon = c ? (c.status === 'approved' ? '✅' : c.status === 'queued' ? '📡' : '⏳') : '';
+  var sub = c
+    ? (c.status === 'approved' ? 'Done — points banked! 💰' : c.status === 'queued' ? 'Saved offline — syncing soon 📡' : 'Waiting for a grown-up to check ⏳')
+    : '';
+  var action = c
+    ? ((c.status === 'pending' || c.status === 'queued') ? 'undoTask(\'' + c.id + '\')' : '')
+    : 'doTask(\'' + task.id + '\')';
+  return '<div class="task ' + cls + '">'
+    + '<button class="tick" ' + (action ? 'onclick="' + action + '"' : 'disabled') + '>' + tickIcon + '</button>'
+    + '<div class="info">'
+    + '<div class="title">' + esc(task.title) + '</div>'
+    + (sub ? '<div class="sub">' + sub + '</div>' : '')
+    + '</div>'
+    + '<span class="pts-badge">+' + task.points + '</span>'
+    + '</div>';
+}
+
+// Events and reminders are not actionable by a kid - creating and editing them
+// stays parent-only - so these render as a plain card with no tick.
+function glanceEventCard(item, kidId) {
+  var when = item.allDay
+    ? 'All day'
+    : (item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+  var prep = '';
+  if (item.prepLists && item.prepLists[kidId] && item.prepLists[kidId].length) {
+    prep = '<div class="glance-prep">🎒 ' + item.prepLists[kidId].map(esc).join(', ') + '</div>';
+  }
+  return '<div class="task">'
+    + '<button class="tick" disabled>' + (item.kind === 'reminder' ? '🔔' : '📌') + '</button>'
+    + '<div class="info">'
+    + '<div class="title">' + esc(item.title || 'Something on') + '</div>'
+    + (when ? '<div class="sub">' + esc(when) + '</div>' : '')
+    + (item.notes ? '<div class="sub">' + esc(item.notes) + '</div>' : '')
+    + prep
+    + '</div>'
+    + '</div>';
+}
+
+function glanceCard(item, kidId) {
+  return (item.kind === 'chore' || item.taskId)
+    ? glanceChoreCard(item)
+    : glanceEventCard(item, kidId);
+}
+
+function renderKidGlance(kid) {
+  var todayEl = document.getElementById('k-glance-today');
+  var weekEl = document.getElementById('k-glance-week');
+  if (!todayEl || !weekEl) return;
+
+  // Skeletons at final layout size while the call is in flight - no spinner and
+  // no blank-then-jump. Only on a genuinely cold load; a refresh keeps what is
+  // already on screen.
+  if (kidCalendarLoading && (kidCalendarItems || []).length === 0) {
+    var skel = '<div class="glance-skel"></div><div class="glance-skel"></div>';
+    todayEl.innerHTML = skel;
+    weekEl.innerHTML = skel;
+    return;
+  }
+
+  var today = todayStr();
+  var todays = [];
+  var byDay = {};
+
+  (kidCalendarItems || []).forEach(function(item) {
+    var key = parentCalendarDayKey(item);
+    if (!key) return;
+
+    // Already ticked off? Then it is not something still to do.
+    if (item.kind === 'chore' || item.taskId) {
+      var task = (state.tasks || []).find(function(t) { return t.id === item.taskId; });
+      if (!task) return;
+      var c = cycleCompletion(task);
+      if (c && c.status === 'approved') return;
+      if (c && key !== today) return;
+    }
+
+    if (key === today) { todays.push(item); return; }
+    if (key < today) return;                       // yesterday is not "this week"
+    if (!byDay[key]) byDay[key] = [];
+    byDay[key].push(item);
+  });
+
+  todayEl.innerHTML = todays.length
+    ? todays.map(function(i) { return glanceCard(i, kid.id); }).join('')
+    : buildEmptyState('🎉', 'Nothing today!', 'Enjoy your free time.');
+
+  var days = Object.keys(byDay).sort();
+  weekEl.innerHTML = days.length
+    ? days.map(function(dayKey) {
+        var label = new Date(dayKey + 'T12:00:00').toLocaleDateString([], { weekday: 'short' });
+        return '<div class="glance-day-label">' + esc(label) + '</div>'
+          + byDay[dayKey].map(function(i) { return glanceCard(i, kid.id); }).join('');
+      }).join('')
+    : buildEmptyState('☀️', 'Nothing else this week.', 'A clear run ahead!');
 }
 
 function renderKidCalendar(kid) {
@@ -2341,6 +2477,7 @@ async function loadKidCalendar(kid) {
   if (!session || session.role !== 'kid' || !kid) return;
   kidCalendarLoading = true;
   renderKidCalendar(kid);
+  renderKidGlance(kid);
   var bounds = kidCalendarBounds();
   var result;
   try {
@@ -2355,11 +2492,13 @@ async function loadKidCalendar(kid) {
     kidCalendarLoading = false;
     kidCalendarItems = [];
     renderKidCalendar(kid);
+    renderKidGlance(kid);
     return;
   }
   kidCalendarItems = (result && result.ok !== false && Array.isArray(result.items)) ? result.items : [];
   kidCalendarLoading = false;
   renderKidCalendar(kid);
+  renderKidGlance(kid);
 }
 
 function parentApprovalsGlanceBounds() {
@@ -2815,7 +2954,7 @@ function animatePoints(targetVal) {
 }
 
 function findTaskCard(taskId) {
-  var lists = ['k-daily', 'k-weekly', 'k-oneoff'];
+  var lists = ['k-glance-today', 'k-glance-week', 'k-daily', 'k-weekly', 'k-oneoff'];
   for (var li = 0; li < lists.length; li++) {
     var el = document.getElementById(lists[li]);
     if (!el) continue;
