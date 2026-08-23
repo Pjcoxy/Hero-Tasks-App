@@ -291,21 +291,24 @@ It took three goes to get here, and the failures are the useful part:
    cut the picture in half to show four names.
 2. A separate splash screen that held for a beat then vanished — the artwork got
    about two seconds and was then gone.
-3. This: the artwork fills the screen and the faces dock along the bottom, so it
-   stays up for as long as it takes someone to choose.
+3. Artwork full-screen with the faces docked along the **bottom** — kept the
+   picture whole, but sat them over the foreground.
+4. This: the faces move up into the **sky above the wordmark**, the one band of
+   the artwork that is genuinely empty.
 
-- **One row of round avatars** at the foot, not a grid of cards. A card needs
-  its own background and that background is a hole punched in the picture. A
-  face plus a name needs neither.
-- The strip they sit on is boots, backpack and map in the artwork. The logo, the
-  kids and the landscape are all above it and stay untouched.
-- The gradient behind the row **fades up** rather than starting hard, so it
-  reads as light falling off the foot of the picture instead of a panel laid on
-  top. `--scrim-strong` → `--scrim-soft` → transparent.
+- **One row of round avatars**, not a grid of cards. A card needs its own
+  background and that background is a hole punched in the picture. A face needs
+  neither.
+- **No names and no prompt.** Adding the photos was the point: a face is a
+  faster way to find yourself than reading four names, and the labels were the
+  only thing still landing on the shield. Both stay in the markup and are read
+  out via `aria-label`, just undrawn.
+- The strip is **sized to the band, not to taste**. The sky is about 70px on a
+  phone; anything taller puts the row on the logo.
+- The gradient behind the row **fades down** rather than starting hard, so it
+  reads as light at the top of the picture instead of a bar laid across it.
 - Whose face it is comes from the **ring**, not a card outline — kid colour for
   a kid, brand for a parent.
-- The `Kid` / `Parent 👑` line is dropped here. At this size the face and the
-  name are the whole message, and a third line per person costs more picture.
 
 **Sizing by aspect ratio, not width.** The artwork is portrait, roughly 0.45
 wide-to-tall. A phone is close enough that `cover` crops almost nothing. Past
