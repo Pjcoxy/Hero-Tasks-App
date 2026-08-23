@@ -14,6 +14,14 @@ name: Deploy to Azure
 # HEAD^. A failed deploy leaves the tag where it is and the next push retries
 # it, and several commits landing together cannot hide each other.
 #
+# Every job checks out ${{ github.sha }} - this run's own commit - and never
+# 'main'. When #175 and #176 merged 45 seconds apart, the deploy job correctly
+# uploaded #175's commit, but the record job checked out 'main' (already moved
+# on to #176) and tagged THAT as deployed. #176's own run then compared main
+# against the tag, found them identical, logged "Nothing changed since the last
+# deploy" and skipped every job - green, having shipped nothing. The commit sat
+# undeployed while the pipeline reported success.
+#
 # Required repository secrets:
 #   AZURE_STATIC_WEB_APPS_API_TOKEN  - Static Web App deployment token
 #                                      (Portal -> herotasks-swa-dev -> Manage
@@ -46,7 +54,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          # This run's own commit, NOT 'main'. A later merge can move main
+          # while this run is still queued, and then the run reports on a
+          # commit it is not deploying. That is exactly how #176 was skipped.
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Detect what changed since the last successful deploy
         id: filter
@@ -163,9 +174,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          # Same reason as the 'changes' job: tag the commit this run actually
+          # deployed. Checking out 'main' tagged whatever had merged in the
+          # meantime, marking an undeployed commit as live and causing the very
+          # next run to skip everything as "nothing changed".
+          ref: ${{ github.sha }}
+          fetch-depth: 0
       - name: Mark this commit as deployed
         run: |
-          git tag -f deployed
+          set -euo pipefail
+
+          # Runs are serialised by the concurrency group, but a retry or a
+          # re-run of an older run can still arrive late. Never move the tag
+          # backwards - that would re-deploy old code over new.
+          if git rev-parse -q --verify refs/tags/deployed >/dev/null 2>&1; then
+            PREV=$(git rev-parse refs/tags/deployed^{commit})
+            if [ "$PREV" = "${{ github.sha }}" ]; then
+              echo "Already tagged - nothing to do."
+              exit 0
+            fi
+            if ! git merge-base --is-ancestor "$PREV" "${{ github.sha }}"; then
+              echo "::warning::deployed ($PREV) is not an ancestor of ${{ github.sha }} - leaving the tag alone."
+              exit 0
+            fi
+          fi
+
+          git tag -f deployed "${{ github.sha }}"
           git push -f origin refs/tags/deployed
-          echo "deployed -> $(git rev-parse HEAD)"
+          echo "deployed -> ${{ github.sha }}"
