@@ -293,22 +293,21 @@ It took three goes to get here, and the failures are the useful part:
    about two seconds and was then gone.
 3. Artwork full-screen with the faces docked along the **bottom** — kept the
    picture whole, but sat them over the foreground.
-4. This: the faces move up into the **sky above the wordmark**, the one band of
-   the artwork that is genuinely empty.
+4. Faces moved up into the **sky above the wordmark** — the artwork was
+   untouched, but loose circles floating on a picture read as decoration, not as
+   controls. Nothing anchored them and nothing said "this is the way in".
+5. This: a **panel docked to the bottom edge** holding the four faces.
 
-- **One row of round avatars**, not a grid of cards. A card needs its own
-  background and that background is a hole punched in the picture. A face needs
-  neither.
-- **No names and no prompt.** Adding the photos was the point: a face is a
-  faster way to find yourself than reading four names, and the labels were the
-  only thing still landing on the shield. Both stay in the markup and are read
-  out via `aria-label`, just undrawn.
-- The strip is **sized to the band, not to taste**. The sky is about 70px on a
-  phone; anything taller puts the row on the logo.
-- The gradient behind the row **fades down** rather than starting hard, so it
-  reads as light at the top of the picture instead of a bar laid across it.
-- Whose face it is comes from the **ring**, not a card outline — kid colour for
-  a kid, brand for a parent.
+- **A surface, not floating circles.** An edge, a radius and a shadow say "these
+  are controls" in a way that position alone cannot. That is what anchors them.
+- **Every person is the same kind of thing.** Same circle, same ring weight,
+  same name underneath. A parent on a dark disc beside a kid's photo read as two
+  different categories rather than four ways into one app.
+- **Fixed width per tile, never `flex-basis: auto`.** Sized from content, an
+  emoji glyph is narrower than a photo — the circles come out different sizes
+  and the names land on four different baselines.
+- The prompt stays gone. Four faces in a panel are self-explanatory; the
+  `Kid` / `Parent 👑` line stays gone too, at a third line each.
 
 **Sizing by aspect ratio, not width.** The artwork is portrait, roughly 0.45
 wide-to-tall. A phone is close enough that `cover` crops almost nothing. Past

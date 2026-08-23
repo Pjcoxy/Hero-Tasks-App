@@ -144,7 +144,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
    seconds. */
 #screen-who {
   background: var(--brand) url('img/hero-splash.webp') center top / cover no-repeat;
-  justify-content: flex-start;
+  justify-content: flex-end;
 }
 /* The artwork is portrait, about 0.45 wide-to-tall. A phone is close enough
    that `cover` crops almost nothing. Anything squarer or landscape is not:
@@ -154,19 +154,16 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 @media (min-aspect-ratio: 3/5) {
   #screen-who { background-size: contain; }
 }
+/* A real panel, docked to the bottom edge.
+   Loose circles floating in the sky read as decoration, not as controls -
+   nothing anchored them and nothing said "these are the way in". A surface with
+   an edge, a radius and a shadow does both jobs at once. */
 .who-sheet {
   flex: none;
-  padding: calc(env(safe-area-inset-top, 0px) + var(--space-2)) var(--space-4) var(--space-4);
-  /* Fades down rather than starting hard, so it reads as light at the top of
-     the picture and not as a bar laid across it.
-
-     The faces sit in the sky above the wordmark - the one band of the artwork
-     that is genuinely empty. No prompt text: four faces under a finger are
-     self-explanatory, and the words were the most wordy thing on the screen. */
-  background: linear-gradient(
-    to bottom,
-    var(--scrim-soft) 0%,
-    transparent 100%);
+  padding: var(--space-5) var(--space-4) calc(env(safe-area-inset-bottom, 0px) + var(--space-5));
+  background: var(--surface);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-3);
 }
 
 /* One row, however many people. Four fits a small phone comfortably; a fifth
@@ -175,14 +172,16 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 #who-grid {
   display: flex;
   justify-content: center;
-  gap: var(--space-3);
+  align-items: flex-start;
+  gap: var(--space-4);
 }
 .who-tile {
-  flex: 0 1 auto;
-  /* The sky above the wordmark is about 70px on a phone. The whole strip -
-     face, gap and name - has to fit inside that or the names land on the
-     shield, so this is sized to the band rather than to taste. */
-  max-width: 3.75rem;
+  /* A fixed width, not flex-basis: auto. With auto the tile takes its width
+     from its content, and an emoji glyph is narrower than a photo - so the
+     circles came out different sizes and the names sat at four different
+     heights. */
+  flex: 0 0 auto;
+  width: 4.5rem;
   background: none;
   border: 0;
   padding: 0;
@@ -204,17 +203,22 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   align-items: center;
   justify-content: center;
   font-size: var(--text-2xl);
-  background: var(--surface);
-  /* The ring is what carries whose face this is - kid colour for a kid, brand
-     for a parent - now that there is no card behind it. */
-  box-shadow: 0 0 0 3px var(--tile-ring, var(--brand)), var(--shadow-2);
+  /* Parents and kids get the same circle, the same ring weight and the same
+     name underneath. A parent on a dark disc beside a kid's photo read as two
+     different kinds of thing rather than four ways into the same app. */
+  background: var(--surface-sunken);
+  box-shadow: 0 0 0 3px var(--tile-ring, var(--brand)), var(--shadow-1);
 }
-.who-tile.parent .tile-emoji { background: var(--ink); color: var(--surface); }
-/* Names and the 'Kid'/'Parent 👑' line both go. Adding their photos was the
-   point: a face is a faster way to find yourself than reading four names, and
-   the labels were the only thing still landing on the wordmark. Kept in the
-   markup and read out by screen readers via aria-label, just not drawn. */
-.who-tile .tile-name,
+/* Names are back now there is a panel to hold them - on the artwork they had
+   nowhere to sit and landed on the shield. */
+.who-tile .tile-name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--ink);
+  line-height: var(--leading-tight);
+}
+/* The 'Kid' / 'Parent 👑' line stays off. Four people in one household do not
+   need their category spelled out, and it was a third line each. */
 .who-tile .tile-sub { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
 .skel-row {

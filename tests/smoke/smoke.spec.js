@@ -779,18 +779,33 @@ test('the sign-in screen is the artwork, with the faces on it', async ({ page })
   expect(Math.max(...tops) - Math.min(...tops), 'the faces should share one row')
     .toBeLessThanOrEqual(2);
 
-  // The row moved from the foot to the sky above the wordmark - the one band of
-  // the artwork that is genuinely empty. It has to stay clear of the logo.
+  // Anchored in a panel at the foot, not floating on the artwork. Loose circles
+  // in the sky read as decoration rather than as the way in.
   const view = page.viewportSize();
-  expect(Math.max(...tops), 'the row should sit in the sky above the wordmark')
-    .toBeLessThan(view.height * 0.12);
+  expect(Math.min(...tops), 'the row should sit in the panel at the foot')
+    .toBeGreaterThan(view.height * 0.6);
+
+  const panel = await page.locator('.who-sheet').boundingBox();
+  expect(Math.round(panel.y + panel.height), 'the panel should meet the bottom edge')
+    .toBe(view.height);
+
+  // Every person is the same kind of control: same circle, same ring, same name.
+  // Sized from content, an emoji glyph is narrower than a photo and the four
+  // came out at different sizes on different baselines.
+  const circles = await page.locator('.who-tile .tile-emoji').evaluateAll(
+    (els) => els.map((e) => {
+      const r = e.getBoundingClientRect();
+      return `${Math.round(r.width)}x${Math.round(r.height)}@${Math.round(r.y)}`;
+    }),
+  );
+  expect(new Set(circles).size, 'all four avatars should be identical').toBe(1);
 });
 
 test('the sign-in screen has no prompt text on it', async ({ page }) => {
   await expect(page.locator('#screen-who')).not.toContainText('Who are you');
-  // The names are still there for screen readers, just not drawn on the artwork.
-  const label = await page.locator('.who-tile').first().getAttribute('aria-label');
-  expect(label).toMatch(/Peter|Tymanda|Toby|Ollie/);
+  // Names are drawn again now there is a panel to hold them.
+  await expect(page.locator('.who-tile').filter({ hasText: 'Toby' })).toHaveCount(1);
+  await expect(page.locator('.who-tile').filter({ hasText: 'Peter' })).toHaveCount(1);
 });
 
 test('there is no separate splash screen to sit through', async ({ page }) => {
