@@ -204,9 +204,20 @@ test('the old daily-only Missions section is gone from Home', async ({ page }) =
 // not in hero.js's ROUTES table at all - every save returned "Unknown action".
 // Source-level checks could not see that: the string was present, the route was
 // not. This drives the real sheet against the real route table, so the two have
-// to agree. Headless Chromium has no SpeechRecognition, so the flow opens on
-// its typed fallback - the same path a kid on an unsupported browser takes.
+// to agree.
+//
+// SpeechRecognition is removed first, deliberately. Whether a headless Chromium
+// exposes it varies by build - where it does, start() waits on a speech service
+// the runner cannot reach and the sheet never opens, so the test would pass or
+// hang depending on the machine. Removing it pins the flow to its typed
+// fallback: the documented path for a browser that cannot record, and the one
+// that exercises everything this test is actually about.
 test('the voice capture sheet lets the kid pick the item type and saves it', async ({ page }) => {
+  await page.addInitScript(() => {
+    delete window.SpeechRecognition;
+    delete window.webkitSpeechRecognition;
+  });
+  await page.reload();
   await pickPerson(page, 'Ollie');
 
   await page.locator('#k-voice-reminder-btn').click();
