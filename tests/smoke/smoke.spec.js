@@ -797,20 +797,30 @@ test('the sign-in screen is the artwork, with the faces on it', async ({ page })
   expect(Math.min(...tops), 'the row should sit in the panel at the foot')
     .toBeGreaterThan(view.height * 0.6);
 
+  // Same fractional-layout caveat as the row above, so allow a pixel either
+  // way. Exact equality here failed once at 721 against a 720px viewport on the
+  // very commit that passed at 720 on the other runner - a sub-pixel rounding
+  // difference, not a panel that had come away from the bottom edge.
   const panel = await page.locator('.who-sheet').boundingBox();
-  expect(Math.round(panel.y + panel.height), 'the panel should meet the bottom edge')
-    .toBe(view.height);
+  expect(Math.abs(panel.y + panel.height - view.height), 'the panel should meet the bottom edge')
+    .toBeLessThanOrEqual(1);
 
   // Every person is the same kind of control: same circle, same ring, same name.
   // Sized from content, an emoji glyph is narrower than a photo and the four
   // came out at different sizes on different baselines.
+  // Compared with a tolerance rather than as strings: rounding fractional
+  // positions to ints can land two identical circles on different labels and
+  // fail a test that has found nothing wrong.
   const circles = await page.locator('.who-tile .tile-emoji').evaluateAll(
     (els) => els.map((e) => {
       const r = e.getBoundingClientRect();
-      return `${Math.round(r.width)}x${Math.round(r.height)}@${Math.round(r.y)}`;
+      return { w: r.width, h: r.height, y: r.y };
     }),
   );
-  expect(new Set(circles).size, 'all four avatars should be identical').toBe(1);
+  const spread = (key) => Math.max(...circles.map((c) => c[key])) - Math.min(...circles.map((c) => c[key]));
+  expect(spread('w'), 'all four avatars should be the same width').toBeLessThanOrEqual(1);
+  expect(spread('h'), 'all four avatars should be the same height').toBeLessThanOrEqual(1);
+  expect(spread('y'), 'all four avatars should share one baseline').toBeLessThanOrEqual(1);
 });
 
 test('the sign-in screen has no prompt text on it', async ({ page }) => {

@@ -280,6 +280,16 @@ when the household does not exist, so editing `SEED_PEOPLE` changes nothing for
 a household created weeks ago. `AVATAR_MIGRATIONS` is the only thing that moves
 an existing record — this is the #88 trap, and it has now caught us twice.
 
+**Replacing the photo behind an existing key needs a `?v=` bump.** Swapping the
+bytes of, say, `avatar-tymanda.webp` keeps the filename, so a phone that already
+holds the old face can go on serving it from the HTTP cache long after the
+deploy — the service worker is network-first, but the network fetch itself hits
+that cache. Each entry in `IMG_AVATARS` therefore carries its own `?v=N`; raise
+the number on the files you changed. The versions are written out per line
+rather than shared through a constant because `check-frontend.js` lifts
+`IMG_AVATARS` into a sandbox on its own, and a constant declared outside it is
+not in scope there.
+
 ### The sign-in screen
 
 **The artwork is the screen.** Signing in happens on top of it; there is no
