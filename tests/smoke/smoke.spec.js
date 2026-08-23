@@ -199,6 +199,13 @@ test('the prize carousel scrolls and tracks which prize you are on', async ({ pa
 test('tapping a prize card opens it in the Rewards tab', async ({ page }) => {
   await pickPerson(page, 'Ollie');
 
+  // The carousel drops any click landing within 250ms of a scroll - that is the
+  // swipe guard the next test covers. The shared store grows through the run,
+  // so late in the suite the screen is still settling when this click arrives,
+  // the guard eats it and the tab never switches. Wait for the guard to go cold
+  // rather than clicking into it; Playwright's own stability wait does not help
+  // because the guard keys off scroll events, not the card moving.
+  await page.waitForFunction(() => Date.now() - (window.goalScrolledAt || 0) > 300);
   await page.locator('#k-goal-carousel .goal-card').nth(1).click();
 
   await expect(page.locator('#tab-rewards')).toBeVisible();
@@ -692,6 +699,110 @@ test('the kid header carries the photo through after signing in', async ({ page 
   // The header uses the tighter head crop, not the chest-up tile - at ~40px the
   // tile is an unreadable smudge.
   await expect(img).toHaveAttribute('src', /head-/);
+});
+
+// Every head crop should be a face at header size. Toby's and Ollie's were the
+// whole ring shrunk into the square instead - a small face with a coloured
+// border round it, and Ollie's was off-centre with the cockatoo taking half
+// the frame. This checks the file, not the CSS: a wide crop cannot be rescued
+// downstream.
+test('every head crop is framed on the face, not the whole badge', async ({ page }) => {
+  const heads = ['toby', 'ollie', 'peter', 'tymanda'];
+  for (const who of heads) {
+    const res = await page.request.get(`/img/head-${who}.webp`);
+    expect(res.status(), `head-${who}.webp should exist`).toBe(200);
+  }
+  // Square, and the same size for all four, so none of them renders softer or
+  // sharper than the others in the same row.
+  const sizes = await Promise.all(heads.map((who) => page.evaluate((name) => new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(`${img.naturalWidth}x${img.naturalHeight}`);
+    img.onerror = () => resolve('failed');
+    img.src = `img/head-${name}.webp`;
+  }), who)));
+  expect(new Set(sizes).size, `head crops differ in size: ${sizes.join(', ')}`).toBe(1);
+  expect(sizes[0]).toBe('96x96');
+});
+
+// A crown said "a parent". The header can say which one, and everyone else in
+// this app is already represented by their photo.
+// Allocation used to offer "every day", "once a week" and "one-off", and
+// "once a week" silently meant whichever weekday the chore happened to be
+// created on - real recurrence that nobody could see or choose. A chore that
+// belongs on Mon/Wed/Fri had no way to be expressed.
+test('a chore can be set to particular weekdays, and lands on exactly those', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+
+    await post({
+      action: 'addTask', parentId: 'peter', parentPin: '1234',
+      kidId: 'toby', title: 'Bins out', points: 4,
+      cycle: 'weekly', days: [1, 3, 5],
+    });
+    const state = await post({ action: 'state' });
+    const task = state.tasks.find((t) => t.title === 'Bins out');
+
+    // Two clear weeks, so the pattern has to repeat rather than fire once.
+    const from = new Date();
+    from.setUTCDate(from.getUTCDate() - from.getUTCDay() + 1);
+    const to = new Date(from);
+    to.setUTCDate(to.getUTCDate() + 13);
+    const cal = await post({
+      action: 'calendar', parentId: 'peter', parentPin: '1234',
+      start: from.toISOString(), end: to.toISOString(),
+    });
+    const mine = (cal.items || []).filter((i) => i.taskId === task.id);
+    return {
+      days: task.days,
+      error: cal.error || null,
+      ok: cal.ok === true,
+      weekdays: [...new Set(mine.map((i) => new Date(i.occurrenceAt).getUTCDay()))].sort(),
+      count: mine.length,
+    };
+  });
+
+  expect(result.error, 'the calendar call should succeed').toBe(null);
+  expect(result.ok, 'the calendar call should succeed').toBe(true);
+  expect(result.days, 'the chosen days come back on the task').toEqual([1, 3, 5]);
+  expect(result.weekdays, 'it lands on Mon, Wed and Fri and nothing else').toEqual([1, 3, 5]);
+  expect(result.count, 'three days a week, across two weeks').toBe(6);
+});
+
+// A chore on Mon/Wed/Fri is due on each of them. Matching completions by week -
+// which is what the old "once a week" needed - would mark Wednesday done
+// because Monday was. Legacy chores carry no days and must keep the old rule.
+test('a completion counts for its own day, not the whole week', async ({ page }) => {
+  await pickPerson(page, 'Peter');
+  const verdict = await page.evaluate(() => {
+    state.completions = [{ taskId: 'bins', status: 'approved', date: '2026-08-24' }];
+    const at = (days, date) => !!parentCalendarLiveCompletion({
+      kind: 'chore', taskId: 'bins', cycle: 'weekly', days, occurrenceDate: date,
+    });
+    return {
+      namedMonday:    at([1, 3, 5], '2026-08-24'),
+      namedWednesday: at([1, 3, 5], '2026-08-26'),
+      legacyWednesday: at(null, '2026-08-26'),
+    };
+  });
+  expect(verdict.namedMonday, 'Monday is done').toBe(true);
+  expect(verdict.namedWednesday, 'Wednesday is not done just because Monday was').toBe(false);
+  expect(verdict.legacyWednesday, 'a chore with no named days keeps the weekly rule').toBe(true);
+});
+
+test('Parent HQ is headed by the parent, not a crown', async ({ page }) => {
+  await pickPerson(page, 'Peter');
+  const title = page.locator('#p-hq-title');
+  await expect(title).toContainText('Peter');
+  await expect(title).not.toContainText('\u{1F451}');
+  const face = title.locator('.hq-face img.avatar-photo');
+  await expect(face).toHaveCount(1);
+  await expect(face).toHaveAttribute('src', /head-peter/);
+  const loaded = await face.evaluate((el) => el.complete && el.naturalWidth > 0);
+  expect(loaded).toBe(true);
 });
 
 // This previously asserted the artwork sat on the picker's header band. That

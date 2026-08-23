@@ -267,6 +267,14 @@ chest-up for the person picker, `head` is tighter on the face because at ~40px
 a chest-up shot is an unreadable smudge. `renderAvatarHtml()` defaults to
 `tile`, `setAvatar()` defaults to `head`; pass the other explicitly.
 
+**The head crop is a face, not the badge shrunk.** Toby's and Ollie's were cut
+as the whole ringed circle fitted into the square, which at 40px is a small
+face inside a coloured border — and Ollie's put him off-centre with the
+cockatoo taking half the frame. Crop tight on the face, same framing for
+everyone, so a row of four reads as four people rather than four different
+zoom levels. This cannot be fixed downstream: CSS can only scale what the file
+already contains.
+
 Every kind also needs a `fallback` emoji. Plenty of places can only hold text —
 `<option>` labels, prompt lists, the parent kid-mark — and an avatar that
 renders as nothing there is worse than an emoji.
@@ -274,6 +282,11 @@ renders as nothing there is worse than an emoji.
 `.avatar-photo` fills whatever round or rounded slot it is dropped into
 (`width/height: 100%`, `object-fit: cover`, `border-radius: inherit`), so the
 same markup works at 2.5rem in the header and 4.5rem on a tile.
+
+**A person is their photo, everywhere.** Parent HQ was headed by a crown, which
+said "a parent" when the header can say *which* parent. Everyone else in the app
+is already represented by their own face; a role badge beside four photos reads
+as a different kind of thing.
 
 **Changing an avatar needs a migration.** `ensureSeeded()` only creates records
 when the household does not exist, so editing `SEED_PEOPLE` changes nothing for
@@ -289,6 +302,37 @@ the number on the files you changed. The versions are written out per line
 rather than shared through a constant because `check-frontend.js` lifts
 `IMG_AVATARS` into a sandbox on its own, and a constant declared outside it is
 not in scope there.
+
+### How often a chore repeats
+
+Three options, and the middle one is the interesting one:
+
+| Choice | Stored as | Falls on |
+|---|---|---|
+| Every day | `cycle: 'daily'` | every day |
+| Certain days | `cycle: 'weekly'` + `days: [1,3,5]` | those weekdays, `0`=Sunday |
+| One-off | `cycle: 'oneoff'` + `dueBy` | that datetime |
+
+"Certain days" used to be "Once a week", and it silently meant *whichever
+weekday the chore happened to be created on* — real recurrence, but nobody
+could see or choose the day, so a chore that belongs on Mon/Wed/Fri had no way
+to be expressed.
+
+- **Absent `days` still means the creation day.** Chores written before the
+  chooser existed keep landing where they always have, so there is no migration
+  and nothing silently moves.
+- **`days` is cleared when the cycle changes**, exactly like `dueBy`. A task
+  switched to Every day and back must not quietly keep weekdays it had two
+  edits ago.
+- **A completion counts for its own day.** Matching by week is what "once a
+  week" needed; with named days it would mark Wednesday done because Monday
+  was. `cycleCompletion()` and `parentCalendarLiveCompletion()` both branch on
+  whether the chore names days.
+- **Name the days wherever the chore is listed.** "weekly" is equally true of
+  Mon/Wed/Fri and of Sundays only, which makes it the least useful thing a row
+  could say. `daysLabel()` gives "Mon, Wed & Fri".
+- Chips, not a multi-select: seven options that are always the same seven read
+  faster as a row you tap.
 
 ### The sign-in screen
 

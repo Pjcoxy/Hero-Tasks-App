@@ -525,6 +525,40 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 }
 .pill.neutral { background: var(--surface-sunken); color: var(--ink-muted); }
 .pill.good    { background: var(--success-wash); color: var(--success); }
+
+/* Weekday chooser. Checkboxes rather than a multi-select: seven options that
+   are always the same seven read faster as a row you tap than as a list you
+   scroll, and it is the difference between "every day" and "Mon/Wed/Fri" that
+   the parent is actually choosing. The native input stays in the DOM, hidden,
+   so the label still toggles it and keyboard focus still works. */
+.day-picker { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.day-chip {
+  position: relative;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  border-radius: var(--radius-full);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-sunken);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+}
+.day-chip input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.day-chip:has(input:checked) {
+  background: var(--brand);
+  color: var(--on-brand);
+  border-color: var(--brand);
+}
+.day-chip:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 2px; }
+
 .pill.warn    { background: var(--warning-wash); color: var(--warning); }
 
 /* The kid's own face on their card, rather than their name doing all the work. */
@@ -867,6 +901,19 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   flex: 1;
   min-width: 0;
 }
+/* The signed-in parent's own face, where a generic crown used to be. Everyone
+   else in this app is represented by their photo; a crown said "a parent" when
+   the header can say which one. Empty until sign-in, so it collapses to
+   nothing rather than reserving a hole. */
+.parent-title .hq-face {
+  display: inline-flex;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  vertical-align: -0.3em;
+}
+.parent-title .hq-face:not(:empty) { margin-right: var(--space-1); }
 .parent-tabbar {
   display: flex;
   gap: var(--space-2);
@@ -1583,7 +1630,7 @@ button.parent-list-row:active { transform: scale(0.99); }
   <header class="parent-header">
     <div class="parent-header-row">
       <button class="back-btn" onclick="logout()">← Switch user</button>
-      <strong id="p-hq-title" class="parent-title">👑 Parent HQ</strong>
+      <strong id="p-hq-title" class="parent-title"><span class="hq-face"></span>Parent HQ</strong>
       <div class="offline-pill" id="parent-offline-pill" aria-live="polite" aria-label="Offline — showing cached data">⚡ Offline</div>
     </div>
   </header>
@@ -1640,9 +1687,21 @@ button.parent-list-row:active { transform: scale(0.99); }
           <div class="field"><label>How often</label>
             <select id="p-cycle" onchange="updateDueVisibility()">
               <option value="daily">Every day</option>
-              <option value="weekly">Once a week</option>
+              <option value="weekly">Certain days</option>
               <option value="oneoff">One-off</option>
             </select>
+          </div>
+          <div class="field hidden" id="p-days-wrap">
+            <label>Which days</label>
+            <div class="day-picker" id="p-days">
+              <label class="day-chip"><input type="checkbox" value="1"><span>Mon</span></label>
+              <label class="day-chip"><input type="checkbox" value="2"><span>Tue</span></label>
+              <label class="day-chip"><input type="checkbox" value="3"><span>Wed</span></label>
+              <label class="day-chip"><input type="checkbox" value="4"><span>Thu</span></label>
+              <label class="day-chip"><input type="checkbox" value="5"><span>Fri</span></label>
+              <label class="day-chip"><input type="checkbox" value="6"><span>Sat</span></label>
+              <label class="day-chip"><input type="checkbox" value="0"><span>Sun</span></label>
+            </div>
           </div>
           <div class="field hidden" id="p-due-wrap">
             <label>Due by (optional)</label>
@@ -1939,8 +1998,8 @@ var SVG_AVATAR_FALLBACK = {
 // through a constant so this object stays self-contained - check-frontend.js
 // lifts it into a sandbox on its own.
 var IMG_AVATARS = {
-  toby:    { tile: 'img/avatar-toby.webp?v=1',    head: 'img/head-toby.webp?v=1',    fallback: '\u{1F5A8}\uFE0F' },
-  ollie:   { tile: 'img/avatar-ollie.webp?v=1',   head: 'img/head-ollie.webp?v=1',   fallback: '\u{1F43E}' },
+  toby:    { tile: 'img/avatar-toby.webp?v=1',    head: 'img/head-toby.webp?v=2',    fallback: '\u{1F9D2}' },
+  ollie:   { tile: 'img/avatar-ollie.webp?v=1',   head: 'img/head-ollie.webp?v=2',   fallback: '\u{1F466}' },
   peter:   { tile: 'img/avatar-peter.webp?v=1',   head: 'img/head-peter.webp?v=1',   fallback: '\u{1F9D4}' },
   tymanda: { tile: 'img/avatar-tymanda.webp?v=2', head: 'img/head-tymanda.webp?v=2', fallback: '\u{1F469}' },
 };
@@ -2174,7 +2233,15 @@ function cycleCompletion(task) {
   const live = state.completions.filter(c =>
     c.taskId === task.id && (c.status === 'pending' || c.status === 'approved'));
   if (task.cycle === 'daily')  return live.find(c => c.date === todayStr()) || null;
-  if (task.cycle === 'weekly') return live.find(c => isoWeek(c.date) === isoWeek(todayStr())) || null;
+  // A chore with named days is due on each of them, so a completion counts for
+  // its own day only - otherwise doing Monday's would mark Wednesday's done
+  // too. Without days it is the legacy "once a week", where any completion in
+  // the week is the one.
+  if (task.cycle === 'weekly') {
+    return task.days && task.days.length
+      ? live.find(c => c.date === todayStr()) || null
+      : live.find(c => isoWeek(c.date) === isoWeek(todayStr())) || null;
+  }
   return live[0] || null;
 }
 
@@ -2285,7 +2352,7 @@ function renderWho() {
       + ' onclick="pickPerson(\'' + p.id + '\')" touch-action="manipulation">'
       + '<span class="tile-emoji">' + renderAvatarHtml(p.emoji, kidColorVal) + '</span>'
       + '<span class="tile-name">' + esc(p.name) + '</span>'
-      + '<span class="tile-sub">' + (isParent ? 'Parent 👑' : 'Kid') + '</span>'
+      + '<span class="tile-sub">' + (isParent ? 'Parent' : 'Kid') + '</span>'
       + '</button>';
   }).join('');
 }
@@ -2766,7 +2833,12 @@ function parentCalendarLiveCompletion(item) {
   }
   if (item.cycle === 'weekly') {
     var weekKey = parentCalendarDayKey(item);
-    return weekKey ? (live.find(function(c) { return isoWeek(c.date) === isoWeek(weekKey); }) || null) : null;
+    if (!weekKey) return null;
+    // Same rule as cycleCompletion: named days are matched per day.
+    if (item.days && item.days.length) {
+      return live.find(function(c) { return c.date === weekKey; }) || null;
+    }
+    return live.find(function(c) { return isoWeek(c.date) === isoWeek(weekKey); }) || null;
   }
   return live[0] || null;
 }
@@ -3216,7 +3288,9 @@ function renderTaskList(elId, tasks, emptyEmoji, emptyLine1, emptyLine2) {
     var isOverdue = !c && t.dueBy && new Date(t.dueBy) < new Date();
     var sub = c
       ? (c.status === 'approved' ? 'Done — points banked! 💰' : c.status === 'queued' ? 'Saved offline — syncing soon 📡' : 'Waiting for a grown-up to check ⏳')
-      : (t.cycle === 'weekly' ? 'Any time this week' : '');
+      : (t.cycle === 'weekly'
+          ? (t.days && t.days.length ? 'On ' + daysLabel(t.days) : 'Any time this week')
+          : '');
     if (!c && t.dueBy) sub = isOverdue ? '⚠️ Overdue — was due ' + formatDue(t.dueBy) : 'Due ' + formatDue(t.dueBy);
     var action = c
       ? ((c.status === 'pending' || c.status === 'queued') ? 'undoTask(\'' + c.id + '\')' : '')
@@ -3758,7 +3832,9 @@ function renderRecentActivity(kid) {
 }
 
 function renderParent(person) {
-  document.getElementById('p-hq-title').textContent = '👑 ' + person.name + '\'s HQ';
+  document.getElementById('p-hq-title').innerHTML =
+    '<span class="hq-face">' + renderAvatarHtml(person.emoji, person.color, 'head') + '</span>'
+    + esc(person.name) + '\u2019s HQ';
   var pending = state.completions.filter(function(c) { return c.status === 'pending'; });
   var pendingRedemptions = (state.redemptions || []).filter(function(r) { return r.status === 'pending'; });
   var approvalCount = pending.length + pendingRedemptions.length;
@@ -3813,6 +3889,12 @@ function renderParent(person) {
   }
 
   var cycleLabel = { daily: 'daily', weekly: 'weekly', oneoff: 'one-off' };
+  // Name the days when we know them. "weekly" is true of Mon/Wed/Fri and of
+  // Sundays only, which makes it the least useful thing the row could say.
+  var howOften = function(t) {
+    if (t.cycle === 'weekly' && t.days && t.days.length) return daysLabel(t.days);
+    return cycleLabel[t.cycle] || t.cycle;
+  };
   var kids = kidsOnly();
   document.getElementById('p-tasks').innerHTML = kids.map(function(k) {
     var mine = state.tasks.filter(function(t) { return t.kidId === k.id; });
@@ -3831,7 +3913,7 @@ function renderParent(person) {
               return '<div class="parent-list-row">'
                 + '<div class="parent-copy">'
                 + '<span class="parent-list-title">' + esc(t.title) + '</span>'
-                + '<div class="sub">' + (cycleLabel[t.cycle] || t.cycle) + ' · ' + t.points + ' pts' + (t.dueBy ? ' · due ' + formatDue(t.dueBy) : '') + '</div>'
+                + '<div class="sub">' + howOften(t) + ' · ' + t.points + ' pts' + (t.dueBy ? ' · due ' + formatDue(t.dueBy) : '') + '</div>'
                 + '</div>'
                 + '<button class="btn ghost small" onclick="parentEditTask(\'' + t.id + '\')">Edit</button>'
                 + '<button class="btn red-ghost small" onclick="parentDeleteTask(\'' + t.id + '\')">Remove</button>'
@@ -4623,9 +4705,42 @@ async function cancelKidRedemption(redemptionId) {
   toast('Points returned! 💜');
 }
 
+// Monday first, because that is how a school week is read. The stored value is
+// still JS getDay() numbering, 0=Sunday, so it lines up with the API.
+var WEEKDAYS = [
+  { value: 1, short: 'Mon' }, { value: 2, short: 'Tue' }, { value: 3, short: 'Wed' },
+  { value: 4, short: 'Thu' }, { value: 5, short: 'Fri' }, { value: 6, short: 'Sat' },
+  { value: 0, short: 'Sun' },
+];
+
+function dayShort(value) {
+  var match = WEEKDAYS.find(function(d) { return d.value === value; });
+  return match ? match.short : '';
+}
+
+// "Mon, Wed & Fri". Named days beat "weekly" everywhere a chore is listed -
+// "Any time this week" was true but useless when the chore only lands on
+// Wednesday.
+function daysLabel(days) {
+  if (!Array.isArray(days) || !days.length) return '';
+  var names = WEEKDAYS
+    .filter(function(d) { return days.indexOf(d.value) !== -1; })
+    .map(function(d) { return d.short; });
+  if (names.length === 7) return 'Every day';
+  if (names.length === 1) return names[0];
+  return names.slice(0, -1).join(', ') + ' & ' + names[names.length - 1];
+}
+
+function selectedDays() {
+  return Array.prototype.slice
+    .call(document.querySelectorAll('#p-days input:checked'))
+    .map(function(input) { return Number(input.value); });
+}
+
 function updateDueVisibility() {
-  var isOneoff = document.getElementById('p-cycle').value === 'oneoff';
-  document.getElementById('p-due-wrap').classList.toggle('hidden', !isOneoff);
+  var cycle = document.getElementById('p-cycle').value;
+  document.getElementById('p-due-wrap').classList.toggle('hidden', cycle !== 'oneoff');
+  document.getElementById('p-days-wrap').classList.toggle('hidden', cycle !== 'weekly');
 }
 
 async function parentAddTask() {
@@ -4633,18 +4748,22 @@ async function parentAddTask() {
   if (!title) { toast('Type or speak a task first!'); return; }
   var cycle    = document.getElementById('p-cycle').value;
   var dueInput = document.getElementById('p-due').value;
+  var days     = cycle === 'weekly' ? selectedDays() : null;
+  if (cycle === 'weekly' && !days.length) { toast('Pick at least one day.'); return; }
   var payload  = {
     action: 'addTask', parentId: session.personId, parentPin: session.pin,
     kidId:  document.getElementById('p-kid').value,
     title,
     cycle,
+    days,
     points: Number(document.getElementById('p-points').value) || 5,
     dueBy: cycle === 'oneoff' && dueInput ? new Date(dueInput).toISOString() : null,
   };
   document.getElementById('p-title').value = '';
   document.getElementById('p-due').value   = '';
   toast('Task allocated! 📬');
-  await api(payload);
+  var added = await api(payload);
+  if (toastApiError(added)) return;
 }
 
 async function parentAddPlanningItem() {
@@ -4979,7 +5098,7 @@ async function parentEditTask(taskId) {
   var points = Number(pointsInput);
   if (!Number.isInteger(points) || points < 1) { toast('Points must be a positive integer.'); return; }
   var cycleOptions = ['daily', 'weekly', 'oneoff'];
-  var cyclePrompt = 'How often?\n1) Every day  2) Once a week  3) One-off';
+  var cyclePrompt = 'How often?\n1) Every day  2) Certain days  3) One-off';
   var cycleInput = prompt(cyclePrompt, String(cycleOptions.indexOf(task.cycle) + 1));
   if (cycleInput === null) return;
   var cycleIndex = Number(cycleInput.trim()) - 1;
@@ -4994,6 +5113,23 @@ async function parentEditTask(taskId) {
   var kidIndex = Number(kidInput.trim()) - 1;
   var kid = kids[kidIndex];
   if (!kid) { toast('Choose a valid kid number.'); return; }
+  var days = null;
+  if (cycle === 'weekly') {
+    var daysPrompt = 'Which days? Numbers separated by commas.\n'
+      + WEEKDAYS.map(function(d, index) { return (index + 1) + ') ' + d.short; }).join('  ');
+    var existing = Array.isArray(task.days) && task.days.length
+      ? WEEKDAYS.map(function(d, index) { return task.days.indexOf(d.value) === -1 ? null : index + 1; })
+          .filter(Boolean).join(',')
+      : '';
+    var daysInput = prompt(daysPrompt, existing);
+    if (daysInput === null) return;
+    var picked = daysInput.split(',')
+      .map(function(part) { return Number(part.trim()); })
+      .filter(function(n) { return Number.isInteger(n) && n >= 1 && n <= 7; })
+      .map(function(n) { return WEEKDAYS[n - 1].value; });
+    days = [...new Set(picked)];
+    if (!days.length) { toast('Pick at least one day, 1 to 7.'); return; }
+  }
   var dueBy = null;
   if (cycle === 'oneoff') {
     var dueInput = prompt('Due date and time? Leave blank to clear it.', task.cycle === 'oneoff' && task.dueBy ? task.dueBy : '');
@@ -5013,6 +5149,7 @@ async function parentEditTask(taskId) {
     title: trimmed,
     points,
     cycle,
+    days,
     kidId: kid.id,
     dueBy,
   });
