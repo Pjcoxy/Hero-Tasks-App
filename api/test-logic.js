@@ -31,6 +31,14 @@ function mockContainer(name) {
   return {
     items: {
       create: async (doc) => {
+        // Real Cosmos refuses a duplicate id with 409; recordMisses leans on
+        // that for idempotency, so the mock must refuse too or the tests
+        // would pass against a store more forgiving than production.
+        if (map.has(doc.id)) {
+          const err = new Error('Entity with the specified id already exists');
+          err.code = 409;
+          throw err;
+        }
         map.set(doc.id, doc);
         return { resource: doc };
       },
@@ -1894,6 +1902,69 @@ async function main() {
   console.log('\u2713 legacy chores without a window are held to the fallback window');
 
   // Put the windows back for anything that runs after this.
+  household.windows = null;
+  await mockContainer('households').item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(household);
+
+  // -------------------------------------------------------------------------
+  // Misses. A miss is a record that the points were not earned - nothing is
+  // deducted and nothing else happens, but the record is what lets yesterday
+  // start from something instead of blank.
+  const { recordMisses } = require('./src/functions/hero.js');
+
+  // Shut everything again so due-but-unsubmitted chores are sweepable.
+  household.windows = [
+    { id: 'morning', label: 'Morning', closesAt: '00:00' },
+    { id: 'afterschool', label: 'After school', closesAt: '00:00' },
+    { id: 'evening', label: 'Evening', closesAt: '00:00' },
+  ];
+  await mockContainer('households').item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(household);
+
+  await ROUTES.addTask({
+    parentId: 'peter', parentPin: '1234', kidId: 'toby',
+    title: 'Empty the dishwasher', points: 6, cycle: 'daily', windowId: 'evening',
+  });
+  const sweep1 = await recordMisses();
+  const missRows = (await ROUTES.state()).completions.filter((c) => c.status === 'missed');
+  const dishMiss = missRows.find((c) => c.title === 'Empty the dishwasher');
+  assert.ok(dishMiss, 'a due, unsubmitted chore in a shut window is recorded as missed');
+  assert.strictEqual(dishMiss.points, 6, 'the miss names the points that were on the table');
+  assert.strictEqual(dishMiss.windowId, 'evening', 'and which window shut on it');
+  console.log('\u2713 a shut window with nothing submitted becomes a recorded miss');
+
+  const sweep2 = await recordMisses();
+  const missCountAfter = (await ROUTES.state()).completions
+    .filter((c) => c.status === 'missed' && c.title === 'Empty the dishwasher').length;
+  assert.strictEqual(missCountAfter, 1, 'a second sweep records nothing new');
+  assert.strictEqual(sweep2.recorded, 0, 'and says so');
+  console.log('\u2713 the sweep is idempotent - one miss per chore per day, however often it runs');
+
+  // The 'Afternoon chore' was completed earlier while its window was open, so
+  // even though every window is shut now, it must not be marked missed.
+  const afternoonMissed = (await ROUTES.state()).completions
+    .some((c) => c.status === 'missed' && c.title === 'Afternoon chore');
+  assert.strictEqual(afternoonMissed, false, 'a chore submitted in time is never a miss');
+  console.log('\u2713 submitting in time keeps a chore off the miss list');
+
+  // A weekly chore not due today is not "missed" today.
+  const notToday = [(new Date(`${(await ROUTES.state()).today}T12:00:00Z`).getUTCDay() + 3) % 7];
+  await ROUTES.addTask({
+    parentId: 'peter', parentPin: '1234', kidId: 'toby',
+    title: 'Wash the car', points: 8, cycle: 'weekly', days: notToday, windowId: 'evening',
+  });
+  await recordMisses();
+  const carMissed = (await ROUTES.state()).completions
+    .some((c) => c.status === 'missed' && c.title === 'Wash the car');
+  assert.strictEqual(carMissed, false, 'a weekly chore is only missable on its own days');
+  console.log('\u2713 a weekly chore is only missable on the days it is due');
+
+  // Balances never count a miss - the points named on the record stay unearned.
+  const tobyStats = (await ROUTES.state()).stats['toby'];
+  const approvedTotal = (await ROUTES.state()).completions
+    .filter((c) => c.kidId === 'toby' && c.status === 'approved')
+    .reduce((sum, c) => sum + (c.points || 0), 0);
+  assert.strictEqual(tobyStats.points, approvedTotal, 'points are the sum of approved rows and nothing else');
+  console.log('\u2713 a miss changes no balance - the only consequence is points not earned');
+
   household.windows = null;
   await mockContainer('households').item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(household);
 

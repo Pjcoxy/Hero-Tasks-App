@@ -256,6 +256,7 @@ async function getState() {
       points: c.points || 0,
       date: c.date,
       status: c.status,
+      windowId: c.windowId || null,
       comment: c.comment || null,
       createdAt: c.createdAt,
       decidedAt: c.decidedAt || null,
@@ -1291,6 +1292,83 @@ async function cancelRedemption(req) {
   return getState();
 }
 
+// A miss is a record that the points were not earned. Nothing more: nothing is
+// deducted, no streak breaks - that was settled in #9, and points-not-earned
+// is already the consequence. What the record buys is the pattern ("bins:
+// missed 3 of the last 7") and a yesterday that starts from something instead
+// of blank. Without it the app knows what was done but never what should have
+// been, and every morning looks identical however the day before went.
+//
+// Misses live in the completions container as status: 'missed' rows rather
+// than a container of their own, so one stream holds everything that happened
+// to a chore. They carry the forfeited points for display; nothing counts
+// them - balances only ever sum approved rows.
+//
+// The sweep runs from the same 15-minute timer as due reminders. Idempotency
+// is the record's own id: miss-<taskId>-<date> is deterministic, so a second
+// sweep of the same window finds the create refused and moves on. That also
+// holds across restarts, which a "have I run today" flag would not.
+function choreDueToday(chore, dateStr) {
+  if (chore.cycle === 'daily') return true;
+  if (chore.cycle !== 'weekly') return false;
+  // The weekday of a local date, taken at UTC noon of that date so no
+  // timezone can shift it across midnight.
+  const weekday = new Date(`${dateStr}T12:00:00Z`).getUTCDay();
+  if (Array.isArray(chore.days) && chore.days.length) return chore.days.includes(weekday);
+  const anchor = new Date(`${chore.createdAt || dateStr}T12:00:00Z`);
+  return weekday === anchor.getUTCDay();
+}
+
+async function recordMisses(now = new Date()) {
+  const dateStr = todayStr(now);
+  const [chores, completions, windows] = await Promise.all([
+    queryHousehold('chores'),
+    queryHousehold('completions'),
+    getHouseholdWindows(),
+  ]);
+  const completionsContainer = container('completions');
+  const settledToday = new Set(
+    completions
+      .filter((c) => c.date === dateStr && c.taskId)
+      .map((c) => c.taskId)
+  );
+
+  let recorded = 0;
+  for (const chore of chores) {
+    if (chore.active === false) continue;
+    if (chore.cycle === 'oneoff') continue; // dueBy is its own mechanism
+    if (!choreDueToday(chore, dateStr)) continue;
+    const windowDef = resolveWindow(windows, chore.windowId);
+    if (!isWindowClosed(windowDef, now)) continue;
+    if (settledToday.has(chore.id)) continue; // submitted in time, any status
+
+    try {
+      await completionsContainer.items.create({
+        // Deterministic id = the idempotency. One miss per chore per day,
+        // however many sweeps run.
+        id: `miss-${chore.id}-${dateStr}`,
+        householdId: HOUSEHOLD_ID,
+        taskId: chore.id,
+        kidId: chore.kidId,
+        title: chore.title,
+        // The points that were on the table, for display. Never summed:
+        // balances only count approved rows.
+        points: Number(chore.points) || 0,
+        date: dateStr,
+        status: 'missed',
+        windowId: windowDef ? windowDef.id : null,
+        createdAt: now.toISOString(),
+      });
+      recorded += 1;
+    } catch (err) {
+      // 409 means this sweep already ran for this chore today. Anything else
+      // is real.
+      if (!err || err.code !== 409) throw err;
+    }
+  }
+  return { recorded };
+}
+
 async function sendDueReminders(now = new Date()) {
   await ensureSeeded();
   const [chores, completions, quietHours] = await Promise.all([
@@ -1580,7 +1658,12 @@ app.timer('choreDueReminder', {
     } catch (err) {
       context.error(err);
     }
+    try {
+      await recordMisses();
+    } catch (err) {
+      context.error(err);
+    }
   },
 });
 
-module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, todayStr, localMinutes, HOUSEHOLD_TZ, DEFAULT_WINDOWS, isWindowClosed, resolveWindow };
+module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, recordMisses, todayStr, localMinutes, HOUSEHOLD_TZ, DEFAULT_WINDOWS, isWindowClosed, resolveWindow };
