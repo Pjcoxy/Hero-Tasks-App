@@ -378,6 +378,7 @@ async function validatePlanningPayload(req, currentItem = null) {
     prepLists: [],
     adultActions: [],
     notes: null,
+    prepDueBy: null,
     externalRef: null,
     allDay: false,
   };
@@ -431,6 +432,19 @@ async function validatePlanningPayload(req, currentItem = null) {
   if (req.source !== undefined) {
     if (!['manual', 'voice', 'email'].includes(req.source)) return { ok: false, error: 'invalid source' };
     next.source = req.source;
+  }
+
+  // Per-event override for when prep is due. Absent, the rule is the last
+  // window's close on the day before (prepDeadlinePassed) - this exists for
+  // prep that only makes sense on the day, like "uniform on" before Cubs.
+  if (req.prepDueBy !== undefined) {
+    if (req.prepDueBy === null || req.prepDueBy === '') {
+      next.prepDueBy = null;
+    } else {
+      const prepDueBy = parseIso(req.prepDueBy);
+      if (!prepDueBy) return { ok: false, error: 'prepDueBy must be an ISO datetime' };
+      next.prepDueBy = prepDueBy;
+    }
   }
 
   if (req.externalRef !== undefined) {
@@ -1094,6 +1108,28 @@ async function uncomplete(req) {
     await completions.item(req.completionId, HOUSEHOLD_ID).delete();
   }
   return getState();
+}
+
+// Parent-gated fresh start: wipe the activity history - completions (chore
+// ticks, misses, prep confirmations) and reward redemptions - without
+// touching who exists, the chores themselves, the calendar or the shop.
+// Points balances derive entirely from those rows, so this zeroes everyone.
+// Exists because test data otherwise lives forever: nothing else can delete
+// a completion, deliberately.
+async function clearActivity(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const completions = await queryHousehold('completions');
+  for (const row of completions) {
+    await container('completions').item(row.id, HOUSEHOLD_ID).delete().catch(() => {});
+  }
+  const rewardRows = await queryHousehold('rewards');
+  let redemptions = 0;
+  for (const row of rewardRows) {
+    if (row.type !== 'redemption') continue;
+    await container('rewards').item(row.id, HOUSEHOLD_ID).delete().catch(() => {});
+    redemptions += 1;
+  }
+  return { ok: true, cleared: { completions: completions.length, redemptions } };
 }
 
 async function addExtra(req) {
@@ -1866,6 +1902,7 @@ const ROUTES = {
   reorderTasks,
   tickPrepItem,
   confirmPrep,
+  clearActivity,
 };
 
 app.http('hero', {
