@@ -663,15 +663,21 @@ async function main() {
   });
   console.log('✓ approve sends reward-earned push to the completed chore kid');
 
-  const now = new Date();
-  const startQuiet = new Date(now.getTime() - (60 * 1000));
-  const endQuiet = new Date(now.getTime() + (60 * 1000));
-  const hhmm = (d) => `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  // A window of one minute either side of now. Built from LOCAL time, because
+  // that is what a parent types into the setting and what the code now reads.
+  // This previously built it from getUTCHours() and passed only because the
+  // code was reading UTC too - two matching mistakes cancelling out.
+  const { localMinutes: nowLocalMinutes } = require('./src/functions/hero.js');
+  const nowMinutesLocal = nowLocalMinutes(new Date());
+  const hhmm = (minutes) => {
+    const wrapped = ((minutes % 1440) + 1440) % 1440;
+    return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
+  };
   await updateQuietHours({
     parentId: 'peter',
     parentPin: '1234',
-    start: hhmm(startQuiet),
-    end: hhmm(endQuiet),
+    start: hhmm(nowMinutesLocal - 1),
+    end: hhmm(nowMinutesLocal + 1),
   });
 
   await chores.items.create({
@@ -1765,6 +1771,36 @@ async function main() {
   const capped = (await ROUTES.state()).completions.find((c) => c.id === longPending.id);
   assert.strictEqual(capped.comment.length, 280, 'a long note is capped, not stored whole');
   console.log('\u2713 a decision comment is capped at 280 characters');
+
+  // -------------------------------------------------------------------------
+  // Local time. The app is a family in Perth (UTC+8) and every date it writes
+  // used to be a UTC date, so for the eight hours between local midnight and
+  // 8am the API and the browser disagreed about what day it was - a chore
+  // ticked before school was stamped yesterday and rendered as still to do.
+  // Quiet hours were out by the same eight hours in the other direction.
+  const { todayStr, localMinutes, isInQuietHours: quietCheck } = require('./src/functions/hero.js');
+
+  const beforeSchool = new Date('2026-08-23T23:30:00Z'); // 07:30 Mon 24th in Perth
+  assert.strictEqual(beforeSchool.toISOString().slice(0, 10), '2026-08-23',
+    'the fixture really is the previous day in UTC, or this proves nothing');
+  assert.strictEqual(todayStr(beforeSchool), '2026-08-24',
+    'a chore done before school belongs to today, not yesterday');
+  console.log('\u2713 an early-morning completion is dated the local day, not the UTC one');
+
+  assert.strictEqual(localMinutes(new Date('2026-08-23T16:00:00Z')), 0,
+    'local midnight is minute 0 - h23, so it must not come back as 24:00');
+  assert.strictEqual(localMinutes(new Date('2026-08-24T13:00:00Z')), 21 * 60,
+    '9pm local is minute 1260');
+  console.log('\u2713 local minutes are measured from local midnight');
+
+  const evenings = { start: '21:00', end: '07:00' };
+  assert.strictEqual(quietCheck(evenings, new Date('2026-08-24T13:30:00Z')), true,
+    '9:30pm local is inside a 21:00-07:00 quiet window');
+  assert.strictEqual(quietCheck(evenings, new Date('2026-08-23T22:00:00Z')), true,
+    '6am local is still inside it');
+  assert.strictEqual(quietCheck(evenings, new Date('2026-08-24T02:00:00Z')), false,
+    '10am local is not - this is the case that used to be silenced');
+  console.log('\u2713 quiet hours are read in local time, not UTC');
 
   console.log('\nALL LOGIC TESTS PASSED');
 }

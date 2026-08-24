@@ -6,8 +6,45 @@ const { sendPush } = require('../lib/push');
 const { extractVoiceIntent } = require('../lib/llm');
 const { findConflicts, suggestAlternateSlots } = require('../lib/calendar');
 
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+// Everything this app calls "today", or "9pm", means the family's local day -
+// not UTC. Perth runs UTC+8, and with no conversion at all the two collide
+// badly: a chore ticked at 7am was stamped with yesterday's date, and quiet
+// hours set for the evening landed in the middle of the school day. The
+// frontend was already using browser-local dates, so for the eight hours
+// either side of UTC midnight the two ends of the app disagreed about what
+// day it was and a just-completed chore rendered as still outstanding.
+//
+// Intl does the conversion, DST included, with no dependency and no
+// hand-rolled offset arithmetic to drift. 'en-CA' is here because it formats
+// as YYYY-MM-DD, which is the shape every date in this codebase already uses.
+const HOUSEHOLD_TZ = process.env.HOUSEHOLD_TIMEZONE || 'Australia/Perth';
+
+const LOCAL_DATE_FORMAT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: HOUSEHOLD_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+const LOCAL_TIME_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  timeZone: HOUSEHOLD_TZ,
+  hour: '2-digit',
+  minute: '2-digit',
+  // h23 rather than hour12:false - the latter renders midnight as 24 on some
+  // ICU builds, which would put it a whole day out of range.
+  hourCycle: 'h23',
+});
+
+function todayStr(now = new Date()) {
+  return LOCAL_DATE_FORMAT.format(now);
+}
+
+// Minutes since local midnight, for comparing against an HH:MM setting.
+function localMinutes(now = new Date()) {
+  const parts = LOCAL_TIME_FORMAT.formatToParts(now);
+  const hour = Number(parts.find((part) => part.type === 'hour').value);
+  const minute = Number(parts.find((part) => part.type === 'minute').value);
+  return (hour * 60) + minute;
 }
 
 const HHMM_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
@@ -25,7 +62,7 @@ function isInQuietHours(quietHours, now = new Date()) {
   }
   const start = hhmmToMinutes(quietHours.start);
   const end = hhmmToMinutes(quietHours.end);
-  const nowMinutes = (now.getUTCHours() * 60) + now.getUTCMinutes();
+  const nowMinutes = localMinutes(now);
   if (start === end) return true;
   if (start < end) return nowMinutes >= start && nowMinutes < end;
   return nowMinutes >= start || nowMinutes < end;
@@ -1453,4 +1490,4 @@ app.timer('choreDueReminder', {
   },
 });
 
-module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders };
+module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, todayStr, localMinutes, HOUSEHOLD_TZ };
