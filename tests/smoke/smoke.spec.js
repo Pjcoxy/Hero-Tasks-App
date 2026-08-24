@@ -274,7 +274,7 @@ test('the rewards shop is not empty', async ({ page }) => {
 test('the kid Home screen shows a Today and a This Week section', async ({ page }) => {
   await pickPerson(page, 'Ollie');
 
-  await expect(page.getByRole('heading', { name: /^📅 Today$/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /🗓️ Today/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: /This Week/ })).toBeVisible();
 
   // Both must resolve to real content or a real empty state - never a permanent
@@ -932,6 +932,39 @@ test('a missed chore shows on the parent\u2019s today view', async ({ page }) =>
 // it, and Packed only unlocks when everything is ticked. This is the surface
 // the original prepLists[kidId] lookup bug kept blank - that code had never
 // once run.
+// Pete's screenshot: the flat calendar emoji hardcodes "JUL 17" in its
+// artwork on Samsung/Apple, and with no real date anywhere the app appeared
+// to claim the wrong day. The header now prints the actual date, and a
+// submitted chore reads as dealt-with - struck through - rather than
+// looking indistinguishable from still-to-do.
+test('the Today header shows the real date, and a submitted chore is struck through', async ({ page }) => {
+  await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    await post({
+      action: 'addTask', parentId: 'peter', parentPin: '1234',
+      kidId: 'toby', title: 'Sweep the porch', points: 2, cycle: 'daily',
+    });
+  });
+  await page.reload();
+  await pickPerson(page, 'Toby');
+
+  const expected = new Date().toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+  await expect(page.locator('#k-today-date')).toHaveText(expected);
+
+  const row = page.locator('.task', { hasText: 'Sweep the porch' }).first();
+  await expect(row).toBeVisible();
+  const before = await row.locator('.title').evaluate((el) => getComputedStyle(el).textDecorationLine);
+  expect(before).not.toContain('line-through');
+  await row.locator('.tick').click();
+  await expect(row).toContainText(/waiting for a grown-up/i);
+  const after = await row.locator('.title').evaluate((el) => getComputedStyle(el).textDecorationLine);
+  expect(after, 'a submitted chore should be struck through').toContain('line-through');
+});
+
 test('a kid can tick their prep list and confirm packed', async ({ page }) => {
   const eventId = await page.evaluate(async () => {
     const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
