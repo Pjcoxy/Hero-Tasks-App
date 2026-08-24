@@ -8,6 +8,21 @@
 // stubs the API at the network layer invents its own responses and sails
 // straight past that class of bug. Running the real handler against a real
 // (if temporary) store is what makes the test able to see it.
+// The window feature makes 'now' part of the app's behaviour: past 21:00
+// household time a daily chore is refused. Tests must not change meaning with
+// the hour CI happens to run at, so the harness pins the household timezone to
+// a fixed-offset zone chosen so that local time is around noon right now, with
+// the local date equal to the UTC date (the browser in CI runs UTC, and the
+// two ends of the app must agree on what day it is). Etc/GMT zones use
+// inverted signs: Etc/GMT-8 means UTC+8.
+{
+  const utcHour = new Date().getUTCHours();
+  const offset = Math.max(-12, Math.min(14, 12 - utcHour));
+  process.env.HOUSEHOLD_TIMEZONE = offset === 0
+    ? 'Etc/GMT'
+    : `Etc/GMT${offset > 0 ? '-' : '+'}${Math.abs(offset)}`;
+}
+
 const http = require('http');
 const fs = require('fs');
 const path = require('path');

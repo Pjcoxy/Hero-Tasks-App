@@ -303,6 +303,46 @@ rather than shared through a constant because `check-frontend.js` lifts
 `IMG_AVATARS` into a sandbox on its own, and a constant declared outside it is
 not in scope there.
 
+### Windows — when a chore is due
+
+**Do it, submit it inside the window, get it approved — points. Window closes
+with nothing submitted — no points, marked a miss.** That is the household's
+whole mechanic, settled deliberately, including the hard part: **there is no
+late award and no parent override.** A door that always reopens is not a
+deadline.
+
+Three named windows for the whole household, not a clock per chore:
+
+| Window | Closes |
+|---|---|
+| Morning | 08:30 |
+| After school | 18:00 |
+| Evening | 21:00 |
+
+Defaults live in `DEFAULT_WINDOWS` in `hero.js`, overridable per household via
+a `windows` array on the household record — in code rather than the seed,
+because `ensureSeeded()` never touches an existing household (the #88 trap).
+A chore with no `windowId` is held to the **evening** window, not exempted: an
+undated chore has always meant "some time today", and the last window of the
+day is the honest reading of that.
+
+Rules that must not drift:
+
+- **The server is the only clock.** `state.windows[].closed` is computed
+  API-side and the frontend renders it; `completeTask` refuses a shut window
+  with `windowClosed: true`. The browser never computes shutness from its own
+  clock — a phone in the wrong timezone would show a different truth than the
+  API acts on.
+- **A miss stays on screen.** The row greys, says why, strikes the points —
+  it does not vanish. A miss that disappears overnight teaches nothing.
+- **One-offs are separate.** They carry their own `dueBy` and overdue display;
+  folding the two mechanisms together is a decision, not a default.
+- **Tests pin the clock.** "Now" is part of behaviour, so `test-logic.js` and
+  the smoke server pin `HOUSEHOLD_TIMEZONE` to a fixed-offset zone where local
+  time is ~noon — morning has always shut, evening is always open, whatever
+  hour CI runs. A window of `closesAt: '00:00'` is shut at every moment of the
+  day, which is the deterministic way to test refusal.
+
 ### How often a chore repeats
 
 Three options, and the middle one is the interesting one:

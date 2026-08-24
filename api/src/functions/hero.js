@@ -68,6 +68,52 @@ function isInQuietHours(quietHours, now = new Date()) {
   return nowMinutes >= start || nowMinutes < end;
 }
 
+// Windows are when a chore is due. A recurring chore carries no time of its
+// own - "daily" says how often, never by when - so before this there was
+// nothing for a deadline to be measured against and nothing could be late.
+//
+// Three named windows for the whole household rather than a clock per chore:
+// three choices to set up instead of one per task, and a nudge can say "before
+// bed" rather than "at 18:00". Defaults live here rather than on the household
+// record on purpose - ensureSeeded() only writes when the household is absent,
+// so seeding them would do nothing for a household created weeks ago. A
+// household may override them; when it has not, these apply immediately.
+const DEFAULT_WINDOWS = Object.freeze([
+  Object.freeze({ id: 'morning',     label: 'Morning',      closesAt: '08:30' }),
+  Object.freeze({ id: 'afterschool', label: 'After school', closesAt: '18:00' }),
+  Object.freeze({ id: 'evening',     label: 'Evening',      closesAt: '21:00' }),
+]);
+
+// What a chore with no window set means. Existing chores predate the concept,
+// and an undated chore has always been understood as "some time today", so the
+// last window of the day is the honest reading rather than exempting it.
+const FALLBACK_WINDOW_ID = 'evening';
+
+async function getHouseholdWindows() {
+  const { resource: household } = await container('households')
+    .item(HOUSEHOLD_ID, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  const custom = household && Array.isArray(household.windows) ? household.windows : null;
+  return custom && custom.length ? custom : DEFAULT_WINDOWS;
+}
+
+function resolveWindow(windows, windowId) {
+  return windows.find((w) => w.id === windowId)
+    || windows.find((w) => w.id === FALLBACK_WINDOW_ID)
+    || windows[windows.length - 1]
+    || null;
+}
+
+// Whether the window has already shut today. Comparing minutes-since-local-
+// midnight needs no date arithmetic: the count resets at local midnight, so at
+// 00:30 the next day the same window reads as open again, which is exactly the
+// daily reset a recurring chore wants.
+function isWindowClosed(windowDef, now = new Date()) {
+  if (!windowDef || !HHMM_RE.test(windowDef.closesAt || '')) return false;
+  return localMinutes(now) >= hhmmToMinutes(windowDef.closesAt);
+}
+
 async function getHouseholdQuietHours() {
   const { resource: household } = await container('households')
     .item(HOUSEHOLD_ID, HOUSEHOLD_ID)
@@ -146,6 +192,8 @@ async function getState() {
   const allRewardRows = await queryHousehold('rewards');
   const redemptionDocs = allRewardRows.filter((r) => r.type === 'redemption');
 
+  const windows = await getHouseholdWindows();
+
   const stats = {};
   people
     .filter((p) => p.role === 'kid')
@@ -163,6 +211,14 @@ async function getState() {
   return {
     ok: true,
     vapidPublicKey: process.env.VAPID_PUBLIC_KEY || '',
+    // `closed` is computed HERE, not in the browser. The server is the only
+    // clock: it is the thing that enforces the close, and a phone whose OS
+    // timezone differs from the household's would otherwise show a different
+    // truth than the API acts on. Stale-while-open is acceptable - the display
+    // refreshes on every state fetch, and a submit against a window that shut
+    // in between gets the API's own refusal with a clear message.
+    windows: windows.map((w) => ({ ...w, closed: isWindowClosed(w) })),
+    fallbackWindowId: FALLBACK_WINDOW_ID,
     people: people.map((p) => ({ id: p.id, name: p.name, emoji: p.emoji, role: p.role, hasPin: !!p.pin })),
     rewards: rewardDocs.map((r) => ({ id: r.id, title: r.title, cost: r.cost, needsApproval: r.needsApproval })),
     redemptions: redemptionDocs
@@ -183,6 +239,7 @@ async function getState() {
       title: t.title,
       points: t.points,
       cycle: t.cycle,
+      windowId: t.windowId || null,
       days: Array.isArray(t.days) && t.days.length ? t.days : null,
       dueBy: t.dueBy || null,
       // Chores created before reordering existed have no order field. Falling
@@ -499,6 +556,12 @@ function choreFallsOnDay(chore, day, anchor) {
 
 async function addTask(req) {
   await requireParent(req.parentId, req.parentPin);
+  const windows = await getHouseholdWindows();
+  let windowId = null;
+  if (req.windowId !== undefined && req.windowId !== null && req.windowId !== '') {
+    if (!windows.some((w) => w.id === req.windowId)) return { ok: false, error: 'unknown window' };
+    windowId = req.windowId;
+  }
   let days = null;
   if (req.cycle === 'weekly' && req.days !== undefined) {
     days = normaliseChoreDays(req.days);
@@ -511,6 +574,8 @@ async function addTask(req) {
     title: req.title,
     points: Number(req.points) || 5,
     cycle: req.cycle || 'daily',
+    // Which window it is due by. Null reads as the fallback window.
+    windowId,
     // Only meaningful on a weekly chore. Null falls back to the creation day.
     days,
     // Due date/time only applies to one-off tasks — daily/weekly recurrence already
@@ -593,6 +658,15 @@ async function updateTask(req) {
       .catch(() => ({ resource: null }));
     if (!kid || kid.role !== 'kid') return { ok: false, error: 'Kid not found' };
     chore.kidId = req.kidId;
+  }
+  if (req.windowId !== undefined) {
+    if (req.windowId === null || req.windowId === '') {
+      chore.windowId = null;
+    } else {
+      const windows = await getHouseholdWindows();
+      if (!windows.some((w) => w.id === req.windowId)) return { ok: false, error: 'unknown window' };
+      chore.windowId = req.windowId;
+    }
   }
   if (req.days !== undefined && req.days !== null) {
     const days = normaliseChoreDays(req.days);
@@ -853,6 +927,25 @@ async function completeTask(req) {
   const chore = chores.find((t) => t.id === req.taskId);
   if (!chore) return { ok: false, error: 'Task not found' };
   await requireSelf(req.personId, req.pin, chore.kidId);
+
+  // The window is what makes the points real: submit inside it or they are
+  // gone. There is no late award and no parent override - that was settled
+  // deliberately, because a door that always reopens is not a deadline.
+  //
+  // One-off chores are left alone. They carry their own dueBy, which is a
+  // different mechanism with its own overdue display, and folding the two
+  // together is a separate decision rather than a detail of this one.
+  if (chore.cycle !== 'oneoff') {
+    const windows = await getHouseholdWindows();
+    const choreWindow = resolveWindow(windows, chore.windowId);
+    if (isWindowClosed(choreWindow)) {
+      return {
+        ok: false,
+        error: `The ${String(choreWindow.label).toLowerCase()} window closed at ${choreWindow.closesAt}.`,
+        windowClosed: true,
+      };
+    }
+  }
 
   // Idempotency: if a client-generated key is supplied, skip creating a
   // duplicate completion record when the same request is replayed (e.g. after
@@ -1490,4 +1583,4 @@ app.timer('choreDueReminder', {
   },
 });
 
-module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, todayStr, localMinutes, HOUSEHOLD_TZ };
+module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, todayStr, localMinutes, HOUSEHOLD_TZ, DEFAULT_WINDOWS, isWindowClosed, resolveWindow };
