@@ -1,6 +1,21 @@
 // Standalone logic test — mocks Cosmos DB in-memory so the actual business logic in
 // hero.js runs for real (seed, add/complete/approve a chore, check points+streak),
 // without needing a live Cosmos DB or Azure Functions host. Not part of the deployed app.
+// The window feature makes 'now' part of the app's behaviour: past 21:00
+// household time a daily chore is refused. Tests must not change meaning with
+// the hour CI happens to run at, so the harness pins the household timezone to
+// a fixed-offset zone chosen so that local time is around noon right now, with
+// the local date equal to the UTC date (the browser in CI runs UTC, and the
+// two ends of the app must agree on what day it is). Etc/GMT zones use
+// inverted signs: Etc/GMT-8 means UTC+8.
+{
+  const utcHour = new Date().getUTCHours();
+  const offset = Math.max(-12, Math.min(14, 12 - utcHour));
+  process.env.HOUSEHOLD_TIMEZONE = offset === 0
+    ? 'Etc/GMT'
+    : `Etc/GMT${offset > 0 ? '-' : '+'}${Math.abs(offset)}`;
+}
+
 const path = require('path');
 const Module = require('module');
 
@@ -1775,32 +1790,112 @@ async function main() {
   // -------------------------------------------------------------------------
   // Local time. The app is a family in Perth (UTC+8) and every date it writes
   // used to be a UTC date, so for the eight hours between local midnight and
-  // 8am the API and the browser disagreed about what day it was - a chore
-  // ticked before school was stamped yesterday and rendered as still to do.
-  // Quiet hours were out by the same eight hours in the other direction.
-  const { todayStr, localMinutes, isInQuietHours: quietCheck } = require('./src/functions/hero.js');
+  // 8am the API and the browser disagreed about what day it was. These assert
+  // the real production timezone, so they run in a child process: the harness
+  // above pins HOUSEHOLD_TIMEZONE to a test zone before hero.js loads, and the
+  // constant is baked in at require time.
+  const { execFileSync } = require('child_process');
+  const perthProbe = execFileSync(process.execPath, ['-e', `
+    const h = require(${JSON.stringify(path.join(__dirname, 'src/functions/hero.js'))});
+    const out = {
+      beforeSchool: h.todayStr(new Date('2026-08-23T23:30:00Z')),
+      midnightMins: h.localMinutes(new Date('2026-08-23T16:00:00Z')),
+      ninePmMins:   h.localMinutes(new Date('2026-08-24T13:00:00Z')),
+      quietLateEvening: h.isInQuietHours({ start: '21:00', end: '07:00' }, new Date('2026-08-24T13:30:00Z')),
+      quietEarlyMorning: h.isInQuietHours({ start: '21:00', end: '07:00' }, new Date('2026-08-23T22:00:00Z')),
+      quietMidMorning: h.isInQuietHours({ start: '21:00', end: '07:00' }, new Date('2026-08-24T02:00:00Z')),
+      windowShutLateEvening: h.isWindowClosed({ id: 'evening', closesAt: '21:00' }, new Date('2026-08-24T13:30:00Z')),
+      windowOpenAfternoon:  h.isWindowClosed({ id: 'evening', closesAt: '21:00' }, new Date('2026-08-24T06:00:00Z')),
+    };
+    process.stdout.write(JSON.stringify(out));
+  `], {
+    env: { ...process.env, HOUSEHOLD_TIMEZONE: 'Australia/Perth' },
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  const perth = JSON.parse(perthProbe.toString());
 
-  const beforeSchool = new Date('2026-08-23T23:30:00Z'); // 07:30 Mon 24th in Perth
-  assert.strictEqual(beforeSchool.toISOString().slice(0, 10), '2026-08-23',
+  assert.strictEqual(new Date('2026-08-23T23:30:00Z').toISOString().slice(0, 10), '2026-08-23',
     'the fixture really is the previous day in UTC, or this proves nothing');
-  assert.strictEqual(todayStr(beforeSchool), '2026-08-24',
+  assert.strictEqual(perth.beforeSchool, '2026-08-24',
     'a chore done before school belongs to today, not yesterday');
   console.log('\u2713 an early-morning completion is dated the local day, not the UTC one');
 
-  assert.strictEqual(localMinutes(new Date('2026-08-23T16:00:00Z')), 0,
-    'local midnight is minute 0 - h23, so it must not come back as 24:00');
-  assert.strictEqual(localMinutes(new Date('2026-08-24T13:00:00Z')), 21 * 60,
-    '9pm local is minute 1260');
+  assert.strictEqual(perth.midnightMins, 0, 'local midnight is minute 0 - h23, not 24:00');
+  assert.strictEqual(perth.ninePmMins, 21 * 60, '9pm local is minute 1260');
   console.log('\u2713 local minutes are measured from local midnight');
 
-  const evenings = { start: '21:00', end: '07:00' };
-  assert.strictEqual(quietCheck(evenings, new Date('2026-08-24T13:30:00Z')), true,
-    '9:30pm local is inside a 21:00-07:00 quiet window');
-  assert.strictEqual(quietCheck(evenings, new Date('2026-08-23T22:00:00Z')), true,
-    '6am local is still inside it');
-  assert.strictEqual(quietCheck(evenings, new Date('2026-08-24T02:00:00Z')), false,
-    '10am local is not - this is the case that used to be silenced');
+  assert.strictEqual(perth.quietLateEvening, true, '9:30pm local is inside a 21:00-07:00 quiet window');
+  assert.strictEqual(perth.quietEarlyMorning, true, '6am local is still inside it');
+  assert.strictEqual(perth.quietMidMorning, false, '10am local is not - the case that used to be silenced');
   console.log('\u2713 quiet hours are read in local time, not UTC');
+
+  assert.strictEqual(perth.windowShutLateEvening, true, '9:30pm is past a 21:00 close');
+  assert.strictEqual(perth.windowOpenAfternoon, false, '2pm is not');
+  console.log('\u2713 a window closes on the household clock, not UTC');
+
+  // -------------------------------------------------------------------------
+  // Windows. The rule: submit inside the window or the points are gone - no
+  // late award, no override. These run in-process against the harness zone,
+  // where the pinned clock reads mid-morning, so "open" cases are open.
+  const stateWithWindows = await ROUTES.state();
+  assert.ok(Array.isArray(stateWithWindows.windows) && stateWithWindows.windows.length === 3,
+    'state carries the three household windows');
+  assert.ok(stateWithWindows.windows.every((w) => typeof w.closed === 'boolean'),
+    'each window says whether it has shut - the server is the only clock');
+  assert.strictEqual(stateWithWindows.fallbackWindowId, 'evening');
+  console.log('\u2713 state exposes the windows, their closed flags, and the fallback');
+
+  const badWindow = await ROUTES.addTask({
+    parentId: 'peter', parentPin: '1234', kidId: 'ollie',
+    title: 'Ghost chore', points: 1, cycle: 'daily', windowId: 'brunch',
+  });
+  assert.strictEqual(badWindow.ok, false, 'an unknown window is refused');
+  console.log('\u2713 a chore cannot be put in a window that does not exist');
+
+  // The harness pins local time to ~noon, so 'afterschool' (closes 18:00) is
+  // open and 'morning' (closed 08:30) is already shut - both states reachable
+  // deterministically whatever hour CI runs.
+  await ROUTES.addTask({
+    parentId: 'peter', parentPin: '1234', kidId: 'ollie',
+    title: 'Afternoon chore', points: 2, cycle: 'daily', windowId: 'afterschool',
+  });
+  const afternoonChore = (await ROUTES.state()).tasks.find((t) => t.title === 'Afternoon chore');
+  assert.strictEqual(afternoonChore.windowId, 'afterschool', 'the chosen window is stored and exposed');
+
+  const openTick = await ROUTES.completeTask({ taskId: afternoonChore.id, personId: 'ollie', pin: '1234' });
+  assert.strictEqual(openTick.ok, true, 'inside the window, completing works');
+  console.log('\u2713 a chore in an open window can be completed');
+
+  // Shut every window: closesAt 00:00 means minutes-since-midnight >= 0,
+  // which is every moment of the day. Deterministic whatever hour CI runs.
+  const { resource: household } = await mockContainer('households')
+    .item(HOUSEHOLD_ID, HOUSEHOLD_ID).read();
+  household.windows = [
+    { id: 'morning', label: 'Morning', closesAt: '00:00' },
+    { id: 'afterschool', label: 'After school', closesAt: '00:00' },
+    { id: 'evening', label: 'Evening', closesAt: '00:00' },
+  ];
+  await mockContainer('households').item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(household);
+
+  await ROUTES.addTask({
+    parentId: 'peter', parentPin: '1234', kidId: 'ollie',
+    title: 'Too late chore', points: 3, cycle: 'daily', windowId: 'evening',
+  });
+  const lateChore = (await ROUTES.state()).tasks.find((t) => t.title === 'Too late chore');
+  const lateTick = await ROUTES.completeTask({ taskId: lateChore.id, personId: 'ollie', pin: '1234' });
+  assert.strictEqual(lateTick.ok, false, 'a shut window refuses the completion');
+  assert.strictEqual(lateTick.windowClosed, true, 'and says why, machine-readably');
+  console.log('\u2713 a shut window means no points - refused at the API, not just greyed out');
+
+  const noWindowChore = (await ROUTES.state()).tasks.find((t) => t.title === 'Water plant');
+  const fallbackTick = await ROUTES.completeTask({ taskId: noWindowChore.id, personId: 'ollie', pin: '1234' });
+  assert.strictEqual(fallbackTick.ok, false,
+    'a chore with no window falls back to the evening window rather than escaping the rule');
+  console.log('\u2713 legacy chores without a window are held to the fallback window');
+
+  // Put the windows back for anything that runs after this.
+  household.windows = null;
+  await mockContainer('households').item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(household);
 
   console.log('\nALL LOGIC TESTS PASSED');
 }

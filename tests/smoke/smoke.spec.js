@@ -793,6 +793,68 @@ test('a completion counts for its own day, not the whole week', async ({ page })
   expect(verdict.legacyWednesday, 'a chore with no named days keeps the weekly rule').toBe(true);
 });
 
+// Windows are what make the points real: submit before the close or they are
+// gone for the day. The server is the only clock - the harness pins household
+// time to ~noon, so 'morning' has always shut and 'evening' is always open,
+// whatever hour CI runs at.
+test('a chore states its window and stake, and a shut window reads as missed', async ({ page }) => {
+  await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    await post({
+      action: 'addTask', parentId: 'peter', parentPin: '1234',
+      kidId: 'toby', title: 'Feed the fish', points: 2, cycle: 'daily', windowId: 'evening',
+    });
+    await post({
+      action: 'addTask', parentId: 'peter', parentPin: '1234',
+      kidId: 'toby', title: 'Make the bed', points: 3, cycle: 'daily', windowId: 'morning',
+    });
+  });
+  // The page fetched state before these chores existed; sign-in renders from
+  // that cache rather than refetching.
+  await page.reload();
+  await pickPerson(page, 'Toby');
+  // Daily chores render on the Home glance, fed by the calendar call - give it
+  // a beat rather than racing the fetch.
+
+  // Open window: the row names its stake and can be ticked.
+  const open = page.locator('.task', { hasText: 'Feed the fish' }).first();
+  await expect(open).toBeVisible();
+  await expect(open).toContainText(/closes 9\s?pm/i);
+  await expect(open.locator('.tick')).toBeEnabled();
+
+  // Shut window: greyed, says missed, tick disabled, points struck through.
+  const missed = page.locator('.task.missed', { hasText: 'Make the bed' }).first();
+  await expect(missed).toBeVisible();
+  await expect(missed).toContainText(/missed/i);
+  await expect(missed.locator('.tick')).toBeDisabled();
+});
+
+// The refusal is the API's, not just the row's - a stale page that still shows
+// a tick cannot sneak a completion past a shut window.
+test('a shut window refuses the completion at the API', async ({ page }) => {
+  const verdict = await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    await post({
+      action: 'addTask', parentId: 'peter', parentPin: '1234',
+      kidId: 'ollie', title: 'Sweep the step', points: 2, cycle: 'daily', windowId: 'morning',
+    });
+    const state = await post({ action: 'state' });
+    const task = state.tasks.find((t) => t.title === 'Sweep the step');
+    return post({ action: 'completeTask', taskId: task.id, personId: 'ollie', pin: '1234' });
+  });
+  expect(verdict.ok).toBe(false);
+  expect(verdict.windowClosed).toBe(true);
+  expect(verdict.error).toMatch(/window closed/i);
+});
+
 test('Parent HQ is headed by the parent, not a crown', async ({ page }) => {
   await pickPerson(page, 'Peter');
   const title = page.locator('#p-hq-title');

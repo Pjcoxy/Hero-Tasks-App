@@ -715,6 +715,12 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 }
 .task.overdue .tick { border-color: var(--danger); }
 .task.overdue .sub  { color: var(--danger); font-weight: var(--weight-medium); }
+/* A shut window. Dimmed but still on the list - a miss that vanished overnight
+   would teach nothing; one that sits there until tomorrow is the record. */
+.task.missed { opacity: 0.6; }
+.task.missed .tick { border-color: var(--danger); cursor: default; }
+.task.missed .sub  { color: var(--danger); font-weight: var(--weight-medium); }
+.task.missed .pts-badge { text-decoration: line-through; }
 .task.dimmed { opacity: 0.72; }
 .task-side { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); }
 .task-exiting {
@@ -1691,6 +1697,10 @@ button.parent-list-row:active { transform: scale(0.99); }
               <option value="oneoff">One-off</option>
             </select>
           </div>
+          <div class="field" id="p-window-wrap">
+            <label>Due by</label>
+            <select id="p-window"></select>
+          </div>
           <div class="field hidden" id="p-days-wrap">
             <label>Which days</label>
             <div class="day-picker" id="p-days">
@@ -2494,10 +2504,14 @@ function glanceChoreCard(item) {
   var sub = c
     ? (c.status === 'approved' ? 'Done — points banked! 💰' : c.status === 'queued' ? 'Saved offline — syncing soon 📡' : 'Waiting for a grown-up to check ⏳')
     : '';
+  var ws = choreWindowState(task, c);
+  if (!c && ws) sub = ws.missed ? ws.missedText : (sub ? sub + ' · ' + ws.stake : ws.stake);
+  var missed = !!(ws && ws.missed);
   var action = c
     ? ((c.status === 'pending' || c.status === 'queued') ? 'undoTask(\'' + c.id + '\')' : '')
-    : 'doTask(\'' + task.id + '\')';
-  return '<div class="task ' + cls + '">'
+    : (missed ? '' : 'doTask(\'' + task.id + '\')');
+  if (missed) tickIcon = '❌';
+  return '<div class="task ' + cls + (missed ? ' missed' : '') + '">'
     + '<button class="tick" ' + (action ? 'onclick="' + action + '"' : 'disabled') + '>' + tickIcon + '</button>'
     + '<div class="info">'
     + '<div class="title">' + esc(task.title) + '</div>'
@@ -3286,16 +3300,24 @@ function renderTaskList(elId, tasks, emptyEmoji, emptyLine1, emptyLine2) {
     var cls = c ? (c.status === 'approved' ? 'done-approved' : c.status === 'queued' ? 'done-queued' : 'done-pending') : '';
     var tickIcon = c ? (c.status === 'approved' ? '✅' : c.status === 'queued' ? '📡' : '⏳') : '';
     var isOverdue = !c && t.dueBy && new Date(t.dueBy) < new Date();
+    // A recurring chore lives or dies by its window. Once it has shut with
+    // nothing submitted, the points are gone for today and the row says so -
+    // greyed and unclickable, not silently vanished. One-offs keep their own
+    // dueBy mechanics.
+    var ws = choreWindowState(t, c);
+    var missed = !!(ws && ws.missed);
     var sub = c
       ? (c.status === 'approved' ? 'Done — points banked! 💰' : c.status === 'queued' ? 'Saved offline — syncing soon 📡' : 'Waiting for a grown-up to check ⏳')
       : (t.cycle === 'weekly'
           ? (t.days && t.days.length ? 'On ' + daysLabel(t.days) : 'Any time this week')
           : '');
+    if (!c && ws) sub = missed ? ws.missedText : (sub ? sub + ' · ' + ws.stake : ws.stake);
     if (!c && t.dueBy) sub = isOverdue ? '⚠️ Overdue — was due ' + formatDue(t.dueBy) : 'Due ' + formatDue(t.dueBy);
     var action = c
       ? ((c.status === 'pending' || c.status === 'queued') ? 'undoTask(\'' + c.id + '\')' : '')
-      : 'doTask(\'' + t.id + '\')';
-    return '<div class="task ' + cls + ' ' + (isOverdue ? 'overdue' : '') + '">'
+      : (missed ? '' : 'doTask(\'' + t.id + '\')');
+    if (missed) tickIcon = '❌';
+    return '<div class="task ' + cls + ' ' + (isOverdue ? 'overdue' : '') + (missed ? ' missed' : '') + '">'
       + '<button class="tick" ' + (action ? 'onclick="' + action + '"' : 'disabled') + '>' + tickIcon + '</button>'
       + '<div class="info">'
       + '<div class="title">' + esc(t.title) + '</div>'
@@ -3874,6 +3896,17 @@ function renderParent(person) {
     }).join('');
   }
 
+  var windowSel = document.getElementById('p-window');
+  if (windowSel) {
+    var windowCurrent = windowSel.value;
+    windowSel.innerHTML = ((state.windows) || []).map(function(w) {
+      return '<option value="' + w.id + '">' + esc(w.label) + ' — by ' + w.closesAt + '</option>';
+    }).join('');
+    // Default new chores to the fallback window rather than the first option,
+    // so an untouched form matches what the API would assume anyway.
+    windowSel.value = windowCurrent || state.fallbackWindowId || '';
+  }
+
   var sel = document.getElementById('p-kid');
   var current = sel.value;
   var kidOptions = kidsOnly().map(function(k) {
@@ -3913,7 +3946,7 @@ function renderParent(person) {
               return '<div class="parent-list-row">'
                 + '<div class="parent-copy">'
                 + '<span class="parent-list-title">' + esc(t.title) + '</span>'
-                + '<div class="sub">' + howOften(t) + ' · ' + t.points + ' pts' + (t.dueBy ? ' · due ' + formatDue(t.dueBy) : '') + '</div>'
+                + '<div class="sub">' + howOften(t) + (t.cycle !== 'oneoff' ? ' · ' + windowLabel(choreWindow(t)) : '') + ' · ' + t.points + ' pts' + (t.dueBy ? ' · due ' + formatDue(t.dueBy) : '') + '</div>'
                 + '</div>'
                 + '<button class="btn ghost small" onclick="parentEditTask(\'' + t.id + '\')">Edit</button>'
                 + '<button class="btn red-ghost small" onclick="parentDeleteTask(\'' + t.id + '\')">Remove</button>'
@@ -4713,6 +4746,52 @@ var WEEKDAYS = [
   { value: 0, short: 'Sun' },
 ];
 
+// The household's windows arrive on state. A chore with no windowId reads as
+// the fallback window - same rule as the API, which is the one that enforces.
+function choreWindow(t) {
+  var windows = (state && state.windows) || [];
+  var id = t.windowId || (state && state.fallbackWindowId);
+  for (var i = 0; i < windows.length; i++) {
+    if (windows[i].id === id) return windows[i];
+  }
+  return windows.length ? windows[windows.length - 1] : null;
+}
+
+function windowLabel(w) {
+  if (!w) return '';
+  var mins = hhmmToMinutes(w.closesAt);
+  var h = Math.floor(mins / 60), m = mins % 60;
+  var ampm = h >= 12 ? 'pm' : 'am';
+  var h12 = h % 12 === 0 ? 12 : h % 12;
+  return 'closes ' + h12 + (m ? ':' + String(m).padStart(2, '0') : '') + ' ' + ampm;
+}
+
+function hhmmToMinutes(value) {
+  var parts = String(value || '').split(':');
+  return (Number(parts[0]) * 60) + Number(parts[1] || 0);
+}
+
+// The server decides. Its clock is the one that enforces the close, and a
+// phone set to a different timezone would otherwise display a different truth
+// than the API acts on.
+function isWindowShut(w) {
+  return !!(w && w.closed);
+}
+
+// The window facts a chore row needs, shared by the Home glance card and the
+// Missions lists so the two can never drift apart. Null for one-offs - they
+// carry their own dueBy mechanics.
+function choreWindowState(task, completion) {
+  if (!task || task.cycle === 'oneoff') return null;
+  var w = choreWindow(task);
+  if (!w) return null;
+  return {
+    missed: !completion && isWindowShut(w),
+    stake: windowLabel(w),
+    missedText: 'Missed — ' + String(w.label || '').toLowerCase() + ' window closed at ' + w.closesAt,
+  };
+}
+
 function dayShort(value) {
   var match = WEEKDAYS.find(function(d) { return d.value === value; });
   return match ? match.short : '';
@@ -4741,6 +4820,8 @@ function updateDueVisibility() {
   var cycle = document.getElementById('p-cycle').value;
   document.getElementById('p-due-wrap').classList.toggle('hidden', cycle !== 'oneoff');
   document.getElementById('p-days-wrap').classList.toggle('hidden', cycle !== 'weekly');
+  // One-offs carry their own due datetime; the window is for recurring chores.
+  document.getElementById('p-window-wrap').classList.toggle('hidden', cycle === 'oneoff');
 }
 
 async function parentAddTask() {
@@ -4756,6 +4837,7 @@ async function parentAddTask() {
     title,
     cycle,
     days,
+    windowId: cycle === 'oneoff' ? null : (document.getElementById('p-window').value || null),
     points: Number(document.getElementById('p-points').value) || 5,
     dueBy: cycle === 'oneoff' && dueInput ? new Date(dueInput).toISOString() : null,
   };
@@ -5113,6 +5195,18 @@ async function parentEditTask(taskId) {
   var kidIndex = Number(kidInput.trim()) - 1;
   var kid = kids[kidIndex];
   if (!kid) { toast('Choose a valid kid number.'); return; }
+  var windowId = null;
+  if (cycle !== 'oneoff') {
+    var windows = (state.windows || []);
+    var windowPrompt = 'Due by which window?\n'
+      + windows.map(function(w, index) { return (index + 1) + ') ' + w.label + ' — by ' + w.closesAt; }).join('  ');
+    var currentWindowIndex = windows.findIndex(function(w) { return w.id === (task.windowId || state.fallbackWindowId); });
+    var windowInput = prompt(windowPrompt, String((currentWindowIndex === -1 ? windows.length : currentWindowIndex + 1)));
+    if (windowInput === null) return;
+    var windowChoice = windows[Number(windowInput.trim()) - 1];
+    if (!windowChoice) { toast('Choose a window number.'); return; }
+    windowId = windowChoice.id;
+  }
   var days = null;
   if (cycle === 'weekly') {
     var daysPrompt = 'Which days? Numbers separated by commas.\n'
@@ -5150,6 +5244,7 @@ async function parentEditTask(taskId) {
     points,
     cycle,
     days,
+    windowId,
     kidId: kid.id,
     dueBy,
   });
