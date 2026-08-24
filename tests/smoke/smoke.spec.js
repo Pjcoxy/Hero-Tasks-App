@@ -975,7 +975,9 @@ test('a kid can tick their prep list and confirm packed', async ({ page }) => {
       body: JSON.stringify(body),
     }).then((r) => r.json());
     const fresh = await post({ action: 'state' });
-    const row = fresh.completions.find((c) => c.id === 'prep-' + id + '-ollie');
+    // Ids carry the occurrence date now that events can repeat weekly.
+    const row = fresh.completions.find((c) =>
+      c.id.startsWith('prep-' + id + '-') && c.id.endsWith('-ollie') && !c.id.startsWith('prep-miss-'));
     return row ? row.status + ':' + row.points : null;
   }, eventId)).toBe('pending:10');
 

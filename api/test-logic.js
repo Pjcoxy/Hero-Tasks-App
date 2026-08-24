@@ -2058,7 +2058,8 @@ async function main() {
   await R.tickPrepItem({ personId: 'ollie', pin: '1234', planningItemId: soccerEvent.item.id, itemIndex: 1, done: true });
   const packed = await R.confirmPrep({ personId: 'ollie', pin: '1234', planningItemId: soccerEvent.item.id });
   assert.strictEqual(packed.ok, true, 'everything ticked, in time: confirmed');
-  const prepRow = packed.completions.find((c) => c.id === `prep-${soccerEvent.item.id}-ollie`);
+  const soccerOccDate = require('./src/functions/hero.js').currentOccurrence(soccerEvent.item).date;
+  const prepRow = packed.completions.find((c) => c.id === `prep-${soccerEvent.item.id}-${soccerOccDate}-ollie`);
   assert.ok(prepRow, 'the confirmation is a completion row');
   assert.strictEqual(prepRow.status, 'pending', 'pending a parent, like any chore');
   assert.strictEqual(prepRow.points, 10, "carrying the list's points");
@@ -2067,7 +2068,7 @@ async function main() {
 
   const twice = await R.confirmPrep({ personId: 'ollie', pin: '1234', planningItemId: soccerEvent.item.id });
   assert.strictEqual(twice.ok, true, 'a second confirm is quietly idempotent');
-  const prepRows = twice.completions.filter((c) => c.id === `prep-${soccerEvent.item.id}-ollie`);
+  const prepRows = twice.completions.filter((c) => c.id === `prep-${soccerEvent.item.id}-${soccerOccDate}-ollie`);
   assert.strictEqual(prepRows.length, 1, 'and creates nothing new');
   console.log('\u2713 confirming twice cannot double the reward');
 
@@ -2089,18 +2090,19 @@ async function main() {
   // fixed instant, via recordMisses(prepLateNow).
   assert.strictEqual(prepLateTick.ok, true, 'at pinned noon the list is still open');
   await recordMisses(prepLateNow);
-  const campMiss = (await R.state()).completions.find((c) => c.id === `prep-miss-${camp.item.id}-toby`);
+  const campOccDate = require('./src/functions/hero.js').currentOccurrence(camp.item).date;
+  const campMiss = (await R.state()).completions.find((c) => c.id === `prep-miss-${camp.item.id}-${campOccDate}-toby`);
   assert.ok(campMiss, 'an unconfirmed list is missed once the night before closes');
   assert.strictEqual(campMiss.points, 12, 'naming the points that were on the table');
   await recordMisses(prepLateNow);
-  const campMisses = (await R.state()).completions.filter((c) => c.id === `prep-miss-${camp.item.id}-toby`);
+  const campMisses = (await R.state()).completions.filter((c) => c.id === `prep-miss-${camp.item.id}-${campOccDate}-toby`);
   assert.strictEqual(campMisses.length, 1, 'and only once');
   console.log('\u2713 an unconfirmed prep list is missed when the night before closes, once');
 
   // The confirmed one is never missed, even after its deadline.
   await recordMisses(new Date(inTwoDays.getTime() - 3 * 3600000));
   const soccerMissed = (await R.state()).completions
-    .some((c) => c.id === `prep-miss-${soccerEvent.item.id}-ollie`);
+    .some((c) => c.id.startsWith(`prep-miss-${soccerEvent.item.id}-`));
   assert.strictEqual(soccerMissed, false, 'a confirmed list is never swept as missed');
   console.log('\u2713 confirming in time keeps the list off the miss sweep');
 
@@ -2146,6 +2148,71 @@ async function main() {
   assert.strictEqual(sameDayTick.ok, true,
     'with the override, same-day prep is open - the night-before rule would have refused this');
   console.log('\u2713 prepDueBy overrides the night-before default for same-day prep');
+
+  // -------------------------------------------------------------------------
+  // Recurring events. One document, expanded weekly - and the week-two
+  // behaviour is the whole point: the calendar shows every week, prep earns
+  // separately each week, and last week's ticks never carry over.
+  const { currentOccurrence } = require('./src/functions/hero.js');
+
+  const cubsStart2 = new Date(at('17:30').getTime() + 26 * 3600000); // tomorrow 19:30ish local? no: +26h from 17:30 today
+  const weekly = await R.addPlanningItem({
+    parentId: 'peter', parentPin: '1234', type: 'event', title: 'Weekly Cubs',
+    personId: null, startAt: cubsStart2.toISOString(), recurrence: 'weekly',
+    prepDueBy: cubsStart2.toISOString(),
+    prepLists: [{ personId: 'ollie', points: 3, items: [{ text: 'Uniform on' }] }],
+  });
+  assert.strictEqual(weekly.ok, true);
+  assert.strictEqual(weekly.item.recurrence, 'weekly', 'the recurrence is stored');
+
+  // The calendar expands it: four weeks of range, four occurrences, each a
+  // week apart, and exactly one carries the live prep date.
+  const calFrom = new Date(Date.now() - 86400000).toISOString();
+  const calTo = new Date(Date.now() + 28 * 86400000).toISOString();
+  const expanded = await R.calendar({ parentId: 'peter', parentPin: '1234', start: calFrom, end: calTo });
+  const occurrences = expanded.items.filter((i) => i.id === weekly.item.id);
+  assert.strictEqual(occurrences.length, 4, 'four weeks of range, four occurrences');
+  const gaps = occurrences.slice(1).map((occ, i) =>
+    new Date(occ.startAt).getTime() - new Date(occurrences[i].startAt).getTime());
+  assert.ok(gaps.every((g) => g === 7 * 86400000), 'each exactly a week apart');
+  const liveOnes = occurrences.filter((occ) => occ.occurrenceDate === occ.prepOpenDate);
+  assert.strictEqual(liveOnes.length, 1, 'exactly one occurrence is prep-live');
+  assert.strictEqual(liveOnes[0].occurrenceDate, currentOccurrence(weekly.item).date,
+    'and it is the next one');
+  console.log('\u2713 a weekly event expands into weekly occurrences with one live prep date');
+
+  // Week one: tick, confirm, paid. The id carries the occurrence date.
+  const occ1 = currentOccurrence(weekly.item).date;
+  await R.tickPrepItem({ personId: 'ollie', pin: '1234', planningItemId: weekly.item.id, itemIndex: 0, done: true });
+  const wk1 = await R.confirmPrep({ personId: 'ollie', pin: '1234', planningItemId: weekly.item.id });
+  assert.strictEqual(wk1.ok, true);
+  assert.ok(wk1.completions.some((c) => c.id === `prep-${weekly.item.id}-${occ1}-ollie`),
+    'week one earns under its own occurrence date');
+
+  // Week two, simulated by reading the doc as the NEXT occurrence would see
+  // it: the stored list still says done=true and tickedFor=week one - which
+  // is exactly why confirmPrep keys on tickedFor matching the CURRENT
+  // occurrence. Confirming again right now is idempotent (same week); the
+  // stale-ticks refusal is what the tickedFor comparison guarantees for the
+  // week after, and the unit above (tickedFor reset on first tick) covers
+  // the wipe. What we can assert across weeks without a clock: the miss
+  // sweep for a later occurrence uses a different id, so week two misses
+  // even though week one was confirmed.
+  const nextOccDate = require('./src/functions/hero.js').todayStr(
+    new Date(new Date(currentOccurrence(weekly.item).startAt).getTime() + 7 * 86400000));
+  assert.notStrictEqual(occ1, nextOccDate, 'the two weeks have different occurrence dates');
+  assert.ok(!wk1.completions.some((c) => c.id === `prep-${weekly.item.id}-${nextOccDate}-ollie`),
+    "week one's confirmation does not pre-pay week two");
+  console.log('\u2713 each week of a repeating event earns separately');
+
+  // A reminder cannot recur.
+  const recurringReminder = await R.addPlanningItem({
+    parentId: 'peter', parentPin: '1234', type: 'reminder', title: 'Nag',
+    personId: 'toby', startAt: cubsStart2.toISOString(), recurrence: 'weekly',
+  });
+  assert.strictEqual(recurringReminder.ok, true, 'reminder save: ' + JSON.stringify(recurringReminder));
+  assert.strictEqual(recurringReminder.item.recurrence, null, 'recurrence is cleared on reminders');
+  console.log('\u2713 reminders cannot recur');
 
   console.log('\nALL LOGIC TESTS PASSED');
 }

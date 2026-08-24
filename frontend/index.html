@@ -1796,6 +1796,9 @@ button.parent-list-row:active { transform: scale(0.99); }
             </select>
           </div>
           <div class="field"><label>Starts</label><input id="p-plan-start" type="datetime-local"></div>
+          <div class="field hidden" id="p-plan-repeat-wrap">
+            <label class="check-row"><input id="p-plan-repeat" type="checkbox"><span>Repeats weekly</span></label>
+          </div>
           <div class="field" id="p-plan-end-wrap"><label>Ends (optional)</label><input id="p-plan-end" type="datetime-local"></div>
           <div class="field"><label>Who</label><select id="p-plan-person"></select></div>
           <div class="field"><label>Notes (optional)</label><input id="p-plan-notes" type="text" placeholder="e.g. Bring hat + water" autocomplete="off"></div>
@@ -2571,16 +2574,26 @@ function glanceEventCard(item, kidId) {
   var list = (item.prepLists || []).find(function(l) { return l.personId === kidId; });
   var prep = '';
   if (list && list.items && list.items.length) {
+    // Ids carry the occurrence date: a weekly event earns (or misses) each
+    // week separately. Only the occurrence the server marks prepOpenDate is
+    // tickable - next Monday's Cubs shows its list read-ahead, not live.
+    var occDate = item.occurrenceDate || '';
+    var isLive = !item.prepOpenDate || item.prepOpenDate === occDate;
     var confirmed = (state.completions || []).some(function(c) {
-      return c.id === 'prep-' + item.id + '-' + kidId;
+      return c.id === 'prep-' + item.id + '-' + occDate + '-' + kidId;
     });
     var missed = (state.completions || []).some(function(c) {
-      return c.id === 'prep-miss-' + item.id + '-' + kidId;
+      return c.id === 'prep-miss-' + item.id + '-' + occDate + '-' + kidId;
     });
-    var allTicked = list.items.every(function(entry) { return entry.done; });
+    // Ticks belong to one occurrence; a stale tickedFor means an untouched
+    // week however the flags look.
+    var ticksCount = list.tickedFor === occDate;
+    var allTicked = ticksCount && list.items.every(function(entry) { return entry.done; });
+    var locked = missed || confirmed || !isLive;
     var rows = list.items.map(function(entry, index) {
-      return '<label class="prep-item' + (entry.done ? ' done' : '') + (missed || confirmed ? ' locked' : '') + '">'
-        + '<input type="checkbox"' + (entry.done ? ' checked' : '') + (missed || confirmed ? ' disabled' : '')
+      var ticked = ticksCount && entry.done;
+      return '<label class="prep-item' + (ticked ? ' done' : '') + (locked ? ' locked' : '') + '">'
+        + '<input type="checkbox"' + (ticked ? ' checked' : '') + (locked ? ' disabled' : '')
         + ' onchange="tickPrep(\'' + jsq(item.id) + '\', ' + index + ', this.checked)">'
         + '<span>' + esc(entry.text) + '</span>'
         + '</label>';
@@ -2591,9 +2604,11 @@ function glanceEventCard(item, kidId) {
     } else if (missed) {
       footer = '<div class="sub prep-missed">Missed — packing closed the night before'
         + (list.points ? ' · ' + list.points + ' pts were up for grabs' : '') + '</div>';
+    } else if (!isLive) {
+      footer = '<div class="sub">Opens after this week\u2019s' + (list.points ? ' · ' + list.points + ' pts' : '') + '</div>';
     } else {
       footer = '<div class="prep-footer">'
-        + '<span class="sub">Pack by the night before' + (list.points ? ' · ' + list.points + ' pts' : '') + '</span>'
+        + '<span class="sub">Pack in time' + (list.points ? ' · ' + list.points + ' pts' : '') + '</span>'
         + '<button class="btn small" ' + (allTicked ? '' : 'disabled ')
         + 'onclick="confirmPrepPacked(\'' + jsq(item.id) + '\')">Packed ✔</button>'
         + '</div>';
@@ -2604,7 +2619,7 @@ function glanceEventCard(item, kidId) {
     + '<button class="tick" disabled>' + (item.kind === 'reminder' ? '🔔' : '📌') + '</button>'
     + '<div class="info">'
     + '<div class="title">' + esc(item.title || 'Something on') + '</div>'
-    + (when ? '<div class="sub">' + esc(when) + '</div>' : '')
+    + (when ? '<div class="sub">' + esc(when) + (item.recurrence === 'weekly' ? ' · every week' : '') + '</div>' : '')
     + (item.notes ? '<div class="sub">' + esc(item.notes) + '</div>' : '')
     + prep
     + '</div>'
@@ -2623,7 +2638,12 @@ async function tickPrep(planningItemId, itemIndex, done) {
   (kidCalendarItems || []).forEach(function(item) {
     if (item.id !== planningItemId) return;
     var list = (item.prepLists || []).find(function(l) { return l.personId === session.personId; });
-    if (list && list.items[itemIndex]) list.items[itemIndex].done = done;
+    if (!list || !list.items[itemIndex]) return;
+    if (list.tickedFor !== item.prepOpenDate) {
+      list.items.forEach(function(entry) { entry.done = false; });
+      list.tickedFor = item.prepOpenDate;
+    }
+    list.items[itemIndex].done = done;
   });
   var kid = state.people.find(function(person) { return person.id === session.personId; });
   if (kid) renderKidGlance(kid);
@@ -2788,6 +2808,7 @@ function updatePlanningTypeVisibility() {
   if (!typeEl) return;
   var isEvent = typeEl.value === 'event';
   document.getElementById('p-plan-end-wrap').classList.toggle('hidden', !isEvent);
+  document.getElementById('p-plan-repeat-wrap').classList.toggle('hidden', !isEvent);
 }
 
 function parentCalendarActiveMonth() {
@@ -5045,8 +5066,10 @@ async function parentAddPlanningItem() {
     endAt: endAt,
     personId: document.getElementById('p-plan-person').value || null,
     notes: document.getElementById('p-plan-notes').value.trim() || null,
+    recurrence: type === 'event' && document.getElementById('p-plan-repeat').checked ? 'weekly' : null,
   });
   if (toastApiError(result)) return;
+  document.getElementById('p-plan-repeat').checked = false;
   document.getElementById('p-plan-title').value = '';
   document.getElementById('p-plan-start').value = '';
   document.getElementById('p-plan-end').value = '';
@@ -5068,12 +5091,16 @@ function planningUpdatePayload(item) {
     endAt: item.endAt || null,
     personId: item.personId === undefined ? null : item.personId,
     notes: item.notes || null,
+    recurrence: item.recurrence || null,
+    prepDueBy: item.prepDueBy || null,
     prepLists: Array.isArray(item.prepLists) ? item.prepLists.map(function(list) {
       return {
         personId: list.personId,
         // Round-tripped, not rebuilt: dropping points here would silently
-        // zero a list's reward on every unrelated edit.
+        // zero a list's reward on every unrelated edit, and dropping
+        // tickedFor would hand a weekly list last week's ticks.
         points: Number(list.points) || 0,
+        tickedFor: list.tickedFor || null,
         items: (list.items || []).map(function(entry) {
           return { text: entry.text, done: !!entry.done };
         }),

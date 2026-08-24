@@ -415,6 +415,30 @@ night is the thing rewarded** — not attending. The rules, all settled:
   looked the list up as `prepLists[kidId]` when it is an array of
   `{personId, items}` — that 🎒 line had never once run.)
 
+### Repeating events
+
+`recurrence: 'weekly'` on an event (only events - reminders clear it). One
+document, expanded into occurrences by `calendar()` exactly as a weekly chore
+is; the event's own `startAt` anchors the weekday and time, and `prepDueBy`
+shifts week by week with the occurrence. Deleting the item deletes the series.
+
+The week-two behaviour is the design:
+
+- **Each week earns separately.** Prep completion and miss ids carry the
+  occurrence date (`prep-<itemId>-<date>-<kid>`), so confirming this Monday
+  never pre-pays next Monday, and an unconfirmed week misses on its own.
+- **Ticks belong to one occurrence.** `list.tickedFor` records which; the
+  first tick of a new week wipes last week's flags before it lands, else
+  Cubs arrives pre-packed every Monday after the first. `tickedFor` is
+  round-tripped through both `planningUpdatePayload` and
+  `validatePrepLists` - dropping it on either side hands the new week stale
+  ticks.
+- **Only one occurrence is prep-live.** `calendar()` stamps every occurrence
+  with `prepOpenDate` (the current occurrence's date); the kid's glance
+  renders any other week's list read-only.
+
+Known limit: conflict detection still checks the base occurrence only.
+
 ### Nudges and the evening summary
 
 Two messages a day, maximum, per person - the design is a digest, not a
