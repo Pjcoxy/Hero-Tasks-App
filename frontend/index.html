@@ -836,6 +836,14 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   background: var(--danger-wash);
   color: var(--danger);
 }
+/* A recorded miss - the window shut with nothing submitted. Same visual family
+   as rejected (something did not happen) but its own class: a miss is nobody
+   refusing anything. */
+.calendar-event.missed {
+  background: var(--danger-wash);
+  color: var(--danger);
+  text-decoration: line-through;
+}
 
 /* ─── Buttons ─────────────────────────────────────────────────────────── */
 .btn {
@@ -2448,6 +2456,7 @@ function statusIcon(status) {
   if (status === 'approved') return '✅';
   if (status === 'pending') return '⏳';
   if (status === 'rejected') return '❌';
+  if (status === 'missed') return '⛔';
   return '•';
 }
 
@@ -3817,7 +3826,7 @@ function renderRedemptions(kid) {
 function renderRecentActivity(kid) {
   var el = document.getElementById('k-activity');
   var decided = state.completions.filter(function(c) {
-    return c.kidId === kid.id && (c.status === 'approved' || c.status === 'rejected');
+    return c.kidId === kid.id && (c.status === 'approved' || c.status === 'rejected' || c.status === 'missed');
   }).sort(function(a, b) {
     return String(b.decidedAt || b.date || '').localeCompare(String(a.decidedAt || a.date || ''));
   }).slice(0, 5);
@@ -3830,11 +3839,16 @@ function renderRecentActivity(kid) {
     var title = task ? esc(task.title) : esc(c.taskTitle || 'Mission');
     var pts   = task ? task.points : (c.points || 0);
     var isApproved = c.status === 'approved';
+    var isMissed = c.status === 'missed';
     var cls  = isApproved ? 'done-approved' : 'done-rejected';
-    var icon = isApproved ? '✅' : '❌';
+    var icon = isApproved ? '✅' : (isMissed ? '⛔' : '❌');
+    // A miss is stated as a fact, not a telling-off. The points that were on
+    // the table are named because that IS the consequence - nothing else is.
     var sub  = isApproved
       ? 'Nice job! ✅ +' + pts + ' pts'
-      : '❌ Not quite — you can try again';
+      : (isMissed
+          ? 'Missed — the window closed. ' + pts + ' pts were up for grabs'
+          : '❌ Not quite — you can try again');
     var dateStr = c.decidedAt ? formatRewardDate(c.decidedAt) : (c.date || '');
     // The grown-up's note. Read-only on purpose: it is a message about a
     // decision already made, not the start of an argument.

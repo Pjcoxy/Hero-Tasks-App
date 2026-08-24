@@ -343,6 +343,31 @@ Rules that must not drift:
   hour CI runs. A window of `closesAt: '00:00'` is shut at every moment of the
   day, which is the deterministic way to test refusal.
 
+### Misses — the record that points were not earned
+
+A miss is **a fact, not a punishment**. When a window shuts with nothing
+submitted, the 15-minute sweep writes a `status: 'missed'` row into the
+completions container — the forfeited points named on it for display, counted
+by nothing. Balances only ever sum `approved` rows; that invariant is tested.
+
+Mechanics that must hold:
+
+- **Idempotency is the record's own id**: `miss-<taskId>-<date>`. A second
+  sweep gets the 409 and moves on. This survives restarts, which a
+  "have I run today" flag would not. The in-memory test mocks refuse duplicate
+  ids for the same reason real Cosmos does — a mock more forgiving than
+  production would let this test pass while the mechanism was broken.
+- **Submitting in time — any status — keeps a chore off the miss list.**
+  Pending and even rejected completions count as "the kid acted".
+- **A weekly chore is only missable on the days it is due.**
+- **One-offs are excluded** — `dueBy` overdue display is its own mechanism.
+
+Where a miss shows: the kid's calendar (⛔, struck through, its own
+`.calendar-event.missed` class — same visual family as rejected, but a miss is
+nobody refusing anything), and Recent activity, worded as a fact with the
+points that were on the table: *"Missed — the window closed. 6 pts were up for
+grabs."*
+
 ### How often a chore repeats
 
 Three options, and the middle one is the interesting one:

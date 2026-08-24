@@ -41,7 +41,18 @@ function mockContainer(name) {
   const map = getMap(name);
   return {
     items: {
-      create: async (doc) => { map.set(doc.id, doc); return { resource: doc }; },
+      create: async (doc) => {
+        // Real Cosmos refuses a duplicate id with 409; recordMisses leans on
+        // that for idempotency, so the mock must refuse too or the tests
+        // would pass against a store more forgiving than production.
+        if (map.has(doc.id)) {
+          const err = new Error('Entity with the specified id already exists');
+          err.code = 409;
+          throw err;
+        }
+        map.set(doc.id, doc);
+        return { resource: doc };
+      },
       upsert: async (doc) => { map.set(doc.id, doc); return { resource: doc }; },
       query: (q) => ({
         fetchAll: async () => {
