@@ -959,8 +959,18 @@ test('a kid can tick their prep list and confirm packed', async ({ page }) => {
   await expect(card).toBeVisible();
   await expect(card.locator('.prep-item')).toHaveCount(2);
 
+  // The card must say WHEN packing closes, not just that it must be "in
+  // time" - the match time and the packing deadline are different days and
+  // the kid only sees the former otherwise.
+  await expect(card).toContainText(/Pack by/);
+  await expect(card).not.toContainText(/Pack in time/);
+
   const packed = card.getByRole('button', { name: /packed/i });
   await expect(packed).toBeDisabled();
+  // And a disabled Packed must look disabled - it rendered fully opaque and
+  // pressable with nothing ticked.
+  const dimmed = await packed.evaluate((el) => Number(getComputedStyle(el).opacity) < 0.7);
+  expect(dimmed, 'disabled Packed should be visibly dimmed').toBe(true);
 
   await card.locator('.prep-item input').nth(0).check();
   await card.locator('.prep-item input').nth(1).check();
