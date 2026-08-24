@@ -2023,6 +2023,87 @@ async function main() {
   assert.strictEqual(repeat.sent, 0, 'one summary per day, however many ticks follow');
   console.log('\u2713 parents get one evening summary counting done and missed, once');
 
+  // -------------------------------------------------------------------------
+  // Prep lists: the soccer case. The list carries the points; the deadline is
+  // the last window's close on the night BEFORE the event; miss it and the
+  // points are gone but the event stays.
+  const { ROUTES: R } = require('./src/functions/hero.js');
+
+  // Sunday soccer: two local days ahead, so tonight is not yet the night
+  // before and nothing can close it.
+  const inTwoDays = new Date(at('09:00').getTime() + 2 * 86400000);
+  const soccerEvent = await R.addPlanningItem({
+    parentId: 'peter', parentPin: '1234',
+    type: 'event', title: 'Soccer', personId: 'ollie',
+    startAt: inTwoDays.toISOString(),
+    prepLists: [{ personId: 'ollie', points: 10, items: [
+      { text: 'boots' }, { text: 'water bottle' },
+    ] }],
+  });
+  assert.strictEqual(soccerEvent.ok, true, 'the event with a prep list saves');
+  assert.strictEqual(soccerEvent.item.prepLists[0].points, 10, 'the list carries its points');
+
+  // Another kid cannot touch Ollie's list.
+  const wrongKid = await R.tickPrepItem({
+    personId: 'toby', pin: '1234', planningItemId: soccerEvent.item.id, itemIndex: 0, done: true,
+  });
+  assert.strictEqual(wrongKid.ok, false, "someone else's list is refused");
+  console.log('\u2713 a prep list can only be ticked by its own kid');
+
+  // Confirm before everything is ticked: refused.
+  const tooSoon = await R.confirmPrep({ personId: 'ollie', pin: '1234', planningItemId: soccerEvent.item.id });
+  assert.strictEqual(tooSoon.ok, false, 'confirm with unticked items is refused');
+
+  await R.tickPrepItem({ personId: 'ollie', pin: '1234', planningItemId: soccerEvent.item.id, itemIndex: 0, done: true });
+  await R.tickPrepItem({ personId: 'ollie', pin: '1234', planningItemId: soccerEvent.item.id, itemIndex: 1, done: true });
+  const packed = await R.confirmPrep({ personId: 'ollie', pin: '1234', planningItemId: soccerEvent.item.id });
+  assert.strictEqual(packed.ok, true, 'everything ticked, in time: confirmed');
+  const prepRow = packed.completions.find((c) => c.id === `prep-${soccerEvent.item.id}-ollie`);
+  assert.ok(prepRow, 'the confirmation is a completion row');
+  assert.strictEqual(prepRow.status, 'pending', 'pending a parent, like any chore');
+  assert.strictEqual(prepRow.points, 10, "carrying the list's points");
+  assert.ok(prepRow.title.includes('Soccer'), 'and naming the event');
+  console.log('\u2713 ticked, confirmed in time: a pending completion worth the list points');
+
+  const twice = await R.confirmPrep({ personId: 'ollie', pin: '1234', planningItemId: soccerEvent.item.id });
+  assert.strictEqual(twice.ok, true, 'a second confirm is quietly idempotent');
+  const prepRows = twice.completions.filter((c) => c.id === `prep-${soccerEvent.item.id}-ollie`);
+  assert.strictEqual(prepRows.length, 1, 'and creates nothing new');
+  console.log('\u2713 confirming twice cannot double the reward');
+
+  // The night before, after the last window: too late to tick or confirm,
+  // and the sweep records the miss. Event TOMORROW, "now" tonight at 21:30.
+  const prepTomorrow = new Date(at('09:00').getTime() + 86400000);
+  const camp = await R.addPlanningItem({
+    parentId: 'peter', parentPin: '1234',
+    type: 'event', title: 'Cub camp', personId: 'toby',
+    startAt: prepTomorrow.toISOString(),
+    prepLists: [{ personId: 'toby', points: 12, items: [{ text: 'sleeping bag' }, { text: 'torch' }] }],
+  });
+  const prepLateNow = at('21:30');
+  const prepLateTick = await R.tickPrepItem({
+    personId: 'toby', pin: '1234', planningItemId: camp.item.id, itemIndex: 0, done: true,
+  });
+  // tickPrepItem reads the real clock; at pinned ~noon the night-before close
+  // has not passed, so ticking works - the DEADLINE math is what needs the
+  // fixed instant, via recordMisses(prepLateNow).
+  assert.strictEqual(prepLateTick.ok, true, 'at pinned noon the list is still open');
+  await recordMisses(prepLateNow);
+  const campMiss = (await R.state()).completions.find((c) => c.id === `prep-miss-${camp.item.id}-toby`);
+  assert.ok(campMiss, 'an unconfirmed list is missed once the night before closes');
+  assert.strictEqual(campMiss.points, 12, 'naming the points that were on the table');
+  await recordMisses(prepLateNow);
+  const campMisses = (await R.state()).completions.filter((c) => c.id === `prep-miss-${camp.item.id}-toby`);
+  assert.strictEqual(campMisses.length, 1, 'and only once');
+  console.log('\u2713 an unconfirmed prep list is missed when the night before closes, once');
+
+  // The confirmed one is never missed, even after its deadline.
+  await recordMisses(new Date(inTwoDays.getTime() - 3 * 3600000));
+  const soccerMissed = (await R.state()).completions
+    .some((c) => c.id === `prep-miss-${soccerEvent.item.id}-ollie`);
+  assert.strictEqual(soccerMissed, false, 'a confirmed list is never swept as missed');
+  console.log('\u2713 confirming in time keeps the list off the miss sweep');
+
   console.log('\nALL LOGIC TESTS PASSED');
 }
 

@@ -1231,10 +1231,29 @@ button.parent-list-row:active { transform: scale(0.99); }
   margin: var(--space-3) 0 var(--space-2);
 }
 .glance-prep {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
   font-size: var(--text-sm);
-  color: var(--ink-muted);
+}
+.prep-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+.prep-item.done span { text-decoration: line-through; color: var(--ink-muted); }
+.prep-item.locked { cursor: default; }
+.prep-item input { accent-color: var(--brand); width: 1.1rem; height: 1.1rem; }
+.prep-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
   margin-top: var(--space-1);
 }
+.prep-missed { color: var(--danger); font-weight: var(--weight-medium); }
 /* My List - a kid's own notes, plans and reminders. */
 .mylist-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -2536,15 +2555,50 @@ function glanceChoreCard(item) {
     + '</div>';
 }
 
-// Events and reminders are not actionable by a kid - creating and editing them
-// stays parent-only - so these render as a plain card with no tick.
+// The event itself stays read-only for a kid - creating and editing is
+// parent-only - but their OWN prep list on it is theirs to tick. The list
+// carries the points and closes the night before: being ready is what is
+// being rewarded, not attending.
+//
+// (The original version of this looked the list up as prepLists[kidId], but
+// prepLists is an array of {personId, items} - so the 🎒 line had never once
+// rendered. Found while designing #41, which imports lists into exactly this
+// spot.)
 function glanceEventCard(item, kidId) {
   var when = item.allDay
     ? 'All day'
     : (item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+  var list = (item.prepLists || []).find(function(l) { return l.personId === kidId; });
   var prep = '';
-  if (item.prepLists && item.prepLists[kidId] && item.prepLists[kidId].length) {
-    prep = '<div class="glance-prep">🎒 ' + item.prepLists[kidId].map(esc).join(', ') + '</div>';
+  if (list && list.items && list.items.length) {
+    var confirmed = (state.completions || []).some(function(c) {
+      return c.id === 'prep-' + item.id + '-' + kidId;
+    });
+    var missed = (state.completions || []).some(function(c) {
+      return c.id === 'prep-miss-' + item.id + '-' + kidId;
+    });
+    var allTicked = list.items.every(function(entry) { return entry.done; });
+    var rows = list.items.map(function(entry, index) {
+      return '<label class="prep-item' + (entry.done ? ' done' : '') + (missed || confirmed ? ' locked' : '') + '">'
+        + '<input type="checkbox"' + (entry.done ? ' checked' : '') + (missed || confirmed ? ' disabled' : '')
+        + ' onchange="tickPrep(\'' + jsq(item.id) + '\', ' + index + ', this.checked)">'
+        + '<span>' + esc(entry.text) + '</span>'
+        + '</label>';
+    }).join('');
+    var footer;
+    if (confirmed) {
+      footer = '<div class="sub">Packed and confirmed ✅' + (list.points ? ' · ' + list.points + ' pts pending' : '') + '</div>';
+    } else if (missed) {
+      footer = '<div class="sub prep-missed">Missed — packing closed the night before'
+        + (list.points ? ' · ' + list.points + ' pts were up for grabs' : '') + '</div>';
+    } else {
+      footer = '<div class="prep-footer">'
+        + '<span class="sub">Pack by the night before' + (list.points ? ' · ' + list.points + ' pts' : '') + '</span>'
+        + '<button class="btn small" ' + (allTicked ? '' : 'disabled ')
+        + 'onclick="confirmPrepPacked(\'' + jsq(item.id) + '\')">Packed ✔</button>'
+        + '</div>';
+    }
+    prep = '<div class="glance-prep">🎒 ' + rows + footer + '</div>';
   }
   return '<div class="task">'
     + '<button class="tick" disabled>' + (item.kind === 'reminder' ? '🔔' : '📌') + '</button>'
@@ -2555,6 +2609,34 @@ function glanceEventCard(item, kidId) {
     + prep
     + '</div>'
     + '</div>';
+}
+
+async function tickPrep(planningItemId, itemIndex, done) {
+  var result = await api({
+    action: 'tickPrepItem',
+    personId: session.personId, pin: session.pin,
+    planningItemId: planningItemId, itemIndex: itemIndex, done: done,
+  });
+  if (toastApiError(result)) { await refresh(); return; }
+  // Update the local copy so the confirm button's enabled state follows the
+  // tick without a refetch round-trip.
+  (kidCalendarItems || []).forEach(function(item) {
+    if (item.id !== planningItemId) return;
+    var list = (item.prepLists || []).find(function(l) { return l.personId === session.personId; });
+    if (list && list.items[itemIndex]) list.items[itemIndex].done = done;
+  });
+  var kid = state.people.find(function(person) { return person.id === session.personId; });
+  if (kid) renderKidGlance(kid);
+}
+
+async function confirmPrepPacked(planningItemId) {
+  var result = await api({
+    action: 'confirmPrep',
+    personId: session.personId, pin: session.pin,
+    planningItemId: planningItemId,
+  });
+  if (toastApiError(result)) return;
+  toast('Packed! Waiting for a grown-up to check 🎒');
 }
 
 function glanceCard(item, kidId) {
@@ -3095,7 +3177,9 @@ function renderParentCalendarChecklists(item) {
         + '</label>';
     }).join('') || '<div class="sub">No prep items yet.</div>';
     return '<div class="parent-calendar-checklist">'
-      + '<strong>' + esc(kidLabel) + '</strong>'
+      + '<strong>' + esc(kidLabel)
+      + ' <button class="btn ghost small" onclick="parentSetPrepPoints(\'' + jsq(item.id) + '\', ' + listIndex + ')">'
+      + (Number(list.points) > 0 ? list.points + ' pts' : 'Set pts') + '</button></strong>'
       + items
       + '</div>';
   }).join('') || '<div class="sub">No kid prep lists yet.</div>';
@@ -4987,6 +5071,9 @@ function planningUpdatePayload(item) {
     prepLists: Array.isArray(item.prepLists) ? item.prepLists.map(function(list) {
       return {
         personId: list.personId,
+        // Round-tripped, not rebuilt: dropping points here would silently
+        // zero a list's reward on every unrelated edit.
+        points: Number(list.points) || 0,
         items: (list.items || []).map(function(entry) {
           return { text: entry.text, done: !!entry.done };
         }),
@@ -5158,6 +5245,22 @@ async function parentAddPrepItem(itemId) {
     }
     prepList.items.push({ text: text, done: false });
   }, 'Prep item added.');
+}
+
+// The decided rule: the LIST carries the points and the event carries none -
+// being ready is what is rewarded, not attending.
+async function parentSetPrepPoints(itemId, listIndex) {
+  var item = (parentCalendarItems || []).find(function(entry) { return entry.id === itemId; });
+  var current = item && item.prepLists && item.prepLists[listIndex]
+    ? (Number(item.prepLists[listIndex].points) || 0) : 0;
+  var input = prompt('Points for getting this packed in time?', String(current || 10));
+  if (input === null) return;
+  var points = Number(input.trim());
+  if (!Number.isInteger(points) || points < 0) { toast('Points must be a whole number.'); return; }
+  await parentUpdatePlanningItem(itemId, function(payload) {
+    if (!payload.prepLists[listIndex]) return;
+    payload.prepLists[listIndex].points = points;
+  }, 'Prep list is worth ' + points + ' pts.');
 }
 
 async function parentAddAdultAction(itemId) {

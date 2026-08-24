@@ -928,6 +928,68 @@ test('a missed chore shows on the parent\u2019s today view', async ({ page }) =>
   });
 });
 
+// The soccer case, rendered: the kid sees their prep list on the event, ticks
+// it, and Packed only unlocks when everything is ticked. This is the surface
+// the original prepLists[kidId] lookup bug kept blank - that code had never
+// once run.
+test('a kid can tick their prep list and confirm packed', async ({ page }) => {
+  const eventId = await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    const state = await post({ action: 'state' });
+    // Two local days ahead, so the night-before deadline cannot be shut
+    // whatever hour this runs.
+    const start = new Date(new Date(state.today + 'T12:00:00Z').getTime() + 2 * 86400000);
+    const made = await post({
+      action: 'addPlanningItem', parentId: 'peter', parentPin: '1234',
+      type: 'event', title: 'Soccer match', personId: 'ollie',
+      startAt: start.toISOString(),
+      prepLists: [{ personId: 'ollie', points: 10, items: [{ text: 'boots' }, { text: 'shin pads' }] }],
+    });
+    return made.item.id;
+  });
+
+  await page.reload();
+  await pickPerson(page, 'Ollie');
+
+  const card = page.locator('.task', { hasText: 'Soccer match' }).first();
+  await expect(card).toBeVisible();
+  await expect(card.locator('.prep-item')).toHaveCount(2);
+
+  const packed = card.getByRole('button', { name: /packed/i });
+  await expect(packed).toBeDisabled();
+
+  await card.locator('.prep-item input').nth(0).check();
+  await card.locator('.prep-item input').nth(1).check();
+  await expect(packed).toBeEnabled();
+  await packed.click();
+
+  // The confirmation is a completion pending the parent, worth the list.
+  await expect.poll(async () => page.evaluate(async (id) => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    const fresh = await post({ action: 'state' });
+    const row = fresh.completions.find((c) => c.id === 'prep-' + id + '-ollie');
+    return row ? row.status + ':' + row.points : null;
+  }, eventId)).toBe('pending:10');
+
+  // Tidy: retire the event so later tests' premises hold.
+  await page.evaluate(async (id) => {
+    const real = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    await real({ action: 'deletePlanningItem', planningItemId: id, parentId: 'peter', parentPin: '1234' });
+  }, eventId);
+});
+
 test('Parent HQ is headed by the parent, not a crown', async ({ page }) => {
   await pickPerson(page, 'Peter');
   const title = page.locator('#p-hq-title');

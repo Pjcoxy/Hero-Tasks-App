@@ -390,6 +390,31 @@ test that seeds chores for a kid must retire them (`deleteTask`) before
 finishing if a later test's premise is "this kid has nothing on". This has
 now bitten twice; clean up seeded chores as part of the test that made them.
 
+### Prep lists — packed the night before, worth points
+
+The soccer case: Ollie plays Sunday morning, so **being ready by Saturday
+night is the thing rewarded** — not attending. The rules, all settled:
+
+- **The list carries the points; the event carries none.** `prepLists`
+  entries hold `points`, settable from the parent calendar checklist ("Set
+  pts"). `planningUpdatePayload` round-trips them — dropping the field there
+  would silently zero a list's reward on every unrelated edit.
+- **The deadline is the last window's close on the day before the event**
+  (`prepDeadlinePassed`), with an optional per-event `prepDueBy` ISO override
+  winning when set. After it: ticking and confirming are refused with
+  `windowClosed: true`, and the sweep records `prep-miss-<itemId>-<kidId>`.
+- **A kid ticks only their own list** — `tickPrepItem` is `requireSelf` plus
+  a personId match; the parent-only `updatePlanningItem` remains the only way
+  to touch anyone else's.
+- **Confirming creates an ordinary pending completion**
+  (`prep-<itemId>-<kidId>`, deterministic so a double-tap cannot double the
+  reward) titled "Packed for <event>" and worth the list's points — the
+  parent's existing approval flow needs nothing new.
+- The kid's Home glance renders the checklist with live ticks and a Packed
+  button that unlocks only when everything is ticked. (The original render
+  looked the list up as `prepLists[kidId]` when it is an array of
+  `{personId, items}` — that 🎒 line had never once run.)
+
 ### Nudges and the evening summary
 
 Two messages a day, maximum, per person - the design is a digest, not a

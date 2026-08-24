@@ -337,7 +337,12 @@ async function validatePrepLists(prepLists) {
       if (!text) return { ok: false, error: 'prepLists item text is required' };
       items.push({ text, done: !!(item && item.done) });
     }
-    normalized.push({ personId: personCheck.personId, items });
+    let points = 0;
+    if (list.points !== undefined && list.points !== null && list.points !== '') {
+      points = Number(list.points);
+      if (!Number.isInteger(points) || points < 0) return { ok: false, error: 'prepLists points must be a whole number' };
+    }
+    normalized.push({ personId: personCheck.personId, items, points });
   }
   return { ok: true, prepLists: normalized };
 }
@@ -752,6 +757,97 @@ async function getConflictsForItem(item) {
   const conflicts = findConflicts(candidate, schedule);
   const suggestedTimes = conflicts.length > 0 ? suggestAlternateSlots(candidate, schedule) : [];
   return { conflicts, suggestedTimes };
+}
+
+// When prep for an event is due: the close of the LAST window on the day
+// before the event - "packed for Sunday soccer by Saturday 9pm". Being ready
+// the night before is the thing being rewarded, which is why the deadline is
+// not the event's own morning. A per-event override (prepDueBy, ISO) wins
+// when set.
+async function prepDeadlinePassed(item, now = new Date()) {
+  if (item.prepDueBy) {
+    const override = new Date(item.prepDueBy);
+    if (!Number.isNaN(override.getTime())) return now.getTime() >= override.getTime();
+  }
+  const eventDate = todayStr(new Date(item.startAt));
+  const nowDate = todayStr(now);
+  if (nowDate > eventDate) return true;    // the event day is over
+  if (nowDate === eventDate) return true;  // the night before has passed
+  // Some earlier day. Only the day immediately before can close it.
+  const dayBefore = new Date(new Date(`${eventDate}T12:00:00Z`).getTime() - 86400000)
+    .toISOString().slice(0, 10);
+  if (nowDate !== dayBefore) return false;
+  const windows = await getHouseholdWindows();
+  const lastClose = Math.max(...windows
+    .filter((w) => HHMM_RE.test(w.closesAt || ''))
+    .map((w) => hhmmToMinutes(w.closesAt)));
+  return Number.isFinite(lastClose) && localMinutes(now) >= lastClose;
+}
+
+// A kid ticking one item on their own prep list. requireSelf plus a check the
+// list is actually theirs - the parent-only updatePlanningItem stays the only
+// way to touch anyone else's.
+async function tickPrepItem(req) {
+  const personId = String(req.personId || '').trim();
+  await requireSelf(personId, req.pin, personId);
+  const planningItems = container('planningItems');
+  const { resource: item } = await planningItems
+    .item(req.planningItemId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!item || item.active === false) return { ok: false, error: 'Not found' };
+  const list = (item.prepLists || []).find((l) => l.personId === personId);
+  if (!list) return { ok: false, error: 'Not your list' };
+  const index = Number(req.itemIndex);
+  if (!Number.isInteger(index) || index < 0 || index >= list.items.length) {
+    return { ok: false, error: 'No such item' };
+  }
+  if (await prepDeadlinePassed(item)) {
+    return { ok: false, error: 'Too late — packing closed the night before.', windowClosed: true };
+  }
+  list.items[index].done = !!req.done;
+  await planningItems.item(req.planningItemId, HOUSEHOLD_ID).replace(item);
+  return { ok: true, item };
+}
+
+// Everything ticked and the kid says "packed". Creates a pending completion -
+// the same shape as any chore, so the parent's approval flow needs nothing
+// new. Idempotent by id, like a miss.
+async function confirmPrep(req) {
+  const personId = String(req.personId || '').trim();
+  await requireSelf(personId, req.pin, personId);
+  const planningItems = container('planningItems');
+  const { resource: item } = await planningItems
+    .item(req.planningItemId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!item || item.active === false) return { ok: false, error: 'Not found' };
+  const list = (item.prepLists || []).find((l) => l.personId === personId);
+  if (!list) return { ok: false, error: 'Not your list' };
+  if (!list.items.length || !list.items.every((entry) => entry.done)) {
+    return { ok: false, error: 'Tick everything off first.' };
+  }
+  if (await prepDeadlinePassed(item)) {
+    return { ok: false, error: 'Too late — packing closed the night before.', windowClosed: true };
+  }
+  try {
+    await container('completions').items.create({
+      id: `prep-${item.id}-${personId}`,
+      householdId: HOUSEHOLD_ID,
+      taskId: '',
+      planningItemId: item.id,
+      kidId: personId,
+      title: `Packed for ${item.title}`,
+      points: Number(list.points) || 0,
+      date: todayStr(),
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    if (!err || err.code !== 409) throw err;
+    // Already confirmed - not an error worth showing a kid.
+  }
+  return getState();
 }
 
 async function addPlanningItem(req) {
@@ -1366,6 +1462,39 @@ async function recordMisses(now = new Date()) {
       if (!err || err.code !== 409) throw err;
     }
   }
+
+  // Prep lists miss by the same rule they earn: the night before closed with
+  // no confirmation. Only for events still ahead (or today) - the sweep must
+  // not backfill history for events that predate the feature.
+  const planningItems = await queryHousehold('planningItems');
+  for (const item of planningItems) {
+    if (item.active === false || item.type !== 'event') continue;
+    const eventDate = todayStr(new Date(item.startAt));
+    if (eventDate < dateStr) continue;
+    if (!(await prepDeadlinePassed(item, now))) continue;
+    for (const list of item.prepLists || []) {
+      if (!list.items || !list.items.length) continue;
+      const confirmed = completions.some((c) => c.id === `prep-${item.id}-${list.personId}`);
+      if (confirmed) continue;
+      try {
+        await completionsContainer.items.create({
+          id: `prep-miss-${item.id}-${list.personId}`,
+          householdId: HOUSEHOLD_ID,
+          taskId: '',
+          planningItemId: item.id,
+          kidId: list.personId,
+          title: `Packed for ${item.title}`,
+          points: Number(list.points) || 0,
+          date: dateStr,
+          status: 'missed',
+          createdAt: now.toISOString(),
+        });
+        recorded += 1;
+      } catch (err) {
+        if (!err || err.code !== 409) throw err;
+      }
+    }
+  }
   return { recorded };
 }
 
@@ -1735,6 +1864,8 @@ const ROUTES = {
   deleteMyItem,
   reorderMyItems,
   reorderTasks,
+  tickPrepItem,
+  confirmPrep,
 };
 
 app.http('hero', {
