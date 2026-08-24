@@ -5266,6 +5266,16 @@ async function parentEditPlanningItem(itemId) {
     return;
   }
   var personId = whoIndex === 0 ? null : kidsOnly()[whoIndex - 1].id;
+  // Same control the add form has - a one-off must be promotable to weekly
+  // after the fact (Soccer was seeded one-off; the season is not).
+  var recurrence = null;
+  if (type === 'event') {
+    var repeatInput = prompt('Repeats?\n1) Just once  2) Every week', item.recurrence === 'weekly' ? '2' : '1');
+    if (repeatInput === null) return;
+    var repeatChoice = String(repeatInput).trim();
+    if (repeatChoice !== '1' && repeatChoice !== '2') { toast('Choose 1 or 2 for repeats.'); return; }
+    recurrence = repeatChoice === '2' ? 'weekly' : null;
+  }
   var notesInput = prompt('Notes (optional)', item.notes || '');
   if (notesInput === null) return;
   await parentUpdatePlanningItem(itemId, function(payload) {
@@ -5275,6 +5285,7 @@ async function parentEditPlanningItem(itemId) {
     payload.endAt = type === 'event' ? endAt : null;
     payload.personId = personId;
     payload.notes = notesInput.trim() || null;
+    payload.recurrence = recurrence;
     if (type === 'reminder') {
       payload.prepLists = [];
       payload.adultActions = [];

@@ -937,6 +937,60 @@ test('a missed chore shows on the parent\u2019s today view', async ({ page }) =>
 // to claim the wrong day. The header now prints the actual date, and a
 // submitted chore reads as dealt-with - struck through - rather than
 // looking indistinguishable from still-to-do.
+// The add form could make an event weekly; the edit flow could not - so a
+// one-off could never be promoted once created. Drives the real prompt
+// sequence and asserts the server ends up with recurrence set.
+test('editing a one-off event can make it weekly', async ({ page }) => {
+  const eventId = await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    const made = await post({
+      action: 'addPlanningItem', parentId: 'peter', parentPin: '1234',
+      type: 'event', title: 'Winter season opener', personId: 'ollie',
+      startAt: new Date(Date.now() + 3 * 86400000).toISOString(),
+    });
+    return made.item.id;
+  });
+
+  await page.reload();
+  await pickPerson(page, 'Peter');
+  await page.getByRole('button', { name: /calendar/i }).first().click();
+
+  // The edit flow is a prompt sequence; answer each by its question text,
+  // changing only the Repeats step.
+  await page.evaluate(() => {
+    window.prompt = (message, fallback) => /Repeats\?/.test(String(message)) ? '2' : String(fallback == null ? '' : fallback);
+  });
+  await page.evaluate((id) => window.parentEditPlanningItem(id), eventId);
+
+  await expect.poll(async () => page.evaluate(async (id) => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    const cal = await post({
+      action: 'calendar', parentId: 'peter', parentPin: '1234',
+      start: new Date(Date.now() - 86400000).toISOString(),
+      end: new Date(Date.now() + 20 * 86400000).toISOString(),
+    });
+    const rows = (cal.items || []).filter((i) => i.id === id);
+    return rows.length ? rows[0].recurrence + ':' + rows.length : null;
+  }, eventId)).toBe('weekly:3');
+
+  await page.evaluate(async (id) => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    await post({ action: 'deletePlanningItem', planningItemId: id, parentId: 'peter', parentPin: '1234' });
+  }, eventId);
+});
+
 test('the Today header shows the real date, and a submitted chore is struck through', async ({ page }) => {
   await page.evaluate(async () => {
     const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
