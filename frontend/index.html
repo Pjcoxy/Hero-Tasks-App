@@ -1254,6 +1254,7 @@ button.parent-list-row:active { transform: scale(0.99); }
   margin-top: var(--space-1);
 }
 .prep-missed { color: var(--danger); font-weight: var(--weight-medium); }
+.btn[disabled] { opacity: 0.45; cursor: not-allowed; }
 /* My List - a kid's own notes, plans and reminders. */
 .mylist-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -2602,13 +2603,14 @@ function glanceEventCard(item, kidId) {
     if (confirmed) {
       footer = '<div class="sub">Packed and confirmed ✅' + (list.points ? ' · ' + list.points + ' pts pending' : '') + '</div>';
     } else if (missed) {
-      footer = '<div class="sub prep-missed">Missed — packing closed the night before'
+      footer = '<div class="sub prep-missed">Missed — packing closed'
         + (list.points ? ' · ' + list.points + ' pts were up for grabs' : '') + '</div>';
     } else if (!isLive) {
       footer = '<div class="sub">Opens after this week\u2019s' + (list.points ? ' · ' + list.points + ' pts' : '') + '</div>';
     } else {
+      var dueLabel = prepDueLabel(item);
       footer = '<div class="prep-footer">'
-        + '<span class="sub">Pack in time' + (list.points ? ' · ' + list.points + ' pts' : '') + '</span>'
+        + '<span class="sub">' + (dueLabel ? 'Pack by <strong>' + esc(dueLabel) + '</strong>' : 'Pack in time') + (list.points ? ' · ' + list.points + ' pts' : '') + '</span>'
         + '<button class="btn small" ' + (allTicked ? '' : 'disabled ')
         + 'onclick="confirmPrepPacked(\'' + jsq(item.id) + '\')">Packed ✔</button>'
         + '</div>';
@@ -2624,6 +2626,24 @@ function glanceEventCard(item, kidId) {
     + prep
     + '</div>'
     + '</div>';
+}
+
+function prepDueLabel(item) {
+  if (!item.prepDueDate || !item.prepDueTime) return '';
+  var parts = item.prepDueTime.split(':');
+  var hour = Number(parts[0]);
+  var suffix = hour >= 12 ? 'pm' : 'am';
+  var displayHour = hour % 12 === 0 ? 12 : hour % 12;
+  var time = displayHour + (parts[1] === '00' ? '' : ':' + parts[1]) + suffix;
+  var today = todayStr();
+  var tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  var tomorrowStr = tomorrow.getFullYear() + '-' + String(tomorrow.getMonth() + 1).padStart(2, '0') + '-' + String(tomorrow.getDate()).padStart(2, '0');
+  var day;
+  if (item.prepDueDate === today) day = 'today';
+  else if (item.prepDueDate === tomorrowStr) day = 'tomorrow';
+  else day = new Date(item.prepDueDate + 'T12:00:00').toLocaleDateString([], { weekday: 'short' });
+  return day + ' ' + time;
 }
 
 async function tickPrep(planningItemId, itemIndex, done) {

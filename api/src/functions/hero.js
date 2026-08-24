@@ -824,6 +824,31 @@ function currentOccurrence(item, now = new Date()) {
   return { ...last, date: todayStr(new Date(last.startAt)) };
 }
 
+function localHHMM(date) {
+  const parts = LOCAL_TIME_FORMAT.formatToParts(date);
+  return `${parts.find((part) => part.type === 'hour').value}:${parts.find((part) => part.type === 'minute').value}`;
+}
+
+// When an occurrence's prep is due, as household-local display parts - the
+// client shows these verbatim, so no timezone maths ever happens in the
+// browser. Mirrors prepDeadlinePassed: the override wins; otherwise the last
+// window's close on the day before.
+async function prepDueParts(occ, windows) {
+  if (occ.prepDueBy) {
+    const when = new Date(occ.prepDueBy);
+    if (!Number.isNaN(when.getTime())) {
+      return { prepDueDate: todayStr(when), prepDueTime: localHHMM(when) };
+    }
+  }
+  const dayBefore = new Date(new Date(`${occ.date}T12:00:00Z`).getTime() - 86400000)
+    .toISOString().slice(0, 10);
+  const closes = (windows || await getHouseholdWindows())
+    .filter((w) => HHMM_RE.test(w.closesAt || ''))
+    .map((w) => w.closesAt)
+    .sort();
+  return { prepDueDate: dayBefore, prepDueTime: closes[closes.length - 1] || '21:00' };
+}
+
 // When prep for an event is due: the close of the LAST window on the day
 // before the event - "packed for Sunday soccer by Saturday 9pm". Being ready
 // the night before is the thing being rewarded, which is why the deadline is
@@ -1015,6 +1040,7 @@ async function calendar(req) {
   ]);
 
   const schedule = [];
+  const householdWindows = await getHouseholdWindows();
 
   for (const item of planningItems) {
     if (item.active === false) continue;
@@ -1040,6 +1066,10 @@ async function calendar(req) {
         occurrenceDate: todayStr(occStart),
         prepOpenDate: liveOcc ? liveOcc.date : null,
       };
+      if (item.type === 'event' && (item.prepLists || []).some((l) => l.items && l.items.length)) {
+        Object.assign(row, await prepDueParts(
+          { ...occ, date: row.occurrenceDate }, householdWindows));
+      }
       if (callerRole === 'kid') delete row.adultActions;
       schedule.push(row);
     }
