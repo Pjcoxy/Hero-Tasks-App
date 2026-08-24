@@ -368,6 +368,28 @@ nobody refusing anything), and Recent activity, worded as a fact with the
 points that were on the table: *"Missed — the window closed. 6 pts were up for
 grabs."*
 
+### The family view
+
+Parent HQ's Approvals tab is the family's one screen, in this order: what's
+waiting on you, reward requests, **Today by kid**, **Yesterday**, today &
+this week, recently decided.
+
+- **Today by kid** counts misses as their own pill (`.pill.bad`, "2 missed")
+  alongside pending, and "All caught up" only appears when there are neither.
+  A row whose window shut on it is tagged **Missed** (`.tag.missed`), not
+  "Not started" — which would understate a door that has already closed.
+- **Yesterday** renders per kid from the completion records alone: done,
+  sent back, missed, each with the points that were at stake. This panel is
+  what the whole windows-and-misses build exists to feed — until misses were
+  recorded there was nothing truthful it could have said. Yesterday's date is
+  derived from `state.today` (the API's local day), minus one day at UTC
+  noon, so no timezone can shift it.
+
+Smoke-testing note: the suite's store is shared across the whole run, so a
+test that seeds chores for a kid must retire them (`deleteTask`) before
+finishing if a later test's premise is "this kid has nothing on". This has
+now bitten twice; clean up seeded chores as part of the test that made them.
+
 ### Nudges and the evening summary
 
 Two messages a day, maximum, per person - the design is a digest, not a

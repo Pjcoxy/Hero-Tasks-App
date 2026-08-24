@@ -96,7 +96,14 @@ process.env.VAPID_PUBLIC_KEY = 'smoke-public';
 process.env.VAPID_PRIVATE_KEY = 'smoke-private';
 
 const { ensureSeeded } = require(path.join(API_ROOT, 'src/lib/seed.js'));
-const { ROUTES } = require(path.join(API_ROOT, 'src/functions/hero.js'));
+const { ROUTES, recordMisses } = require(path.join(API_ROOT, 'src/functions/hero.js'));
+
+// Harness-only: in production the miss sweep runs from the Azure timer, which
+// this server does not have. Tests that need "the sweep has run" trigger it
+// here explicitly. Never added to the real ROUTES table.
+const HARNESS_ROUTES = {
+  __sweepMisses: () => recordMisses(),
+};
 
 // ---------------------------------------------------------------------------
 // HTTP
@@ -123,7 +130,7 @@ const server = http.createServer(async (req, res) => {
       try { payload = JSON.parse(body || '{}'); } catch (e) { payload = {}; }
       try {
         await ensureSeeded();
-        const fn = ROUTES[payload.action || 'state'];
+        const fn = HARNESS_ROUTES[payload.action] || ROUTES[payload.action || 'state'];
         if (!fn) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ ok: false, error: 'Unknown action' }));
