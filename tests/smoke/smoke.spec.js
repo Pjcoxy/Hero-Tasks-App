@@ -992,10 +992,16 @@ test('a kid can tick their prep list and confirm packed', async ({ page }) => {
   await expect(card).toBeVisible();
   await expect(card.locator('.prep-item')).toHaveCount(2);
 
-  // The card must say WHEN packing closes, not just that it must be "in
-  // time" - the match time and the packing deadline are different days and
-  // the kid only sees the former otherwise.
-  await expect(card).toContainText(/Pack by/);
+  // Appy, not wordy: both facts sit at the top of the card as pills - the
+  // event chip (day + time) and the amber deadline chip - not a sentence
+  // buried under the checklist.
+  // The event chip carries a weekday and a time - whichever day the test's
+  // two-days-out fixture lands on.
+  const chips = card.locator('.event-chips .pill');
+  await expect(chips.first()).toContainText(/🗓️ \w{3} \d{1,2}:\d{2}/);
+  const deadlineChip = card.locator('.event-chips .pill.warn');
+  await expect(deadlineChip).toContainText(/by /);
+  await expect(card.locator('.event-chips .pill', { hasText: /⭐ 10/ })).toHaveCount(1);
   await expect(card).not.toContainText(/Pack in time/);
 
   const packed = card.getByRole('button', { name: /packed/i });
