@@ -334,6 +334,37 @@ to be expressed.
 - Chips, not a multi-select: seven options that are always the same seven read
   faster as a row you tap.
 
+### Dates and times are the family's, not UTC
+
+**Everything the app calls "today", or "9pm", means local time in
+`HOUSEHOLD_TZ`** (`Australia/Perth`, overridable with `HOUSEHOLD_TIMEZONE`).
+Use `todayStr()` and `localMinutes()` in `hero.js`; never `getUTCHours()` or
+`new Date().toISOString().slice(0, 10)` for anything a person will read as a
+day or a time.
+
+This was wrong for a long time and the failure was invisible for sixteen hours
+out of every twenty-four:
+
+- The frontend already used **browser-local** dates. The API used **UTC**. For
+  the eight hours between local midnight and 8am Perth the two disagreed about
+  what day it was, so a chore ticked before school was stored against
+  yesterday and then rendered as still outstanding.
+- Quiet hours set to `21:00–07:00` were applied in UTC, which in Perth is
+  **05:00–15:00** — silent through the school day, wide open at 2am.
+
+The conversion goes through `Intl.DateTimeFormat` with an explicit `timeZone`,
+which handles DST anywhere without a dependency. Two details worth keeping:
+`en-CA` is used because it formats as `YYYY-MM-DD`, the shape every date in
+this codebase already has; and the time formatter uses `hourCycle: 'h23'`
+rather than `hour12: false`, because the latter renders midnight as `24` on
+some ICU builds, putting it a full day out of range.
+
+Note the test that broke when this was fixed: it built its quiet-hours window
+from `getUTCHours()` and had only ever passed because the code read UTC too.
+Two matching mistakes cancelling out is the failure mode to watch for here —
+assert against a **fixed instant with a known local equivalent**, not against
+"now" formatted the same way the code formats it.
+
 ### The sign-in screen
 
 **The artwork is the screen.** Signing in happens on top of it; there is no
