@@ -1968,6 +1968,61 @@ async function main() {
   household.windows = null;
   await mockContainer('households').item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(household);
 
+  // -------------------------------------------------------------------------
+  // Nudges and the evening summary. "Now" is behaviour, so these build their
+  // instants with at(): a Date whose LOCAL wall-clock time is the one named,
+  // in the pinned harness zone - deterministic whatever hour CI runs.
+  const { sendWindowNudges, sendEveningSummary, localMinutes: lm } = require('./src/functions/hero.js');
+  const at = (hhmmStr) => {
+    const [h, m] = hhmmStr.split(':').map(Number);
+    const base = new Date();
+    return new Date(base.getTime() + (((h * 60) + m) - lm(base)) * 60000);
+  };
+
+  await ROUTES.addTask({
+    parentId: 'peter', parentPin: '1234', kidId: 'toby',
+    title: 'Bring in the washing', points: 4, cycle: 'daily', windowId: 'evening',
+  });
+
+  // 19:00: too early. 20:40: inside the 30-minute lead. 20:50: already sent.
+  pushCalls.length = 0;
+  const early = await sendWindowNudges(at('19:00'));
+  assert.strictEqual(early.sent, 0, 'no nudge two hours before the close');
+  const inLead = await sendWindowNudges(at('20:40'));
+  assert.ok(inLead.sent >= 1, 'a nudge inside the lead window');
+  const nudgePush = pushCalls
+    .filter((call) => call.type === 'send')
+    .map((call) => JSON.parse(call.payload))
+    .find((payload) => payload.title === 'Closing soon ⏳' && payload.body.includes('Bring in the washing'));
+  assert.ok(nudgePush, 'the nudge names the chore');
+  assert.ok(nudgePush.body.includes('21:00'), 'and when the window closes');
+  assert.ok(nudgePush.body.includes('4 pts'), 'and what is at stake');
+  const again = await sendWindowNudges(at('20:50'));
+  const washingNudges = pushCalls
+    .filter((call) => call.type === 'send')
+    .map((call) => JSON.parse(call.payload))
+    .filter((payload) => payload.title === 'Closing soon ⏳' && payload.body.includes('Bring in the washing'));
+  assert.strictEqual(washingNudges.length, 1, 'one nudge per chore per day, not one per sweep');
+  console.log('\u2713 a kid gets one closing-soon nudge, naming the chore, the close and the stake');
+
+  // The summary: nothing before the last close, one per day after it, to the
+  // parents, counting the day's misses.
+  pushCalls.length = 0;
+  const beforeClose = await sendEveningSummary(at('20:00'));
+  assert.strictEqual(beforeClose.sent, 0, 'no summary while a window is still open');
+  await recordMisses(at('21:05'));
+  const afterClose = await sendEveningSummary(at('21:05'));
+  assert.strictEqual(afterClose.sent, 2, 'both parents get the summary');
+  const summaryPush = pushCalls
+    .filter((call) => call.type === 'send')
+    .map((call) => JSON.parse(call.payload))
+    .find((payload) => payload.title === 'Today at home');
+  assert.ok(summaryPush, 'the summary went out as a push');
+  assert.ok(/missed/.test(summaryPush.body), 'and it counts the misses');
+  const repeat = await sendEveningSummary(at('21:20'));
+  assert.strictEqual(repeat.sent, 0, 'one summary per day, however many ticks follow');
+  console.log('\u2713 parents get one evening summary counting done and missed, once');
+
   console.log('\nALL LOGIC TESTS PASSED');
 }
 

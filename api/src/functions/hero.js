@@ -1369,6 +1369,118 @@ async function recordMisses(now = new Date()) {
   return { recorded };
 }
 
+// One nudge to the kid, shortly before a window shuts - not a stream. The
+// window's whole design is that the stake is visible in advance, and a single
+// "closes at 9" half an hour out is the last moment that information can
+// still change the outcome. After the close it is recordMisses' job, not a
+// notification's.
+const NUDGE_LEAD_MINUTES = 30;
+
+async function sendWindowNudges(now = new Date()) {
+  const dateStr = todayStr(now);
+  const [chores, completions, windows, quietHours] = await Promise.all([
+    queryHousehold('chores'),
+    queryHousehold('completions'),
+    getHouseholdWindows(),
+    getHouseholdQuietHours(),
+  ]);
+  const choresContainer = container('chores');
+  const settledToday = new Set(
+    completions.filter((c) => c.date === dateStr && c.taskId).map((c) => c.taskId)
+  );
+  const nowMinutes = localMinutes(now);
+
+  let sent = 0;
+  for (const chore of chores) {
+    if (chore.active === false) continue;
+    if (chore.cycle === 'oneoff') continue;
+    if (!choreDueToday(chore, dateStr)) continue;
+    if (settledToday.has(chore.id)) continue;
+    // One per chore per day, marked on the chore doc - same shape as the
+    // one-off lastReminderSentAt marker that already exists.
+    if (chore.nudgedOn === dateStr) continue;
+    const windowDef = resolveWindow(windows, chore.windowId);
+    if (!windowDef || !HHMM_RE.test(windowDef.closesAt || '')) continue;
+    const closeMinutes = hhmmToMinutes(windowDef.closesAt);
+    if (nowMinutes < closeMinutes - NUDGE_LEAD_MINUTES || nowMinutes >= closeMinutes) continue;
+
+    await sendPushIfAllowed(chore.kidId, {
+      title: 'Closing soon ⏳',
+      body: `${chore.title} closes at ${windowDef.closesAt} — ${Number(chore.points) || 0} pts`,
+      url: '/',
+    }, quietHours);
+    chore.nudgedOn = dateStr;
+    await choresContainer.item(chore.id, HOUSEHOLD_ID).replace(chore);
+    sent += 1;
+  }
+  return { sent };
+}
+
+// One summary to each parent when the last window has shut: what got done,
+// what got missed, per kid. A digest, not a stream - the day's single report,
+// which is the first time anything in this app has ever told a parent
+// anything.
+//
+// It deliberately bypasses quiet hours: the evening window closes at 21:00
+// and a household that sets quiet hours from 21:00 would otherwise never
+// receive the one message this feature exists to send. It fires once per day
+// and it goes to the adults - that is a different thing from pinging a kid's
+// tablet at night.
+async function sendEveningSummary(now = new Date()) {
+  const dateStr = todayStr(now);
+  const windows = await getHouseholdWindows();
+  const lastClose = Math.max(...windows
+    .filter((w) => HHMM_RE.test(w.closesAt || ''))
+    .map((w) => hhmmToMinutes(w.closesAt)));
+  if (!Number.isFinite(lastClose) || localMinutes(now) < lastClose) return { sent: 0 };
+
+  const { resource: household } = await container('households')
+    .item(HOUSEHOLD_ID, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!household) return { sent: 0 };
+  if (household.summarySentOn === dateStr) return { sent: 0 };
+
+  const [people, chores, completions] = await Promise.all([
+    queryHousehold('people'),
+    queryHousehold('chores'),
+    queryHousehold('completions'),
+  ]);
+  const kids = people.filter((p) => p.role === 'kid');
+  const parents = people.filter((p) => p.role === 'parent');
+  const todayRows = completions.filter((c) => c.date === dateStr);
+
+  const lines = [];
+  for (const kid of kids) {
+    const due = chores.filter((c) =>
+      c.active !== false && c.cycle !== 'oneoff' && c.kidId === kid.id && choreDueToday(c, dateStr));
+    if (!due.length) continue;
+    const missed = todayRows.filter((c) => c.kidId === kid.id && c.status === 'missed').length;
+    const doneCount = due.length - missed;
+    lines.push(missed === 0
+      ? `${kid.name}: all ${due.length} done ✅`
+      : `${kid.name}: ${doneCount} of ${due.length} done, ${missed} missed`);
+  }
+  if (!lines.length) return { sent: 0 };
+
+  // Mark first, then send. If the sends fail the summary is lost for the day
+  // rather than repeated on every later tick - for a daily digest, silence is
+  // the better failure than a stutter of duplicates.
+  household.summarySentOn = dateStr;
+  await container('households').item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(household);
+
+  let sent = 0;
+  for (const parent of parents) {
+    await sendPushIfAllowed(parent.id, {
+      title: 'Today at home',
+      body: lines.join(' · '),
+      url: '/',
+    }, null); // null quiet hours: see the note above
+    sent += 1;
+  }
+  return { sent };
+}
+
 async function sendDueReminders(now = new Date()) {
   await ensureSeeded();
   const [chores, completions, quietHours] = await Promise.all([
@@ -1663,7 +1775,19 @@ app.timer('choreDueReminder', {
     } catch (err) {
       context.error(err);
     }
+    try {
+      await sendWindowNudges();
+    } catch (err) {
+      context.error(err);
+    }
+    try {
+      // After recordMisses on purpose: the tick where the last window shuts
+      // records the day's misses first, so the summary counts them.
+      await sendEveningSummary();
+    } catch (err) {
+      context.error(err);
+    }
   },
 });
 
-module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, recordMisses, todayStr, localMinutes, HOUSEHOLD_TZ, DEFAULT_WINDOWS, isWindowClosed, resolveWindow };
+module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, recordMisses, sendWindowNudges, sendEveningSummary, todayStr, localMinutes, HOUSEHOLD_TZ, DEFAULT_WINDOWS, isWindowClosed, resolveWindow };

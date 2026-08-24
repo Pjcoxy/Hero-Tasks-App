@@ -368,6 +368,40 @@ nobody refusing anything), and Recent activity, worded as a fact with the
 points that were on the table: *"Missed — the window closed. 6 pts were up for
 grabs."*
 
+### Nudges and the evening summary
+
+Two messages a day, maximum, per person - the design is a digest, not a
+stream:
+
+- **The kid gets one "closing soon"** per chore per day, 30 minutes before its
+  window shuts: *"Feed the dog closes at 21:00 — 5 pts."* The last moment the
+  information can still change the outcome; after the close it is
+  `recordMisses`' job, not a notification's. Once-per-day is marked as
+  `nudgedOn` on the chore doc, the same shape as the one-off
+  `lastReminderSentAt` marker.
+- **The parents get one "Today at home"** when the last window has shut:
+  *"Toby: 3 of 4 done, 1 missed · Ollie: all 2 done ✅."* Idempotent via
+  `summarySentOn` on the household doc, and the tick order matters:
+  `recordMisses` runs before `sendEveningSummary` in the timer, so the
+  summary counts the misses the same tick records.
+
+Two deliberate wrinkles:
+
+- **The summary bypasses quiet hours.** The evening window closes at 21:00;
+  a household with quiet hours from 21:00 would otherwise never receive the
+  one message this feature exists to send. It fires once a day and goes to
+  the adults - different in kind from pinging a kid's tablet at night. Kid
+  nudges respect quiet hours as normal.
+- **Mark first, then send.** The summary flags `summarySentOn` before
+  pushing. If the sends fail, the day's summary is lost rather than repeated
+  on every later tick - for a daily digest, silence is the better failure
+  than a stutter of duplicates.
+
+Testing note: "now" is behaviour, so the tests build instants with a helper
+that returns a Date whose *local wall-clock time in the pinned harness zone*
+is the one named (`at('20:40')`) - never by formatting "now" the way the code
+does.
+
 ### How often a chore repeats
 
 Three options, and the middle one is the interesting one:

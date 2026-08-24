@@ -972,13 +972,17 @@ test('the sign-in screen is the artwork, with the faces on it', async ({ page })
   expect(Math.min(...tops), 'the row should sit in the panel at the foot')
     .toBeGreaterThan(view.height * 0.6);
 
-  // Same fractional-layout caveat as the row above, so allow a pixel either
-  // way. Exact equality here failed once at 721 against a 720px viewport on the
-  // very commit that passed at 720 on the other runner - a sub-pixel rounding
-  // difference, not a panel that had come away from the bottom edge.
+  // What this guards is that the panel is ANCHORED to the bottom edge, not
+  // floated above it. The first version demanded exact equality and failed at
+  // 721 vs 720; widened to 1px it failed again at 1.32px - on a pull request
+  // that changed no frontend code at all, so pure runner-to-runner layout
+  // rounding. Nudging an epsilon up a pixel each time it fires is the wrong
+  // fix. The threshold now has a rationale instead: the smallest spacing
+  // token in the design system is 4px (--space-1), so any DELIBERATE gap
+  // would measure at least that - anything under it can only be rounding.
   const panel = await page.locator('.who-sheet').boundingBox();
   expect(Math.abs(panel.y + panel.height - view.height), 'the panel should meet the bottom edge')
-    .toBeLessThanOrEqual(1);
+    .toBeLessThan(4);
 
   // Every person is the same kind of control: same circle, same ring, same name.
   // Sized from content, an emoji glyph is narrower than a photo and the four
