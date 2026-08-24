@@ -83,35 +83,35 @@ await post({
 console.log('event: Soccer', soccer.toISOString(), '(prep due the night before)');
 
 // Cubs: Monday 17:30 Perth, whole family (Toby AND Ollie both go), a prep
-// list each. "Uniform on" is same-evening prep, so prepDueBy overrides the
-// night-before default to the event start itself.
-// Scouts: Thursday 18:00-20:00 Perth, Toby only, same override.
-// Calendar items do not recur yet, so seed the next two weeks of each.
-for (let week = 0; week < 2; week += 1) {
-  const cubs = new Date(nextPerth(1, 17, 30).getTime() + week * 7 * 86400000);
-  await post({
-    action: 'addPlanningItem', ...parent, type: 'event',
-    title: 'Cubs', personId: null, startAt: cubs.toISOString(),
-    prepDueBy: cubs.toISOString(),
-    prepLists: [
-      { personId: 'toby',  points: 3, items: [{ text: 'Cubs uniform on' }] },
-      { personId: 'ollie', points: 3, items: [{ text: 'Cubs uniform on' }] },
-    ],
-  });
-  console.log('event: Cubs', cubs.toISOString());
+// list each, repeating weekly. "Uniform on" is same-evening prep, so
+// prepDueBy overrides the night-before default to the event start; the
+// override shifts week by week with the occurrence.
+const cubs = nextPerth(1, 17, 30);
+await post({
+  action: 'addPlanningItem', ...parent, type: 'event',
+  title: 'Cubs', personId: null, startAt: cubs.toISOString(),
+  recurrence: 'weekly',
+  prepDueBy: cubs.toISOString(),
+  prepLists: [
+    { personId: 'toby',  points: 3, items: [{ text: 'Cubs uniform on' }] },
+    { personId: 'ollie', points: 3, items: [{ text: 'Cubs uniform on' }] },
+  ],
+});
+console.log('event: Cubs weekly from', cubs.toISOString());
 
-  const scouts = new Date(nextPerth(4, 18, 0).getTime() + week * 7 * 86400000);
-  await post({
-    action: 'addPlanningItem', ...parent, type: 'event',
-    title: 'Scouts', personId: 'toby',
-    startAt: scouts.toISOString(),
-    endAt: new Date(scouts.getTime() + 2 * 3600000).toISOString(),
-    // Pete's rule: uniform on by 5:30, half an hour before the 6pm start.
-    prepDueBy: new Date(scouts.getTime() - 30 * 60000).toISOString(),
-    prepLists: [{ personId: 'toby', points: 3, items: [{ text: 'Scouts uniform on' }] }],
-  });
-  console.log('event: Scouts', scouts.toISOString());
-}
+// Scouts: Thursday 18:00-20:00 Perth, Toby, weekly. Pete's rule: uniform on
+// by 5:30, half an hour before the start.
+const scouts = nextPerth(4, 18, 0);
+await post({
+  action: 'addPlanningItem', ...parent, type: 'event',
+  title: 'Scouts', personId: 'toby',
+  startAt: scouts.toISOString(),
+  endAt: new Date(scouts.getTime() + 2 * 3600000).toISOString(),
+  recurrence: 'weekly',
+  prepDueBy: new Date(scouts.getTime() - 30 * 60000).toISOString(),
+  prepLists: [{ personId: 'toby', points: 3, items: [{ text: 'Scouts uniform on' }] }],
+});
+console.log('event: Scouts weekly from', scouts.toISOString());
 
 const finalState = await post({ action: 'state' });
 console.log('\nfinal: tasks =', (finalState.tasks || []).length,

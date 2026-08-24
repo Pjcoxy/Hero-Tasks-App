@@ -342,7 +342,11 @@ async function validatePrepLists(prepLists) {
       points = Number(list.points);
       if (!Number.isInteger(points) || points < 0) return { ok: false, error: 'prepLists points must be a whole number' };
     }
-    normalized.push({ personId: personCheck.personId, items, points });
+    // Which occurrence the ticks belong to. Round-tripped so a parent edit
+    // does not hand a weekly list last week's ticks.
+    const tickedFor = typeof list.tickedFor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(list.tickedFor)
+      ? list.tickedFor : null;
+    normalized.push({ personId: personCheck.personId, items, points, tickedFor });
   }
   return { ok: true, prepLists: normalized };
 }
@@ -378,6 +382,7 @@ async function validatePlanningPayload(req, currentItem = null) {
     prepLists: [],
     adultActions: [],
     notes: null,
+    recurrence: null,
     prepDueBy: null,
     externalRef: null,
     allDay: false,
@@ -434,6 +439,20 @@ async function validatePlanningPayload(req, currentItem = null) {
     next.source = req.source;
   }
 
+  // Weekly repetition, events only. One value rather than a rules engine:
+  // "every Monday at 5:30" is Cubs, Scouts, training - the whole of this
+  // family's repeating calendar. The event's own startAt is the anchor; every
+  // occurrence is exactly seven days on. Deleting the item deletes the series.
+  if (req.recurrence !== undefined) {
+    if (req.recurrence === null || req.recurrence === '') {
+      next.recurrence = null;
+    } else if (req.recurrence === 'weekly') {
+      next.recurrence = 'weekly';
+    } else {
+      return { ok: false, error: "recurrence must be 'weekly' or null" };
+    }
+  }
+
   // Per-event override for when prep is due. Absent, the rule is the last
   // window's close on the day before (prepDeadlinePassed) - this exists for
   // prep that only makes sense on the day, like "uniform on" before Cubs.
@@ -482,6 +501,7 @@ async function validatePlanningPayload(req, currentItem = null) {
     next.endAt = null;
     next.prepLists = [];
     next.adultActions = [];
+    next.recurrence = null;
   } else if (next.endAt === undefined) {
     next.endAt = null;
   }
@@ -773,17 +793,49 @@ async function getConflictsForItem(item) {
   return { conflicts, suggestedTimes };
 }
 
+// The occurrence of a (possibly weekly) event that prep currently applies
+// to: the first one falling on or after the local today. For a one-off this
+// is just the event itself. Shifting by whole weeks keeps the local wall
+// time identical across DST because 7*86400000 ms is exact between two
+// same-offset instants - and Perth has no DST at all.
+const MAX_OCCURRENCES = 60;
+
+function occurrenceShift(item, k) {
+  const delta = k * 7 * 86400000;
+  return {
+    startAt: new Date(new Date(item.startAt).getTime() + delta).toISOString(),
+    endAt: item.endAt ? new Date(new Date(item.endAt).getTime() + delta).toISOString() : null,
+    prepDueBy: item.prepDueBy ? new Date(new Date(item.prepDueBy).getTime() + delta).toISOString() : null,
+  };
+}
+
+function currentOccurrence(item, now = new Date()) {
+  if (item.recurrence !== 'weekly') {
+    return { startAt: item.startAt, endAt: item.endAt || null, prepDueBy: item.prepDueBy || null,
+      date: todayStr(new Date(item.startAt)) };
+  }
+  const nowDate = todayStr(now);
+  for (let k = 0; k < MAX_OCCURRENCES; k += 1) {
+    const occ = occurrenceShift(item, k);
+    const date = todayStr(new Date(occ.startAt));
+    if (date >= nowDate) return { ...occ, date };
+  }
+  const last = occurrenceShift(item, MAX_OCCURRENCES - 1);
+  return { ...last, date: todayStr(new Date(last.startAt)) };
+}
+
 // When prep for an event is due: the close of the LAST window on the day
 // before the event - "packed for Sunday soccer by Saturday 9pm". Being ready
 // the night before is the thing being rewarded, which is why the deadline is
 // not the event's own morning. A per-event override (prepDueBy, ISO) wins
 // when set.
-async function prepDeadlinePassed(item, now = new Date()) {
-  if (item.prepDueBy) {
-    const override = new Date(item.prepDueBy);
+async function prepDeadlinePassed(item, now = new Date(), occ = null) {
+  const occurrence = occ || currentOccurrence(item, now);
+  if (occurrence.prepDueBy) {
+    const override = new Date(occurrence.prepDueBy);
     if (!Number.isNaN(override.getTime())) return now.getTime() >= override.getTime();
   }
-  const eventDate = todayStr(new Date(item.startAt));
+  const eventDate = occurrence.date;
   const nowDate = todayStr(now);
   if (nowDate > eventDate) return true;    // the event day is over
   if (nowDate === eventDate) return true;  // the night before has passed
@@ -816,8 +868,16 @@ async function tickPrepItem(req) {
   if (!Number.isInteger(index) || index < 0 || index >= list.items.length) {
     return { ok: false, error: 'No such item' };
   }
-  if (await prepDeadlinePassed(item)) {
-    return { ok: false, error: 'Too late — packing closed the night before.', windowClosed: true };
+  const occ = currentOccurrence(item);
+  if (await prepDeadlinePassed(item, new Date(), occ)) {
+    return { ok: false, error: 'Too late — packing closed.', windowClosed: true };
+  }
+  // A weekly event reuses one list. The ticks belong to a single occurrence,
+  // so the first tick of a new week wipes last week's before it lands -
+  // otherwise Cubs would arrive pre-packed every Monday after the first.
+  if (list.tickedFor !== occ.date) {
+    list.items.forEach((entry) => { entry.done = false; });
+    list.tickedFor = occ.date;
   }
   list.items[index].done = !!req.done;
   await planningItems.item(req.planningItemId, HOUSEHOLD_ID).replace(item);
@@ -838,15 +898,16 @@ async function confirmPrep(req) {
   if (!item || item.active === false) return { ok: false, error: 'Not found' };
   const list = (item.prepLists || []).find((l) => l.personId === personId);
   if (!list) return { ok: false, error: 'Not your list' };
-  if (!list.items.length || !list.items.every((entry) => entry.done)) {
+  const occ = currentOccurrence(item);
+  if (list.tickedFor !== occ.date || !list.items.length || !list.items.every((entry) => entry.done)) {
     return { ok: false, error: 'Tick everything off first.' };
   }
-  if (await prepDeadlinePassed(item)) {
-    return { ok: false, error: 'Too late — packing closed the night before.', windowClosed: true };
+  if (await prepDeadlinePassed(item, new Date(), occ)) {
+    return { ok: false, error: 'Too late — packing closed.', windowClosed: true };
   }
   try {
     await container('completions').items.create({
-      id: `prep-${item.id}-${personId}`,
+      id: `prep-${item.id}-${occ.date}-${personId}`,
       householdId: HOUSEHOLD_ID,
       taskId: '',
       planningItemId: item.id,
@@ -959,14 +1020,29 @@ async function calendar(req) {
     if (item.active === false) continue;
     const when = new Date(item.startAt);
     if (Number.isNaN(when.getTime())) continue;
-    if (when.getTime() < start.getTime() || when.getTime() > end.getTime()) continue;
     if (filterPersonId && item.personId !== null && item.personId !== filterPersonId) continue;
-    const row = {
-      ...item,
-      kind: item.type,
-    };
-    if (callerRole === 'kid') delete row.adultActions;
-    schedule.push(row);
+    // A weekly event is one document expanded into occurrences, exactly as a
+    // weekly chore is. Each occurrence carries its own startAt and its date;
+    // prepOpenDate marks the single occurrence whose prep is currently
+    // actionable, so the client can render every other week's list read-only.
+    const occurrenceCount = item.recurrence === 'weekly' ? MAX_OCCURRENCES : 1;
+    const liveOcc = item.type === 'event' ? currentOccurrence(item) : null;
+    for (let k = 0; k < occurrenceCount; k += 1) {
+      const occ = occurrenceShift(item, k);
+      const occStart = new Date(occ.startAt);
+      if (occStart.getTime() > end.getTime()) break;
+      if (occStart.getTime() < start.getTime()) continue;
+      const row = {
+        ...item,
+        kind: item.type,
+        startAt: occ.startAt,
+        endAt: occ.endAt,
+        occurrenceDate: todayStr(occStart),
+        prepOpenDate: liveOcc ? liveOcc.date : null,
+      };
+      if (callerRole === 'kid') delete row.adultActions;
+      schedule.push(row);
+    }
   }
 
   const rangeStartDay = startOfUtcDay(start);
@@ -1505,16 +1581,16 @@ async function recordMisses(now = new Date()) {
   const planningItems = await queryHousehold('planningItems');
   for (const item of planningItems) {
     if (item.active === false || item.type !== 'event') continue;
-    const eventDate = todayStr(new Date(item.startAt));
-    if (eventDate < dateStr) continue;
-    if (!(await prepDeadlinePassed(item, now))) continue;
+    const occ = currentOccurrence(item, now);
+    if (occ.date < dateStr) continue;
+    if (!(await prepDeadlinePassed(item, now, occ))) continue;
     for (const list of item.prepLists || []) {
       if (!list.items || !list.items.length) continue;
-      const confirmed = completions.some((c) => c.id === `prep-${item.id}-${list.personId}`);
+      const confirmed = completions.some((c) => c.id === `prep-${item.id}-${occ.date}-${list.personId}`);
       if (confirmed) continue;
       try {
         await completionsContainer.items.create({
-          id: `prep-miss-${item.id}-${list.personId}`,
+          id: `prep-miss-${item.id}-${occ.date}-${list.personId}`,
           householdId: HOUSEHOLD_ID,
           taskId: '',
           planningItemId: item.id,
@@ -1958,4 +2034,4 @@ app.timer('choreDueReminder', {
   },
 });
 
-module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, recordMisses, sendWindowNudges, sendEveningSummary, todayStr, localMinutes, HOUSEHOLD_TZ, DEFAULT_WINDOWS, isWindowClosed, resolveWindow };
+module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, recordMisses, sendWindowNudges, sendEveningSummary, todayStr, localMinutes, HOUSEHOLD_TZ, DEFAULT_WINDOWS, isWindowClosed, resolveWindow, currentOccurrence };
