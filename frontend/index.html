@@ -560,6 +560,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .day-chip:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 2px; }
 
 .pill.warn    { background: var(--warning-wash); color: var(--warning); }
+.pill.bad     { background: var(--danger-wash); color: var(--danger); }
 
 /* The kid's own face on their card, rather than their name doing all the work. */
 .parent-kid-line { display: flex; align-items: center; gap: var(--space-3); }
@@ -1108,6 +1109,7 @@ button.parent-list-row:active { transform: scale(0.99); }
 .tag.waiting { background: var(--warning-wash); color: var(--warning); }
 .tag.not-started { background: var(--brand-wash); color: var(--brand); }
 .tag.rejected { background: var(--danger-wash); color: var(--danger); }
+.tag.missed { background: var(--danger-wash); color: var(--danger); }
 .check-row {
   display: flex;
   align-items: center;
@@ -1675,6 +1677,10 @@ button.parent-list-row:active { transform: scale(0.99); }
       <section class="parent-section">
         <h2 class="parent-section-title">Today, by kid</h2>
         <div id="p-approvals-today-by-kid"></div>
+      </section>
+      <section class="parent-section">
+        <h2 class="parent-section-title">Yesterday</h2>
+        <div id="p-yesterday"></div>
       </section>
       <section class="parent-section">
         <h2 class="parent-section-title">Today &amp; this week</h2>
@@ -2868,7 +2874,17 @@ function parentCalendarLiveCompletion(item) {
 
 function parentCalendarOverviewStatus(item) {
   var completion = parentCalendarLiveCompletion(item);
-  if (!completion) return { className: 'not-started', label: 'Not started' };
+  if (!completion) {
+    // No live completion. If the sweep has recorded a miss for this chore on
+    // this day, that IS the status - "Not started" would understate a window
+    // that has already shut on it.
+    var dayKey = parentCalendarDayKey(item);
+    var missedRow = item.taskId && dayKey && (state.completions || []).some(function(c) {
+      return c.taskId === item.taskId && c.date === dayKey && c.status === 'missed';
+    });
+    if (missedRow) return { className: 'missed', label: 'Missed' };
+    return { className: 'not-started', label: 'Not started' };
+  }
   if (completion.status === 'approved') return { className: 'approved', label: 'Done' };
   return { className: 'waiting', label: 'Waiting on you' };
 }
@@ -2924,6 +2940,62 @@ function renderParentApprovalsGlance() {
     + '</div>';
 }
 
+// Yesterday, per kid: done and missed, from the completion records alone.
+// This is the panel the whole windows-and-misses build exists to feed - until
+// misses were recorded, every morning looked identical however the day before
+// went, and there was nothing truthful this panel could have said.
+function renderParentYesterday() {
+  var el = document.getElementById('p-yesterday');
+  if (!el) return;
+  // The API's own idea of today, minus one day at UTC noon so no timezone can
+  // shift it across midnight. Falls back to the browser only if state is old
+  // enough to predate the field.
+  var todayKey = (state && state.today) || todayStr();
+  var yesterdayKey = new Date(new Date(todayKey + 'T12:00:00Z').getTime() - 86400000)
+    .toISOString().slice(0, 10);
+  var rows = (state.completions || []).filter(function(c) {
+    return c.date === yesterdayKey && c.taskId;
+  });
+  if (rows.length === 0) {
+    el.innerHTML = buildEmptyPill('Nothing recorded yesterday');
+    return;
+  }
+  var kids = kidsOnly();
+  el.innerHTML = kids.map(function(kid) {
+    var mine = rows.filter(function(c) { return c.kidId === kid.id; });
+    if (mine.length === 0) return '';
+    var done = mine.filter(function(c) { return c.status === 'approved' || c.status === 'pending' || c.status === 'queued'; }).length;
+    var missed = mine.filter(function(c) { return c.status === 'missed'; }).length;
+    var pills = (done > 0 ? '<span class="pill good">' + done + ' done</span>' : '')
+      + (missed > 0 ? '<span class="pill bad">' + missed + ' missed</span>' : '');
+    return '<div class="card parent-card">'
+      + '<div class="parent-item-head">'
+      + '<div class="parent-copy parent-kid-line">'
+      + '<span class="parent-kid-face">' + renderAvatarHtml(kid.emoji, 'var(--brand)', 'head') + '</span>'
+      + '<strong>' + esc(kid.name) + '</strong>'
+      + '</div>'
+      + '<div class="pill-row">' + pills + '</div>'
+      + '</div>'
+      + '<div class="parent-list">' + mine.map(function(c) {
+          var tag = c.status === 'missed'
+            ? { className: 'missed', label: 'Missed' }
+            : c.status === 'approved'
+              ? { className: 'approved', label: 'Done' }
+              : c.status === 'rejected'
+                ? { className: 'rejected', label: 'Sent back' }
+                : { className: 'waiting', label: 'Waiting on you' };
+          return '<div class="parent-list-row">'
+            + '<div class="parent-copy">'
+            + '<span class="parent-list-title">' + esc(c.title || 'Untitled') + '</span>'
+            + (c.points ? '<div class="sub">' + c.points + ' pts</div>' : '')
+            + '</div>'
+            + '<span class="tag ' + tag.className + '">' + tag.label + '</span>'
+            + '</div>';
+        }).join('') + '</div>'
+      + '</div>';
+  }).join('') || buildEmptyPill('Nothing recorded yesterday');
+}
+
 function renderParentApprovalsTodayByKid() {
   var el = document.getElementById('p-approvals-today-by-kid');
   if (!el) return;
@@ -2942,14 +3014,15 @@ function renderParentApprovalsTodayByKid() {
     // Status as pills, not paragraphs. 'Today's chores overview' under every
     // name said nothing the heading had not already said, and a kid with
     // nothing on got a five-line empty state to report zero.
-    var waiting = todayItems.filter(function(item) {
-      return parentCalendarOverviewStatus(item).className === 'waiting';
-    }).length;
+    var statuses = todayItems.map(function(item) { return parentCalendarOverviewStatus(item).className; });
+    var waiting = statuses.filter(function(name) { return name === 'waiting'; }).length;
+    var missedCount = statuses.filter(function(name) { return name === 'missed'; }).length;
     var pills = '<span class="pill neutral">' + todayItems.length + ' chore'
       + (todayItems.length === 1 ? '' : 's') + '</span>'
+      + (missedCount > 0 ? '<span class="pill bad">' + missedCount + ' missed</span>' : '')
       + (waiting > 0
           ? '<span class="pill warn">' + waiting + ' pending</span>'
-          : '<span class="pill good">All caught up</span>');
+          : (missedCount === 0 ? '<span class="pill good">All caught up</span>' : ''));
 
     return '<div class="card parent-card">'
       + '<div class="parent-item-head">'
@@ -3004,6 +3077,7 @@ function jumpToApproval(completionId) {
 function renderParentApprovalsSummary() {
   renderParentApprovalsGlance();
   renderParentApprovalsTodayByKid();
+  renderParentYesterday();
 }
 
 function renderParentCalendarChecklists(item) {

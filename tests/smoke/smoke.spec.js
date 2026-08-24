@@ -848,11 +848,84 @@ test('a shut window refuses the completion at the API', async ({ page }) => {
     });
     const state = await post({ action: 'state' });
     const task = state.tasks.find((t) => t.title === 'Sweep the step');
-    return post({ action: 'completeTask', taskId: task.id, personId: 'ollie', pin: '1234' });
+    const refusal = await post({ action: 'completeTask', taskId: task.id, personId: 'ollie', pin: '1234' });
+    // Retire the chore: the store is shared across the run, and a later
+    // test's premise is that Ollie has nothing on today.
+    await post({ action: 'deleteTask', taskId: task.id, parentId: 'peter', parentPin: '1234' });
+    return refusal;
   });
   expect(verdict.ok).toBe(false);
   expect(verdict.windowClosed).toBe(true);
   expect(verdict.error).toMatch(/window closed/i);
+});
+
+// The family view: yesterday, per kid, from the recorded facts. Until misses
+// were recorded there was nothing truthful this panel could have said - every
+// morning looked identical however the day before went. Yesterday-dated rows
+// cannot be created through the real routes (the API stamps today), so this
+// drives the real renderer over planted records - the same lexical `state`
+// the page itself renders from.
+test('yesterday shows each kid\u2019s done and missed, from the records', async ({ page }) => {
+  await pickPerson(page, 'Peter');
+  await page.evaluate(() => {
+    const y = new Date(new Date(state.today + 'T12:00:00Z').getTime() - 86400000)
+      .toISOString().slice(0, 10);
+    state.completions.push(
+      { id: 'y1', taskId: 't-veg', kidId: 'toby', title: 'Water the veggies', points: 3, date: y, status: 'approved' },
+      { id: 'y2', taskId: 't-bins', kidId: 'toby', title: 'Bins out', points: 5, date: y, status: 'missed' },
+    );
+    renderParentYesterday();
+  });
+
+  const tobyCard = page.locator('#p-yesterday .parent-card', { hasText: 'Toby' });
+  await expect(tobyCard).toBeVisible();
+  await expect(tobyCard.locator('.pill.good')).toContainText('1 done');
+  await expect(tobyCard.locator('.pill.bad')).toContainText('1 missed');
+  await expect(tobyCard.locator('.parent-list-row', { hasText: 'Bins out' }).locator('.tag.missed'))
+    .toContainText(/missed/i);
+  await expect(tobyCard.locator('.parent-list-row', { hasText: 'Water the veggies' }).locator('.tag.approved'))
+    .toContainText(/done/i);
+});
+
+// A miss reaches the parent's Today view as a pill and a tag, not silence.
+test('a missed chore shows on the parent\u2019s today view', async ({ page }) => {
+  await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    // A chore in the morning window (shut - the harness pins ~noon), then the
+    // sweep. This drives the real recordMisses through the real store.
+    await post({
+      action: 'addTask', parentId: 'peter', parentPin: '1234',
+      kidId: 'ollie', title: 'Feed the chickens', points: 4, cycle: 'daily', windowId: 'morning',
+    });
+    await post({ action: '__sweepMisses' });
+  });
+
+  // The page fetched state before the chore and the sweep existed.
+  await page.reload();
+  await pickPerson(page, 'Peter');
+  const ollieCard = page.locator('#p-approvals-today-by-kid .parent-card', { hasText: 'Ollie' });
+  await expect(ollieCard).toBeVisible();
+  await expect(ollieCard.locator('.pill.bad')).toContainText(/missed/i);
+  const row = ollieCard.locator('.parent-list-row', { hasText: 'Feed the chickens' });
+  await expect(row.locator('.tag.missed')).toContainText(/missed/i);
+
+  // The store is shared across the whole run, and a later test's premise is
+  // that Ollie has nothing on. Retire the chore (the miss row it left is
+  // dated today and counted from calendar items, so it goes quiet with it).
+  await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    const fresh = await post({ action: 'state' });
+    const chore = fresh.tasks.find((t) => t.title === 'Feed the chickens');
+    if (chore) await post({ action: 'deleteTask', taskId: chore.id, parentId: 'peter', parentPin: '1234' });
+  });
 });
 
 test('Parent HQ is headed by the parent, not a crown', async ({ page }) => {
