@@ -1260,6 +1260,12 @@ button.parent-list-row:active { transform: scale(0.99); }
 .task.done-pending .title,
 .task.done-queued .title,
 .task.done-approved .title { text-decoration: line-through; color: var(--ink-muted); }
+.event-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
 .section-date {
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
@@ -2578,12 +2584,19 @@ function glanceChoreCard(item) {
 // prepLists is an array of {personId, items} - so the 🎒 line had never once
 // rendered. Found while designing #41, which imports lists into exactly this
 // spot.)
+function eventChipLabel(item) {
+  if (item.allDay) return 'All day';
+  if (!item.startAt) return '';
+  var start = new Date(item.startAt);
+  return start.toLocaleDateString([], { weekday: 'short' }) + ' '
+    + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(' ', '').toLowerCase();
+}
+
 function glanceEventCard(item, kidId) {
-  var when = item.allDay
-    ? 'All day'
-    : (item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '');
+  var when = eventChipLabel(item);
   var list = (item.prepLists || []).find(function(l) { return l.personId === kidId; });
   var prep = '';
+  var chips = [];
   if (list && list.items && list.items.length) {
     // Ids carry the occurrence date: a weekly event earns (or misses) each
     // week separately. Only the occurrence the server marks prepOpenDate is
@@ -2609,29 +2622,35 @@ function glanceEventCard(item, kidId) {
         + '<span>' + esc(entry.text) + '</span>'
         + '</label>';
     }).join('');
-    var footer;
+    // The deadline pill's colour is the state: amber while the clock runs,
+    // green once packed, red once closed.
+    var dueLabel = prepDueLabel(item);
     if (confirmed) {
-      footer = '<div class="sub">Packed and confirmed ✅' + (list.points ? ' · ' + list.points + ' pts pending' : '') + '</div>';
+      chips.push('<span class="pill good">Packed ✔' + (list.points ? ' · ' + list.points + ' pts pending' : '') + '</span>');
     } else if (missed) {
-      footer = '<div class="sub prep-missed">Missed — packing closed'
-        + (list.points ? ' · ' + list.points + ' pts were up for grabs' : '') + '</div>';
+      chips.push('<span class="pill bad">⏳ Closed' + (dueLabel ? ' ' + esc(dueLabel) : '') + (list.points ? ' · ' + list.points + ' pts gone' : '') + '</span>');
     } else if (!isLive) {
-      footer = '<div class="sub">Opens after this week\u2019s' + (list.points ? ' · ' + list.points + ' pts' : '') + '</div>';
+      chips.push('<span class="pill neutral">Opens after this week\u2019s</span>');
+      if (list.points) chips.push('<span class="pill neutral">⭐ ' + list.points + '</span>');
     } else {
-      var dueLabel = prepDueLabel(item);
-      footer = '<div class="prep-footer">'
-        + '<span class="sub">' + (dueLabel ? 'Pack by <strong>' + esc(dueLabel) + '</strong>' : 'Pack in time') + (list.points ? ' · ' + list.points + ' pts' : '') + '</span>'
-        + '<button class="btn small" ' + (allTicked ? '' : 'disabled ')
-        + 'onclick="confirmPrepPacked(\'' + jsq(item.id) + '\')">Packed ✔</button>'
-        + '</div>';
+      chips.push('<span class="pill warn">⏳ by ' + esc(dueLabel || 'the deadline') + '</span>');
+      if (list.points) chips.push('<span class="pill neutral">⭐ ' + list.points + '</span>');
     }
-    prep = '<div class="glance-prep">🎒 ' + rows + footer + '</div>';
+    var footer = (!locked)
+      ? '<div class="prep-footer"><span></span><button class="btn small" ' + (allTicked ? '' : 'disabled ')
+        + 'onclick="confirmPrepPacked(\'' + jsq(item.id) + '\')">Packed ✔</button></div>'
+      : '';
+    prep = '<div class="glance-prep">' + rows + footer + '</div>';
+  }
+  var headChips = [];
+  if (when) {
+    headChips.push('<span class="pill neutral">🗓️ ' + esc(when) + (item.recurrence === 'weekly' ? ' · weekly' : '') + '</span>');
   }
   return '<div class="task">'
     + '<button class="tick" disabled>' + (item.kind === 'reminder' ? '🔔' : '📌') + '</button>'
     + '<div class="info">'
     + '<div class="title">' + esc(item.title || 'Something on') + '</div>'
-    + (when ? '<div class="sub">' + esc(when) + (item.recurrence === 'weekly' ? ' · every week' : '') + '</div>' : '')
+    + '<div class="event-chips">' + headChips.concat(chips).join('') + '</div>'
     + (item.notes ? '<div class="sub">' + esc(item.notes) + '</div>' : '')
     + prep
     + '</div>'
