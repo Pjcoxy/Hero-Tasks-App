@@ -106,7 +106,8 @@ for (let week = 0; week < 2; week += 1) {
     title: 'Scouts', personId: 'toby',
     startAt: scouts.toISOString(),
     endAt: new Date(scouts.getTime() + 2 * 3600000).toISOString(),
-    prepDueBy: scouts.toISOString(),
+    // Pete's rule: uniform on by 5:30, half an hour before the 6pm start.
+    prepDueBy: new Date(scouts.getTime() - 30 * 60000).toISOString(),
     prepLists: [{ personId: 'toby', points: 3, items: [{ text: 'Scouts uniform on' }] }],
   });
   console.log('event: Scouts', scouts.toISOString());
