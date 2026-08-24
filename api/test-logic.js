@@ -2104,6 +2104,49 @@ async function main() {
   assert.strictEqual(soccerMissed, false, 'a confirmed list is never swept as missed');
   console.log('\u2713 confirming in time keeps the list off the miss sweep');
 
+  // -------------------------------------------------------------------------
+  // clearActivity: the parent-gated fresh start. Wipes completions and
+  // redemptions - balances derive from those rows, so everyone drops to zero -
+  // while people, chores, the shop and the calendar survive.
+  const beforeClear = await R.state();
+  assert.ok(beforeClear.completions.length > 0, 'there is history to clear, or this proves nothing');
+  let kidRefused = false;
+  try {
+    await R.clearActivity({ parentId: 'toby', parentPin: '1234' });
+  } catch (err) {
+    kidRefused = err && err.status === 401;
+  }
+  assert.ok(kidRefused, 'a kid cannot wipe the history');
+  const wiped = await R.clearActivity({ parentId: 'peter', parentPin: '1234' });
+  assert.strictEqual(wiped.ok, true);
+  assert.ok(wiped.cleared.completions > 0, 'it reports what it removed');
+  const afterClear = await R.state();
+  assert.strictEqual(afterClear.completions.length, 0, 'no completions survive');
+  assert.strictEqual(afterClear.redemptions.length, 0, 'no redemptions survive');
+  Object.values(afterClear.stats).forEach((kidStats) => {
+    assert.strictEqual(kidStats.balance, 0, 'every balance is zero');
+  });
+  assert.ok(afterClear.people.length >= 4, 'people survive');
+  assert.ok(afterClear.rewards.length > 0, 'the reward shop survives');
+  console.log('\u2713 clearActivity wipes history and balances, leaves people and the shop');
+
+  // prepDueBy override: "uniform on" prep is due at the event itself, not the
+  // night before - so a same-day tick works right up to the start.
+  const cubsStart = new Date(at('17:30').getTime() + 3 * 3600000); // later today
+  const cubs2 = await R.addPlanningItem({
+    parentId: 'peter', parentPin: '1234', type: 'event', title: 'Cubs tonight',
+    personId: null, startAt: cubsStart.toISOString(), prepDueBy: cubsStart.toISOString(),
+    prepLists: [{ personId: 'toby', points: 3, items: [{ text: 'Cubs uniform on' }] }],
+  });
+  assert.strictEqual(cubs2.ok, true);
+  assert.ok(cubs2.item.prepDueBy, 'the override is stored');
+  const sameDayTick = await R.tickPrepItem({
+    personId: 'toby', pin: '1234', planningItemId: cubs2.item.id, itemIndex: 0, done: true,
+  });
+  assert.strictEqual(sameDayTick.ok, true,
+    'with the override, same-day prep is open - the night-before rule would have refused this');
+  console.log('\u2713 prepDueBy overrides the night-before default for same-day prep');
+
   console.log('\nALL LOGIC TESTS PASSED');
 }
 

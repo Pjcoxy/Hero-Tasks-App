@@ -1,0 +1,22 @@
+# Manually-triggered maintenance job: wipe activity/chores/calendar on the
+# LIVE app and seed the family's real schedule. Runs from a GitHub runner
+# because the dev container's egress policy cannot reach azurewebsites.net.
+# Never runs on its own - workflow_dispatch only.
+name: Seed demo data
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Wipe and seed the live app
+        run: node scripts/seed-demo.mjs
