@@ -1255,6 +1255,16 @@ button.parent-list-row:active { transform: scale(0.99); }
 }
 .prep-missed { color: var(--danger); font-weight: var(--weight-medium); }
 .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+/* A submitted chore must read as dealt-with at a glance. Struck through in
+   both states - the sub line carries the difference (waiting vs banked). */
+.task.done-pending .title,
+.task.done-queued .title,
+.task.done-approved .title { text-decoration: line-through; color: var(--ink-muted); }
+.section-date {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--ink-muted);
+}
 /* My List - a kid's own notes, plans and reminders. */
 .mylist-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -1570,7 +1580,7 @@ button.parent-list-row:active { transform: scale(0.99); }
       <div class="home-content-sheet">
         <div class="home-glance-grid">
           <section>
-            <h2 class="section-title">📅 Today</h2>
+            <h2 class="section-title">🗓️ Today <span class="section-date" id="k-today-date"></span></h2>
             <div id="k-glance-today"></div>
           </section>
           <section>
@@ -1626,7 +1636,7 @@ button.parent-list-row:active { transform: scale(0.99); }
     <!-- CALENDAR TAB -->
     <div id="tab-calendar" class="tab-panel hidden">
       <div class="tab-content">
-        <h2 class="section-title">📅 Calendar</h2>
+        <h2 class="section-title">🗓️ Calendar</h2>
         <div class="calendar-controls" role="tablist" aria-label="Calendar view">
           <button id="calendar-view-day" class="calendar-chip" onclick="switchCalendarView('day')">Day</button>
           <button id="calendar-view-week" class="calendar-chip active" onclick="switchCalendarView('week')">Week</button>
@@ -1653,7 +1663,7 @@ button.parent-list-row:active { transform: scale(0.99); }
       <span class="tab-icon">🏆</span><span>Leaders</span>
     </button>
     <button class="tab-btn"        id="tabbtn-calendar" onclick="switchTab('calendar')" aria-label="Calendar">
-      <span class="tab-icon">📅</span><span>Calendar</span>
+      <span class="tab-icon">🗓️</span><span>Calendar</span>
     </button>
   </nav>
 
@@ -2628,6 +2638,15 @@ function glanceEventCard(item, kidId) {
     + '</div>';
 }
 
+function todayHeaderLabel() {
+  return new Date().toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function setTodayHeaderDate() {
+  var el = document.getElementById('k-today-date');
+  if (el) el.textContent = todayHeaderLabel();
+}
+
 function prepDueLabel(item) {
   if (!item.prepDueDate || !item.prepDueTime) return '';
   var parts = item.prepDueTime.split(':');
@@ -2686,6 +2705,7 @@ function glanceCard(item, kidId) {
 }
 
 function renderKidGlance(kid) {
+  setTodayHeaderDate();
   var todayEl = document.getElementById('k-glance-today');
   var weekEl = document.getElementById('k-glance-week');
   if (!todayEl || !weekEl) return;
@@ -3051,7 +3071,7 @@ function renderParentApprovalsGlance() {
   el.innerHTML = (nothingScheduled
       ? buildEmptyPill('Nothing scheduled')
       : '<div class="card parent-card">'
-        + '<h3 class="parent-section-title">Today</h3>'
+        + '<h3 class="parent-section-title">Today <span class="section-date">' + esc(todayHeaderLabel()) + '</span></h3>'
         + renderParentGlanceRows(todayItems, 'Nothing today.')
         + '</div>'
         + '<div class="card parent-card">'
