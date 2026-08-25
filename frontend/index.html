@@ -4072,7 +4072,10 @@ function renderRecentActivity(kid) {
   }
   el.innerHTML = decided.map(function(c) {
     var task = state.tasks.find(function(t) { return t.id === c.taskId; });
-    var title = task ? esc(task.title) : esc(c.taskTitle || 'Mission');
+    // A kid-added extra or a prep confirmation has no task behind it - its
+    // name lives on the completion itself. Falling straight to 'Mission'
+    // made a rejected "Eat food" unrecognisable to the kid it went back to.
+    var title = task ? esc(task.title) : esc(c.title || c.taskTitle || 'Mission');
     var pts   = task ? task.points : (c.points || 0);
     var isApproved = c.status === 'approved';
     var isMissed = c.status === 'missed';

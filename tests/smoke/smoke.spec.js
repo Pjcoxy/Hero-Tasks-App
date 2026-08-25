@@ -639,6 +639,35 @@ test('a plain approve goes straight through with no dialog', async ({ page }) =>
   await expect(card).toBeHidden();
 });
 
+// A kid-added extra has no task behind it, so its name lives on the
+// completion itself. Recent activity fell straight to 'Mission' for those,
+// which made a rejected "Eat food" unrecognisable to the kid it went back to.
+test('a rejected extra comes back to the kid by name, with the note', async ({ page }) => {
+  await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    await post({ action: 'addExtra', kidId: 'ollie', personId: 'ollie', pin: '1234', title: 'Washed the car' });
+  });
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const card = page.locator('#p-pending .parent-card').filter({ hasText: 'Washed the car' });
+  await card.locator('.approve-note').fill('Still soapy — rinse it and show me.');
+  await card.getByRole('button', { name: /Try again/ }).click();
+  await expect(card).toBeHidden();
+
+  await page.getByRole('button', { name: /Switch user/ }).click();
+  await pickPerson(page, 'Ollie');
+  const row = page.locator('#k-activity .task', { hasText: 'Washed the car' });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText(/try again/i);
+  await expect(row).toContainText('Still soapy — rinse it and show me.');
+  await expect(page.locator('#k-activity')).not.toContainText(/^Mission$/);
+});
+
 // #174. The app installs on desktops. With no maximum width a task row
 // stretched to ~1900px to hold thirty characters, at phone type scale.
 //
