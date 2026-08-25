@@ -109,11 +109,12 @@ check(/action:\s*'addPlanningItem'/.test(html), 'parent calendar form calls addP
 check(/action:\s*'updatePlanningItem'/.test(html), 'parent calendar edit calls updatePlanningItem');
 check(/action:\s*'deletePlanningItem'/.test(html), 'parent calendar delete calls deletePlanningItem');
 check(/id="p-approvals-badge"/.test(html), 'approvals badge exists');
-check(/id="p-approvals-glance"/.test(html), 'approvals tab includes at-a-glance container');
-check(/Today &amp; this week/.test(html), 'approvals tab includes Today & this week title');
+// The Approvals tab is decisions plus today's state, nothing else: no
+// Yesterday and no This-week sections - the Calendar tab owns those.
+check(!/id="p-approvals-glance"/.test(html), 'approvals tab has no at-a-glance section (Calendar owns the week)');
+check(!/id="p-yesterday"/.test(html), 'approvals tab has no Yesterday section (Calendar owns the past)');
 check(/id="p-approvals-today-by-kid"/.test(html), 'approvals tab includes today-by-kid container');
 check(/Today, by kid/.test(html), 'approvals tab includes Today, by kid title');
-const approvalsGlanceIndex = html.indexOf('id="p-approvals-glance"');
 const approvalsTodayByKidIndex = html.indexOf('id="p-approvals-today-by-kid"');
 const approvalsPendingIndex = html.indexOf('id="p-pending"');
 // Work waiting on the parent comes first on the tab they land on. These
@@ -121,21 +122,18 @@ const approvalsPendingIndex = html.indexOf('id="p-pending"');
 // were updated rather than dropped - the point is that the order is deliberate.
 const approvalsRewardReqIndex = html.indexOf('id="p-reward-requests"');
 check(approvalsPendingIndex !== -1 && approvalsTodayByKidIndex !== -1 && approvalsPendingIndex < approvalsTodayByKidIndex, 'pending approvals list appears before today-by-kid section');
-check(approvalsPendingIndex !== -1 && approvalsGlanceIndex !== -1 && approvalsPendingIndex < approvalsGlanceIndex, 'pending approvals list appears before at-a-glance section');
 check(approvalsRewardReqIndex !== -1 && approvalsTodayByKidIndex !== -1 && approvalsRewardReqIndex < approvalsTodayByKidIndex, 'reward requests appear before today-by-kid section');
-check(approvalsTodayByKidIndex !== -1 && approvalsGlanceIndex !== -1 && approvalsTodayByKidIndex < approvalsGlanceIndex, 'today-by-kid section appears before at-a-glance section');
 check(/onclick="jumpToApproval\(/.test(html), 'waiting-on-you rows link through to their approval');
 check(/id="p-pending-' \+ c\.id \+ '"/.test(html), 'pending approval cards carry an id to jump to');
-check(/function loadParentApprovalsGlance\(\)/.test(html), 'approvals at-a-glance loader exists');
-check(/action:\s*'calendar'[\s\S]*parentId:\s*session\.personId[\s\S]*parentPin:\s*session\.pin/.test(html), 'approvals at-a-glance reuses calendar action with parent credentials');
-check(/function renderParentApprovalsGlance\(\)/.test(html), 'approvals at-a-glance renderer exists');
+check(/function loadParentApprovalsGlance\(\)/.test(html), 'calendar-backed approvals loader exists (feeds today-by-kid)');
+check(/action:\s*'calendar'[\s\S]*parentId:\s*session\.personId[\s\S]*parentPin:\s*session\.pin/.test(html), 'approvals loader reuses calendar action with parent credentials');
 check(/function parentCalendarLiveCompletion\(item\)/.test(html), 'calendar live completion matcher exists');
 check(/function parentCalendarOverviewStatus\(item\)/.test(html), 'calendar overview status helper exists');
 check(/function renderParentApprovalsTodayByKid\(\)/.test(html), 'approvals today-by-kid renderer exists');
 check(/function renderParentApprovalsSummary\(\)/.test(html), 'approvals summary renderer exists');
 check(/\.tag\.waiting\s*\{\s*background:\s*var\(--warning-wash\);\s*color:\s*var\(--warning\);\s*\}/.test(html), 'waiting tag uses warning tokens');
 check(/item\.kind === 'chore' && item\.kidId === kid\.id && parentCalendarDayKey\(item\) === todayKey/.test(html), 'today-by-kid renderer filters today chore occurrences per kid');
-check(/switchParentTab\('calendar'\)|switchParentTab\\\('calendar'\\\)/.test(html), 'approvals at-a-glance includes View calendar action');
+check(/switchParentTab\('calendar'\)|switchParentTab\\\('calendar'\\\)/.test(html), 'today-by-kid offers a View calendar action');
 check(/parentEditTask\(\\'/.test(html), 'task rows wire an Edit button');
 check(/id="k-voice-reminder-btn"/.test(html), 'kid Home tab includes a voice reminder button');
 check(/id="voice-reminder-modal"/.test(html), 'voice reminder confirmation modal exists');

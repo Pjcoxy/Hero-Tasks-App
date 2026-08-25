@@ -370,20 +370,18 @@ grabs."*
 
 ### The family view
 
-Parent HQ's Approvals tab is the family's one screen, in this order: what's
-waiting on you, reward requests, **Today by kid**, **Yesterday**, today &
-this week, recently decided.
+Parent HQ's Approvals tab is decisions plus today's state, in this order:
+the stat tiles, what's waiting on you, reward requests, **Today by kid**
+(with a View calendar action), recently decided. There is deliberately no
+Yesterday and no This-week section here — the Calendar tab owns the wider
+view, and a day's agenda is one tap on it.
 
 - **Today by kid** counts misses as their own pill (`.pill.bad`, "2 missed")
   alongside pending, and "All caught up" only appears when there are neither.
   A row whose window shut on it is tagged **Missed** (`.tag.missed`), not
   "Not started" — which would understate a door that has already closed.
-- **Yesterday** renders per kid from the completion records alone: done,
-  sent back, missed, each with the points that were at stake. This panel is
-  what the whole windows-and-misses build exists to feed — until misses were
-  recorded there was nothing truthful it could have said. Yesterday's date is
-  derived from `state.today` (the API's local day), minus one day at UTC
-  noon, so no timezone can shift it.
+  Misses still reach the parent here and in the evening summary push; the
+  per-day history lives on the Calendar tab.
 
 Smoke-testing note: the suite's store is shared across the whole run, so a
 test that seeds chores for a kid must retire them (`deleteTask`) before

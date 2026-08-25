@@ -1775,17 +1775,15 @@ button.parent-list-row:active { transform: scale(0.99); }
         <div id="p-pending"></div>
         <div id="p-reward-requests"></div>
       </section>
+      <!-- No Yesterday or This-week sections here: the Calendar tab owns the
+           wider view, and a day's agenda is one tap on it. This tab is the
+           decisions and today's state, nothing else. -->
       <section class="parent-section">
         <h2 class="parent-section-title">Today, by kid</h2>
         <div id="p-approvals-today-by-kid"></div>
-      </section>
-      <section class="parent-section">
-        <h2 class="parent-section-title">Yesterday</h2>
-        <div id="p-yesterday"></div>
-      </section>
-      <section class="parent-section">
-        <h2 class="parent-section-title">Today &amp; this week</h2>
-        <div id="p-approvals-glance"></div>
+        <div class="parent-actions">
+          <button class="btn ghost small" onclick="switchParentTab('calendar')">View calendar</button>
+        </div>
       </section>
       <section class="parent-section">
         <h2 class="parent-section-title">Recently decided</h2>
@@ -3139,113 +3137,6 @@ function parentCalendarOverviewStatus(item) {
   return { className: 'waiting', label: 'Waiting on you' };
 }
 
-function renderParentGlanceRows(items, emptyText) {
-  if (!items.length) return '<div class="sub">' + esc(emptyText) + '</div>';
-  return '<div class="parent-list">' + items.map(function(item) {
-    var notes = item.notes ? '<div class="sub">📝 ' + esc(item.notes) + '</div>' : '';
-    return '<div class="parent-list-row">'
-      + '<div class="parent-copy">'
-      + '<span class="parent-list-title">' + esc(item.title || 'Untitled') + '</span>'
-      + '<div class="sub"><span class="tag parent-calendar-kind">' + esc(item.kind || 'item') + '</span>'
-      + ' · ' + esc(parentCalendarItemTime(item))
-      + ' · ' + esc(parentCalendarWho(item))
-      + (item.kind === 'chore' && item.points ? ' · ' + item.points + ' pts' : '')
-      + '</div>'
-      + notes
-      + '</div>'
-      + '</div>';
-  }).join('') + '</div>';
-}
-
-function renderParentApprovalsGlance() {
-  var el = document.getElementById('p-approvals-glance');
-  if (!el) return;
-  if (parentApprovalsGlanceLoading || !parentApprovalsGlanceLoaded) {
-    el.innerHTML = parentCalendarSkeletonHtml();
-    return;
-  }
-  var todayKey = todayStr();
-  var undecided = (parentApprovalsGlanceItems || []).filter(function(item) {
-    return item.kind !== 'chore' || !parentCalendarIsComplete(item);
-  });
-  var todayItems = undecided
-    .filter(function(item) { return parentCalendarDayKey(item) === todayKey; })
-    .sort(parentCalendarSortWhen);
-  var weekItems = undecided
-    .filter(function(item) { return parentCalendarDayKey(item) !== todayKey; })
-    .sort(parentCalendarSortWhen);
-  var nothingScheduled = todayItems.length === 0 && weekItems.length === 0;
-  el.innerHTML = (nothingScheduled
-      ? buildEmptyPill('Nothing scheduled')
-      : '<div class="card parent-card">'
-        + '<h3 class="parent-section-title">Today <span class="section-date">' + esc(todayHeaderLabel()) + '</span></h3>'
-        + renderParentGlanceRows(todayItems, 'Nothing today.')
-        + '</div>'
-        + '<div class="card parent-card">'
-        + '<h3 class="parent-section-title">This week</h3>'
-        + renderParentGlanceRows(weekItems, 'Nothing else this week.')
-        + '</div>')
-    + '<div class="parent-actions">'
-    + '<button class="btn ghost small" onclick="switchParentTab(\'calendar\')">View calendar</button>'
-    + '</div>';
-}
-
-// Yesterday, per kid: done and missed, from the completion records alone.
-// This is the panel the whole windows-and-misses build exists to feed - until
-// misses were recorded, every morning looked identical however the day before
-// went, and there was nothing truthful this panel could have said.
-function renderParentYesterday() {
-  var el = document.getElementById('p-yesterday');
-  if (!el) return;
-  // The API's own idea of today, minus one day at UTC noon so no timezone can
-  // shift it across midnight. Falls back to the browser only if state is old
-  // enough to predate the field.
-  var todayKey = (state && state.today) || todayStr();
-  var yesterdayKey = new Date(new Date(todayKey + 'T12:00:00Z').getTime() - 86400000)
-    .toISOString().slice(0, 10);
-  var rows = (state.completions || []).filter(function(c) {
-    return c.date === yesterdayKey && c.taskId;
-  });
-  if (rows.length === 0) {
-    el.innerHTML = buildEmptyPill('Nothing recorded yesterday');
-    return;
-  }
-  var kids = kidsOnly();
-  el.innerHTML = kids.map(function(kid) {
-    var mine = rows.filter(function(c) { return c.kidId === kid.id; });
-    if (mine.length === 0) return '';
-    var done = mine.filter(function(c) { return c.status === 'approved' || c.status === 'pending' || c.status === 'queued'; }).length;
-    var missed = mine.filter(function(c) { return c.status === 'missed'; }).length;
-    var pills = (done > 0 ? '<span class="pill good">' + done + ' done</span>' : '')
-      + (missed > 0 ? '<span class="pill bad">' + missed + ' missed</span>' : '');
-    return '<div class="card parent-card">'
-      + '<div class="parent-item-head">'
-      + '<div class="parent-copy parent-kid-line">'
-      + '<span class="parent-kid-face">' + renderAvatarHtml(kid.emoji, 'var(--brand)', 'head') + '</span>'
-      + '<strong>' + esc(kid.name) + '</strong>'
-      + '</div>'
-      + '<div class="pill-row">' + pills + '</div>'
-      + '</div>'
-      + '<div class="parent-list">' + mine.map(function(c) {
-          var tag = c.status === 'missed'
-            ? { className: 'missed', label: 'Missed' }
-            : c.status === 'approved'
-              ? { className: 'approved', label: 'Done' }
-              : c.status === 'rejected'
-                ? { className: 'rejected', label: 'Sent back' }
-                : { className: 'waiting', label: 'Waiting on you' };
-          return '<div class="parent-list-row">'
-            + '<div class="parent-copy">'
-            + '<span class="parent-list-title">' + esc(c.title || 'Untitled') + '</span>'
-            + (c.points ? '<div class="sub">' + c.points + ' pts</div>' : '')
-            + '</div>'
-            + '<span class="tag ' + tag.className + '">' + tag.label + '</span>'
-            + '</div>';
-        }).join('') + '</div>'
-      + '</div>';
-  }).join('') || buildEmptyPill('Nothing recorded yesterday');
-}
-
 function renderParentApprovalsTodayByKid() {
   var el = document.getElementById('p-approvals-today-by-kid');
   if (!el) return;
@@ -3336,9 +3227,7 @@ function jumpToApproval(completionId) {
 }
 
 function renderParentApprovalsSummary() {
-  renderParentApprovalsGlance();
   renderParentApprovalsTodayByKid();
-  renderParentYesterday();
 }
 
 function renderParentCalendarChecklists(item) {
