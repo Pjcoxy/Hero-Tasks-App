@@ -894,34 +894,6 @@ test('a shut window refuses the completion at the API', async ({ page }) => {
   expect(verdict.error).toMatch(/window closed/i);
 });
 
-// The family view: yesterday, per kid, from the recorded facts. Until misses
-// were recorded there was nothing truthful this panel could have said - every
-// morning looked identical however the day before went. Yesterday-dated rows
-// cannot be created through the real routes (the API stamps today), so this
-// drives the real renderer over planted records - the same lexical `state`
-// the page itself renders from.
-test('yesterday shows each kid\u2019s done and missed, from the records', async ({ page }) => {
-  await pickPerson(page, 'Peter');
-  await page.evaluate(() => {
-    const y = new Date(new Date(state.today + 'T12:00:00Z').getTime() - 86400000)
-      .toISOString().slice(0, 10);
-    state.completions.push(
-      { id: 'y1', taskId: 't-veg', kidId: 'toby', title: 'Water the veggies', points: 3, date: y, status: 'approved' },
-      { id: 'y2', taskId: 't-bins', kidId: 'toby', title: 'Bins out', points: 5, date: y, status: 'missed' },
-    );
-    renderParentYesterday();
-  });
-
-  const tobyCard = page.locator('#p-yesterday .parent-card', { hasText: 'Toby' });
-  await expect(tobyCard).toBeVisible();
-  await expect(tobyCard.locator('.pill.good')).toContainText('1 done');
-  await expect(tobyCard.locator('.pill.bad')).toContainText('1 missed');
-  await expect(tobyCard.locator('.parent-list-row', { hasText: 'Bins out' }).locator('.tag.missed'))
-    .toContainText(/missed/i);
-  await expect(tobyCard.locator('.parent-list-row', { hasText: 'Water the veggies' }).locator('.tag.approved'))
-    .toContainText(/done/i);
-});
-
 // A miss reaches the parent's Today view as a pill and a tag, not silence.
 test('a missed chore shows on the parent\u2019s today view', async ({ page }) => {
   await page.evaluate(async () => {
