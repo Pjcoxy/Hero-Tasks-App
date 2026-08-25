@@ -1241,6 +1241,12 @@ button.parent-list-row:active { transform: scale(0.99); }
   flex-wrap: wrap;
 }
 .parent-calendar-inline-actions .btn.small { min-height: 2.5rem; }
+.cal-checklist-wrap {
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  margin: var(--space-2) 0 var(--space-3);
+}
 .parent-calendar-loading {
   display: flex;
   flex-direction: column;
@@ -2251,6 +2257,9 @@ let parentCalendarWeekStart = null;
 let parentCalendarSelectedDay = null;
 // When set, the add-to-calendar form is editing this item instead of adding.
 let planningEditId = null;
+// Which event's checklist is expanded in the agenda - by item id, so it
+// survives the re-render every prep mutation triggers.
+let parentCalendarChecklistOpenId = null;
 let parentCalendarItems = [];
 let parentCalendarLoading = false;
 let parentApprovalsGlanceItems = [];
@@ -3393,12 +3402,23 @@ function renderParentCalendar() {
               + '</div>'
               + (canManage
                   ? '<div class="parent-actions">'
+                    + (item.kind === 'event'
+                        ? '<button class="btn ghost small" onclick="parentToggleChecklist(\'' + jsq(item.id) + '\')">🎒 Checklist</button>'
+                        : '')
                     + '<button class="btn ghost small" onclick="parentEditPlanningItem(\'' + jsq(item.id) + '\')">Edit</button>'
                     + '<button class="btn red-ghost small" onclick="parentDeletePlanningItem(\'' + jsq(item.id) + '\')">Delete</button>'
                     + '</div>'
                   : '')
-              + '</div>';
+              + '</div>'
+              + (item.kind === 'event' && parentCalendarChecklistOpenId === item.id
+                  ? '<div class="cal-checklist-wrap">' + renderParentCalendarChecklists(item) + '</div>'
+                  : '');
           }).join('') + '</div>');
+}
+
+function parentToggleChecklist(itemId) {
+  parentCalendarChecklistOpenId = parentCalendarChecklistOpenId === itemId ? null : itemId;
+  renderParentCalendar();
 }
 
 async function loadParentCalendar() {
