@@ -1911,14 +1911,16 @@ button.parent-list-row:active { transform: scale(0.99); }
               <option value="reminder">Reminder</option>
             </select>
           </div>
-          <div class="field"><label>Starts</label><input id="p-plan-start" type="datetime-local"></div>
+          <div class="field"><label>Starts</label><input id="p-plan-start" type="datetime-local" oninput="updatePlanStartEcho()">
+            <div class="sub" id="p-plan-start-echo" aria-live="polite"></div></div>
           <div class="field hidden" id="p-plan-repeat-wrap">
             <label class="check-row"><input id="p-plan-repeat" type="checkbox"><span>Repeats weekly</span></label>
           </div>
           <div class="field" id="p-plan-end-wrap"><label>Ends (optional)</label><input id="p-plan-end" type="datetime-local"></div>
           <div class="field"><label>Who</label><select id="p-plan-person"></select></div>
           <div class="field"><label>Notes (optional)</label><input id="p-plan-notes" type="text" placeholder="e.g. Bring hat + water" autocomplete="off"></div>
-          <button class="btn" onclick="parentAddPlanningItem()">Add to calendar</button>
+          <button class="btn" id="p-plan-submit" onclick="parentAddPlanningItem()">Add to calendar</button>
+          <button class="btn ghost hidden" id="p-plan-cancel" onclick="cancelPlanningEdit()">Cancel edit</button>
           <div id="p-conflict-banner" class="p-conflict-banner hidden" aria-live="polite"></div>
         </div>
       </section>
@@ -2253,6 +2255,8 @@ var goalCarouselSignature = '';
 let parentCalendarMonth = null;
 let parentCalendarWeekStart = null;
 let parentCalendarSelectedDay = null;
+// When set, the add-to-calendar form is editing this item instead of adding.
+let planningEditId = null;
 // Which event's checklist is expanded in the agenda - by item id, so it
 // survives the re-render every prep mutation triggers.
 let parentCalendarChecklistOpenId = null;
@@ -5228,6 +5232,28 @@ async function parentAddPlanningItem() {
     if (Number.isNaN(end.getTime())) { toast('Choose a valid end date and time.'); return; }
     endAt = end.toISOString();
   }
+  var personId = document.getElementById('p-plan-person').value || null;
+  var notes = document.getElementById('p-plan-notes').value.trim() || null;
+  var recurrence = type === 'event' && document.getElementById('p-plan-repeat').checked ? 'weekly' : null;
+  if (planningEditId) {
+    // Same form, edit mode: round-trip through the update payload so prep
+    // lists, points and deadline overrides survive the save untouched.
+    var saved = await parentUpdatePlanningItem(planningEditId, function(payload) {
+      payload.title = title;
+      payload.type = type;
+      payload.startAt = start.toISOString();
+      payload.endAt = type === 'event' ? endAt : null;
+      payload.personId = personId;
+      payload.notes = notes;
+      payload.recurrence = recurrence;
+      if (type === 'reminder') {
+        payload.prepLists = [];
+        payload.adultActions = [];
+      }
+    }, 'Calendar item updated.');
+    if (saved) cancelPlanningEdit();
+    return;
+  }
   var result = await api({
     action: 'addPlanningItem',
     parentId: session.personId,
@@ -5236,9 +5262,9 @@ async function parentAddPlanningItem() {
     type: type,
     startAt: start.toISOString(),
     endAt: endAt,
-    personId: document.getElementById('p-plan-person').value || null,
-    notes: document.getElementById('p-plan-notes').value.trim() || null,
-    recurrence: type === 'event' && document.getElementById('p-plan-repeat').checked ? 'weekly' : null,
+    personId: personId,
+    notes: notes,
+    recurrence: recurrence,
   });
   if (toastApiError(result)) return;
   document.getElementById('p-plan-repeat').checked = false;
@@ -5338,72 +5364,52 @@ async function parentApplySuggestedTime(itemId, startAt, durationMs) {
   }, 'Time updated.');
 }
 
+// The live weekday line under Starts: "Sunday 30 Aug \u00b7 9:00am". The
+// native datetime-local picker shows the weekday while open; this keeps it
+// visible after it closes, so nobody books soccer on the wrong day.
+function updatePlanStartEcho() {
+  var el = document.getElementById('p-plan-start-echo');
+  if (!el) return;
+  var value = document.getElementById('p-plan-start').value;
+  var when = value ? new Date(value) : null;
+  if (!when || Number.isNaN(when.getTime())) { el.textContent = ''; return; }
+  el.textContent = when.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' })
+    + ' \u00b7 ' + when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+}
+
+// Editing reuses the add form - prefilled, button swapped to Save - instead
+// of the old chain of seven browser prompts asking for YYYY-MM-DDTHH:mm.
+// The datetime-local inputs open the phone's own graphical picker.
 async function parentEditPlanningItem(itemId) {
   var item = (parentCalendarItems || []).find(function(entry) { return entry.id === itemId; });
   if (!item) { toast('Calendar item not found.'); return; }
-  var title = prompt('Title?', item.title || '');
-  if (title === null) return;
-  title = title.trim();
-  if (!title) { toast('Enter a title first.'); return; }
-  var typeDefault = (item.kind || item.type) === 'reminder' ? '2' : '1';
-  var typeInput = prompt('Type?\n1) Event  2) Reminder', typeDefault);
-  if (typeInput === null) return;
-  var type = String(typeInput).trim() === '2' ? 'reminder' : String(typeInput).trim() === '1' ? 'event' : '';
-  if (!type) { toast('Choose 1 or 2 for type.'); return; }
-  var startInput = prompt('Starts (YYYY-MM-DDTHH:mm)', planningDateToLocalInput(item.startAt));
-  if (startInput === null) return;
-  var start = new Date(startInput.trim());
-  if (Number.isNaN(start.getTime())) { toast('Choose a valid start date and time.'); return; }
-  var endAt = null;
-  if (type === 'event') {
-    var endInput = prompt('Ends (optional, YYYY-MM-DDTHH:mm)', planningDateToLocalInput(item.endAt));
-    if (endInput === null) return;
-    if (endInput.trim()) {
-      var end = new Date(endInput.trim());
-      if (Number.isNaN(end.getTime())) { toast('Choose a valid end date and time.'); return; }
-      endAt = end.toISOString();
-    }
-  }
-  var kidChoices = ['0) Whole family'].concat(kidsOnly().map(function(kid, index) {
-    return (index + 1) + ') ' + avatarText(kid.emoji) + ' ' + kid.name;
-  }));
-  var defaultChoice = 0;
-  if (item.personId) {
-    defaultChoice = Math.max(0, kidsOnly().findIndex(function(kid) { return kid.id === item.personId; }) + 1);
-  }
-  var whoInput = prompt('Assign to:\n' + kidChoices.join('\n'), String(defaultChoice));
-  if (whoInput === null) return;
-  var whoIndex = Number(whoInput.trim());
-  if (!Number.isInteger(whoIndex) || whoIndex < 0 || whoIndex > kidsOnly().length) {
-    toast('Choose a valid person number.');
-    return;
-  }
-  var personId = whoIndex === 0 ? null : kidsOnly()[whoIndex - 1].id;
-  // Same control the add form has - a one-off must be promotable to weekly
-  // after the fact (Soccer was seeded one-off; the season is not).
-  var recurrence = null;
-  if (type === 'event') {
-    var repeatInput = prompt('Repeats?\n1) Just once  2) Every week', item.recurrence === 'weekly' ? '2' : '1');
-    if (repeatInput === null) return;
-    var repeatChoice = String(repeatInput).trim();
-    if (repeatChoice !== '1' && repeatChoice !== '2') { toast('Choose 1 or 2 for repeats.'); return; }
-    recurrence = repeatChoice === '2' ? 'weekly' : null;
-  }
-  var notesInput = prompt('Notes (optional)', item.notes || '');
-  if (notesInput === null) return;
-  await parentUpdatePlanningItem(itemId, function(payload) {
-    payload.title = title;
-    payload.type = type;
-    payload.startAt = start.toISOString();
-    payload.endAt = type === 'event' ? endAt : null;
-    payload.personId = personId;
-    payload.notes = notesInput.trim() || null;
-    payload.recurrence = recurrence;
-    if (type === 'reminder') {
-      payload.prepLists = [];
-      payload.adultActions = [];
-    }
-  }, 'Calendar item updated.');
+  planningEditId = itemId;
+  document.getElementById('p-plan-title').value = item.title || '';
+  document.getElementById('p-plan-type').value = (item.kind || item.type) === 'reminder' ? 'reminder' : 'event';
+  document.getElementById('p-plan-start').value = planningDateToLocalInput(item.startAt);
+  document.getElementById('p-plan-end').value = item.endAt ? planningDateToLocalInput(item.endAt) : '';
+  document.getElementById('p-plan-person').value = item.personId || '';
+  document.getElementById('p-plan-notes').value = item.notes || '';
+  document.getElementById('p-plan-repeat').checked = item.recurrence === 'weekly';
+  updatePlanningTypeVisibility();
+  updatePlanStartEcho();
+  var submit = document.getElementById('p-plan-submit');
+  submit.textContent = 'Save changes';
+  document.getElementById('p-plan-cancel').classList.remove('hidden');
+  var formCard = document.getElementById('p-plan-title').closest('.parent-card');
+  if (formCard && formCard.scrollIntoView) formCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelPlanningEdit() {
+  planningEditId = null;
+  document.getElementById('p-plan-title').value = '';
+  document.getElementById('p-plan-start').value = '';
+  document.getElementById('p-plan-end').value = '';
+  document.getElementById('p-plan-notes').value = '';
+  document.getElementById('p-plan-repeat').checked = false;
+  updatePlanStartEcho();
+  document.getElementById('p-plan-submit').textContent = 'Add to calendar';
+  document.getElementById('p-plan-cancel').classList.add('hidden');
 }
 
 async function parentDeletePlanningItem(itemId) {

@@ -1085,8 +1085,9 @@ test('a missed chore shows on the parent\u2019s today view', async ({ page }) =>
 // submitted chore reads as dealt-with - struck through - rather than
 // looking indistinguishable from still-to-do.
 // The add form could make an event weekly; the edit flow could not - so a
-// one-off could never be promoted once created. Drives the real prompt
-// sequence and asserts the server ends up with recurrence set.
+// one-off could never be promoted once created. Edit now reuses the add form
+// (prefilled, Save/Cancel, native pickers); this drives it and asserts the
+// server ends up with recurrence set.
 test('editing a one-off event can make it weekly', async ({ page }) => {
   const eventId = await page.evaluate(async () => {
     const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
@@ -1106,12 +1107,25 @@ test('editing a one-off event can make it weekly', async ({ page }) => {
   await pickPerson(page, 'Peter');
   await page.getByRole('button', { name: /calendar/i }).first().click();
 
-  // The edit flow is a prompt sequence; answer each by its question text,
-  // changing only the Repeats step.
+  // The edit flow is the real form now - prefilled, native pickers, no
+  // browser prompts. Any prompt() firing is a regression.
   await page.evaluate(() => {
-    window.prompt = (message, fallback) => /Repeats\?/.test(String(message)) ? '2' : String(fallback == null ? '' : fallback);
+    window.prompt = () => { throw new Error('native prompt used by the edit flow'); };
   });
   await page.evaluate((id) => window.parentEditPlanningItem(id), eventId);
+
+  // Prefilled, in edit mode, with the weekday echoed under Starts.
+  await expect(page.locator('#p-plan-title')).toHaveValue('Winter season opener');
+  await expect(page.locator('#p-plan-submit')).toHaveText('Save changes');
+  await expect(page.locator('#p-plan-cancel')).toBeVisible();
+  await expect(page.locator('#p-plan-start-echo')).toContainText(/Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday/);
+
+  await page.locator('#p-plan-repeat').check();
+  await page.locator('#p-plan-submit').click();
+
+  // The form resets back to add mode after a save.
+  await expect(page.locator('#p-plan-submit')).toHaveText('Add to calendar');
+  await expect(page.locator('#p-plan-cancel')).toBeHidden();
 
   await expect.poll(async () => page.evaluate(async (id) => {
     const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
