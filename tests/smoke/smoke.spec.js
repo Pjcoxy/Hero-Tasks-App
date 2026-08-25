@@ -1364,7 +1364,9 @@ test('a kid card reports status as pills, not paragraphs', async ({ page }) => {
   const cards = page.locator('#p-approvals-today-by-kid .parent-card');
   const toby = cards.filter({ hasText: 'Toby' });
   await expect(toby.locator('.pill.warn')).toContainText(/\d+ pending/);
-  await expect(toby.locator('.pill.neutral').first()).toContainText(/chore/);
+  // No "N chores" total pill: with a single chore it read as the same thing
+  // counted twice. The breakdown pills carry the whole story.
+  await expect(toby.locator('.pill', { hasText: /chore/ })).toHaveCount(0);
 
   // The pill describes the kid's day, not the parent's inbox: with a chore
   // pending there is no green pill, and a kid with an untouched chore says
