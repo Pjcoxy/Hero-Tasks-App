@@ -756,12 +756,21 @@ test('a chore can be set to particular weekdays, and lands on exactly those', as
       start: from.toISOString(), end: to.toISOString(),
     });
     const mine = (cal.items || []).filter((i) => i.taskId === task.id);
+    // The expectation the server enforces: matching weekdays within the
+    // range, but never before the chore's creation day (its anchor). The
+    // old hardcoded 6 was only right when this ran on a Monday.
+    let expected = 0;
+    const anchor = new Date(`${task.createdAt}T00:00:00Z`);
+    for (let day = new Date(from); day.getTime() <= to.getTime(); day.setUTCDate(day.getUTCDate() + 1)) {
+      if (day.getTime() >= anchor.getTime() && [1, 3, 5].includes(day.getUTCDay())) expected += 1;
+    }
     return {
       days: task.days,
       error: cal.error || null,
       ok: cal.ok === true,
       weekdays: [...new Set(mine.map((i) => new Date(i.occurrenceAt).getUTCDay()))].sort(),
       count: mine.length,
+      expected,
     };
   });
 
@@ -769,7 +778,8 @@ test('a chore can be set to particular weekdays, and lands on exactly those', as
   expect(result.ok, 'the calendar call should succeed').toBe(true);
   expect(result.days, 'the chosen days come back on the task').toEqual([1, 3, 5]);
   expect(result.weekdays, 'it lands on Mon, Wed and Fri and nothing else').toEqual([1, 3, 5]);
-  expect(result.count, 'three days a week, across two weeks').toBe(6);
+  expect(result.expected, 'the range holds at least a week of them').toBeGreaterThanOrEqual(3);
+  expect(result.count, 'exactly the anchored occurrences in range').toBe(result.expected);
 });
 
 // A chore on Mon/Wed/Fri is due on each of them. Matching completions by week -
@@ -1354,7 +1364,15 @@ test('a kid card reports status as pills, not paragraphs', async ({ page }) => {
   const cards = page.locator('#p-approvals-today-by-kid .parent-card');
   const toby = cards.filter({ hasText: 'Toby' });
   await expect(toby.locator('.pill.warn')).toContainText(/\d+ pending/);
-  await expect(toby.locator('.pill.neutral')).toContainText(/chore/);
+  await expect(toby.locator('.pill.neutral').first()).toContainText(/chore/);
+
+  // The pill describes the kid's day, not the parent's inbox: with a chore
+  // pending there is no green pill, and a kid with an untouched chore says
+  // "to do" rather than "All caught up" beside a Not started row.
+  await expect(toby.locator('.pill.good')).toHaveCount(0);
+  const ollie = cards.filter({ hasText: 'Ollie' });
+  const ollieText = await ollie.textContent();
+  expect(/All caught up/.test(ollieText || '')).toBe(false);
 
   // The filler subtitle is gone from every card.
   await expect(page.locator('#p-approvals-today-by-kid')).not.toContainText('chores overview');
@@ -1363,8 +1381,9 @@ test('a kid card reports status as pills, not paragraphs', async ({ page }) => {
 test('a kid with nothing on gets one pill, not an empty state', async ({ page }) => {
   await pickPerson(page, 'Peter');
   const ollie = page.locator('#p-approvals-today-by-kid .parent-card').filter({ hasText: 'Ollie' });
-  await expect(ollie.locator('.pill.good')).toContainText('All caught up');
-  // No emoji-and-two-sentences block explaining that zero means zero.
+  // "Nothing on today", stated once - not a green "caught up" claim, and not
+  // an emoji-and-two-sentences block explaining that zero means zero.
+  await expect(ollie.locator('.pill.neutral')).toContainText('Nothing on today');
   await expect(ollie.locator('.empty')).toHaveCount(0);
 });
 
