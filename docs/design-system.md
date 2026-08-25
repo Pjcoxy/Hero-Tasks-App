@@ -403,6 +403,12 @@ night is the thing rewarded** — not attending. The rules, all settled:
   (`prepDeadlinePassed`), with an optional per-event `prepDueBy` ISO override
   winning when set. After it: ticking and confirming are refused with
   `windowClosed: true`, and the sweep records `prep-miss-<itemId>-<kidId>`.
+- **Prep opens on the day it is due** (`prepNotYetOpen`): Thursday's "uniform
+  on" is a Thursday action, not a Tuesday tick. Before the due day, ticking
+  and confirming are refused with `notOpenYet: true`, and the kid card
+  renders the checklist locked under a neutral "🔒 Opens Thu · by 5:30pm"
+  chip. The deadline stays the only knob — set it earlier and the open day
+  moves with it.
 - **A kid ticks only their own list** — `tickPrepItem` is `requireSelf` plus
   a personId match; the parent-only `updatePlanningItem` remains the only way
   to touch anyone else's.

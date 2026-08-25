@@ -1039,13 +1039,15 @@ test('a kid can tick their prep list and confirm packed', async ({ page }) => {
       body: JSON.stringify(body),
     }).then((r) => r.json());
     const state = await post({ action: 'state' });
-    // Two local days ahead, so the night-before deadline cannot be shut
-    // whatever hour this runs.
+    // Two local days ahead, with the deadline overridden to tonight: prep
+    // only opens on the day it is due, and the harness pins local time to
+    // ~noon, so now+8h is this evening - open, not yet closed.
     const start = new Date(new Date(state.today + 'T12:00:00Z').getTime() + 2 * 86400000);
     const made = await post({
       action: 'addPlanningItem', parentId: 'peter', parentPin: '1234',
       type: 'event', title: 'Soccer match', personId: 'ollie',
       startAt: start.toISOString(),
+      prepDueBy: new Date(Date.now() + 8 * 3600000).toISOString(),
       prepLists: [{ personId: 'ollie', points: 10, items: [{ text: 'boots' }, { text: 'shin pads' }] }],
     });
     return made.item.id;
@@ -1104,6 +1106,47 @@ test('a kid can tick their prep list and confirm packed', async ({ page }) => {
       body: JSON.stringify(body),
     }).then((r) => r.json());
     await real({ action: 'deletePlanningItem', planningItemId: id, parentId: 'peter', parentPin: '1234' });
+  }, eventId);
+});
+
+// Thursday's "uniform on" is a Thursday action, not a Tuesday one: prep only
+// opens on the day it is due. An event two days out (default night-before
+// deadline: due tomorrow) must render locked today, saying when it opens.
+test('prep days away is locked until its due day', async ({ page }) => {
+  const eventId = await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    const state = await post({ action: 'state' });
+    const start = new Date(new Date(state.today + 'T12:00:00Z').getTime() + 2 * 86400000);
+    const made = await post({
+      action: 'addPlanningItem', parentId: 'peter', parentPin: '1234',
+      type: 'event', title: 'Scouts night', personId: 'toby',
+      startAt: start.toISOString(),
+      prepLists: [{ personId: 'toby', points: 3, items: [{ text: 'Uniform on' }] }],
+    });
+    return made.item.id;
+  });
+
+  await page.reload();
+  await pickPerson(page, 'Toby');
+
+  const card = page.locator('.task', { hasText: 'Scouts night' }).first();
+  await expect(card).toBeVisible();
+  await expect(card.locator('.event-chips .pill', { hasText: /🔒 Opens/ })).toHaveCount(1);
+  await expect(card.locator('.event-chips .pill.warn')).toHaveCount(0);
+  await expect(card.locator('.prep-item input').first()).toBeDisabled();
+  await expect(card.getByRole('button', { name: /packed/i })).toHaveCount(0);
+
+  await page.evaluate(async (id) => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    await post({ action: 'deletePlanningItem', planningItemId: id, parentId: 'peter', parentPin: '1234' });
   }, eventId);
 });
 
