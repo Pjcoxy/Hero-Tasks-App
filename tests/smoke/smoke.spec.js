@@ -546,26 +546,23 @@ async function seedPendingChore(page, title) {
   }, title);
 }
 
-test('declining asks why, and the reason reaches the kid', async ({ page }) => {
+test('sending back needs a reason in the note box, and it reaches the kid', async ({ page }) => {
   await seedPendingChore(page, 'Sweep the porch');
   await page.reload();
   await pickPerson(page, 'Peter');
 
   const card = page.locator('#p-pending .parent-card').filter({ hasText: 'Sweep the porch' });
-  await card.getByRole('button', { name: /Nope/ }).click();
 
-  // The dialog must be the in-app one, and it must ask for the fix.
-  await expect(page.locator('#ask-modal')).toBeVisible();
-  await expect(page.locator('#ask-title')).toContainText('get this approved');
-
-  // Sending it back empty must not go through.
-  await page.locator('#ask-ok').click();
+  // Sending it back with an empty note box must not go through: it bounces
+  // to the box (focused, no dialog) so the kid gets something to act on.
+  await card.getByRole('button', { name: /Try again/ }).click();
   await expect(page.locator('#toast')).toContainText('Tell them what to fix');
+  await expect(page.locator('#ask-modal')).toBeHidden();
   await expect(card).toBeVisible();
+  await expect(card.locator('.approve-note')).toBeFocused();
 
-  await card.getByRole('button', { name: /Nope/ }).click();
-  await page.locator('#ask-input').fill('The step by the door is still dusty.');
-  await page.locator('#ask-ok').click();
+  await card.locator('.approve-note').fill('The step by the door is still dusty.');
+  await card.getByRole('button', { name: /Try again/ }).click();
   await expect(card).toBeHidden();
 
   // Now the part that matters: the kid can read it on their own screen.
@@ -575,17 +572,15 @@ test('declining asks why, and the reason reaches the kid', async ({ page }) => {
   await expect(activity).toContainText('The step by the door is still dusty.');
 });
 
-test('approving can carry a note, and the fast path still needs one tap', async ({ page }) => {
+test('a note typed in the box rides along with an approve', async ({ page }) => {
   await seedPendingChore(page, 'Water the plants');
   await page.reload();
   await pickPerson(page, 'Peter');
 
   const card = page.locator('#p-pending .parent-card').filter({ hasText: 'Water the plants' });
-  // The aria-label is the accessible name, so match on that rather than the
-  // visible "💬 With note" - they deliberately differ.
-  await card.getByRole('button', { name: /approve with a note/i }).click();
-  await page.locator('#ask-input').fill('Great job, the pots look happy.');
-  await page.locator('#ask-ok').click();
+  await card.locator('.approve-note').fill('Great job, the pots look happy.');
+  await card.getByRole('button', { name: /^✓ Approve$/ }).click();
+  await expect(page.locator('#ask-modal')).toBeHidden();
   await expect(card).toBeHidden();
 
   await page.getByRole('button', { name: /Switch user/ }).click();

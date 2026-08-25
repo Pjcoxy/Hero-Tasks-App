@@ -764,6 +764,16 @@ Same tokens, different register:
 - Density over generosity — a parent scanning approvals wants to see more at once
 - **No celebration animations.** Approving is administration, not achievement.
 
+### Decision notes
+
+Each pending approval card carries one optional note box (`.approve-note`)
+above its two buttons — **✓ Approve** and **✗ Try again**. Whatever is typed
+rides along with whichever button is hit; there is no separate "with note"
+path. Approving with an empty box is the one-tap fast path. Sending back with
+an empty box bounces focus to the box instead of going through — a kid sent
+back with no reason has nothing to act on. Re-renders carry typed notes (and
+focus) over so a background refresh cannot eat a half-written note.
+
 ### Stat tiles
 
 The counts waiting on the parent (approvals, reward requests) are two rounded
