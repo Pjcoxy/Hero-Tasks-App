@@ -739,6 +739,76 @@ test('pull down far enough refreshes; a short pull does not', async ({ page }) =
   expect(pullResult.shortPull, 'a short pull must not refresh').toBe(false);
 });
 
+// #164: editing a task is the allocate form in edit mode - prefilled, Save
+// changes, Cancel - never a chain of browser prompts.
+test('editing a task drives the allocate form, not prompts', async ({ page }) => {
+  await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    await post({
+      action: 'addTask', parentId: 'peter', parentPin: '1234',
+      kidId: 'toby', title: 'Brush the dog', points: 3, cycle: 'daily',
+    });
+  });
+  await page.reload();
+  await pickPerson(page, 'Peter');
+  await page.evaluate(() => {
+    window.prompt = () => { throw new Error('native prompt used by the task editor'); };
+  });
+  await page.getByRole('button', { name: /^Tasks$/i }).first().click();
+
+  const row = page.locator('#p-tasks .parent-list-row', { hasText: 'Brush the dog' });
+  await row.getByRole('button', { name: 'Edit' }).click();
+
+  await expect(page.locator('#p-title')).toHaveValue('Brush the dog');
+  await expect(page.locator('#p-task-submit')).toHaveText('Save changes');
+  await expect(page.locator('#p-task-cancel')).toBeVisible();
+
+  await page.locator('#p-title').fill('Brush the cat');
+  await page.locator('#p-points').fill('7');
+  await page.locator('#p-task-submit').click();
+
+  await expect(page.locator('#p-task-submit')).toHaveText('Allocate task');
+  await expect(page.locator('#p-tasks')).toContainText('Brush the cat');
+  await expect(page.locator('#p-tasks .parent-list-row', { hasText: 'Brush the cat' })).toContainText('7 pts');
+
+  // Tidy: remove the task so later premises hold.
+  await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    const state = await post({ action: 'state' });
+    const task = state.tasks.find((t) => t.title === 'Brush the cat');
+    if (task) await post({ action: 'deleteTask', parentId: 'peter', parentPin: '1234', taskId: task.id });
+  });
+});
+
+// Same pattern for rewards.
+test('editing a reward drives the add-reward form, not prompts', async ({ page }) => {
+  await pickPerson(page, 'Peter');
+  await page.evaluate(() => {
+    window.prompt = () => { throw new Error('native prompt used by the reward editor'); };
+  });
+  await page.getByRole('button', { name: /^Rewards$/i }).first().click();
+
+  const row = page.locator('#p-rewards .parent-card').first();
+  await row.getByRole('button', { name: 'Edit' }).click();
+  await expect(page.locator('#p-reward-submit')).toHaveText('Save changes');
+  await expect(page.locator('#p-reward-cancel')).toBeVisible();
+  const title = await page.locator('#p-reward-title').inputValue();
+  expect(title.length).toBeGreaterThan(0);
+
+  // Cancel restores add mode without touching the reward.
+  await page.locator('#p-reward-cancel').click();
+  await expect(page.locator('#p-reward-submit')).toHaveText('Add reward');
+  await expect(page.locator('#p-reward-title')).toHaveValue('');
+});
+
 // #174. The app installs on desktops. With no maximum width a task row
 // stretched to ~1900px to hold thirty characters, at phone type scale.
 //
@@ -1691,11 +1761,9 @@ test('dots are coloured per person, and there is no legend', async ({ page }) =>
 test('a parent can open an event checklist and add a prep item', async ({ page }) => {
   await seedCalendar(page);
 
-  page.on('dialog', (dialog) => {
-    if (/Which kid prep list/.test(dialog.message())) return dialog.accept('2');
-    if (/Prep item\?/.test(dialog.message())) return dialog.accept('Bring a hat');
-    return dialog.dismiss();
-  });
+  // #164: adding a prep item is an inline row in the kid's own section - no
+  // dialogs of any kind. A native prompt firing is a regression.
+  page.on('dialog', (dialog) => dialog.dismiss());
 
   await openParentCalendar(page);
   // Select the seeded day directly: in the full suite, earlier tests leave
@@ -1712,12 +1780,15 @@ test('a parent can open an event checklist and add a prep item', async ({ page }
 
   const agenda = page.locator('#p-calendar-agenda');
   await agenda.getByRole('button', { name: /Checklist/ }).first().click();
-  await expect(agenda.getByRole('button', { name: /\+ Prep item/ })).toBeVisible();
+  const wrap = agenda.locator('.cal-checklist-wrap');
+  await expect(wrap).toBeVisible();
 
-  await agenda.getByRole('button', { name: /\+ Prep item/ }).click();
-  await expect(agenda.locator('.parent-calendar-checklist').first()).toBeVisible();
-  await expect(agenda.locator('.cal-checklist-wrap')).toContainText('Bring a hat');
-  await expect(agenda.getByRole('button', { name: /Set pts/ }).first()).toBeVisible();
+  // Type into Ollie's own section and hit its Add - no which-kid dialog.
+  const ollieInput = wrap.locator('input[id^="prep-add-"][id$="-ollie"]');
+  await ollieInput.fill('Bring a hat');
+  await wrap.locator('input[id^="prep-add-"][id$="-ollie"] + button').click();
+  await expect(wrap).toContainText('Bring a hat');
+  await expect(wrap.getByRole('button', { name: /Set pts/ }).first()).toBeVisible();
 });
 
 test('tapping a day expands its agenda inline, without leaving the screen', async ({ page }) => {
