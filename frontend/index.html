@@ -3179,12 +3179,20 @@ function renderParentApprovalsTodayByKid() {
     var statuses = todayItems.map(function(item) { return parentCalendarOverviewStatus(item).className; });
     var waiting = statuses.filter(function(name) { return name === 'waiting'; }).length;
     var missedCount = statuses.filter(function(name) { return name === 'missed'; }).length;
-    var pills = '<span class="pill neutral">' + todayItems.length + ' chore'
-      + (todayItems.length === 1 ? '' : 's') + '</span>'
-      + (missedCount > 0 ? '<span class="pill bad">' + missedCount + ' missed</span>' : '')
-      + (waiting > 0
-          ? '<span class="pill warn">' + waiting + ' pending</span>'
-          : (missedCount === 0 ? '<span class="pill good">All caught up</span>' : ''));
+    var toDo = statuses.filter(function(name) { return name === 'not-started'; }).length;
+    // The pill describes the KID's day, not the parent's inbox. The old
+    // green "All caught up" meant only "nothing pending on you", so it sat
+    // beside a "Not started" row and contradicted it - a kid who had done
+    // nothing at all read as caught up.
+    var pills = todayItems.length === 0
+      ? '<span class="pill neutral">Nothing on today</span>'
+      : '<span class="pill neutral">' + todayItems.length + ' chore'
+        + (todayItems.length === 1 ? '' : 's') + '</span>'
+        + (missedCount > 0 ? '<span class="pill bad">' + missedCount + ' missed</span>' : '')
+        + (waiting > 0 ? '<span class="pill warn">' + waiting + ' pending</span>' : '')
+        + (toDo > 0 ? '<span class="pill neutral">' + toDo + ' to do</span>' : '')
+        + (toDo === 0 && waiting === 0 && missedCount === 0
+            ? '<span class="pill good">All done ✅</span>' : '');
 
     return '<div class="card parent-card">'
       + '<div class="parent-item-head">'
