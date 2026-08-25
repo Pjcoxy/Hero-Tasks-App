@@ -764,6 +764,17 @@ Same tokens, different register:
 - Density over generosity — a parent scanning approvals wants to see more at once
 - **No celebration animations.** Approving is administration, not achievement.
 
+### Stat tiles
+
+The counts waiting on the parent (approvals, reward requests) are two rounded
+tiles side by side at the top of the Approvals tab — `.stat-row` / `.stat-tile` —
+a big number over a small muted label. Zero is stated once, on the tile; the
+card containers below stay empty rather than repeating it as a pill or a
+sentence. A non-zero tile takes `.attention` (`--warning-wash` background,
+`--warning` number) because it is work waiting on the parent, and the decision
+cards render below the row. One exception to the type rule above: the tile
+number uses `--text-2xl` — the count is the point of the tile.
+
 ---
 
 ## The one thing that separates an app from a web page
