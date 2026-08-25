@@ -1670,6 +1670,42 @@ test('dots are coloured per person, and there is no legend', async ({ page }) =>
   await expect(page.locator('#p-tab-calendar')).not.toContainText(/legend/i);
 });
 
+// The prep-list controls were defined but never rendered - every checklist
+// in production had been created by the seed, and a parent had no way to
+// build one in the app. Event rows in the agenda now carry a Checklist
+// toggle that opens the lists and the add/set-points controls.
+test('a parent can open an event checklist and add a prep item', async ({ page }) => {
+  await seedCalendar(page);
+
+  page.on('dialog', (dialog) => {
+    if (/Which kid prep list/.test(dialog.message())) return dialog.accept('2');
+    if (/Prep item\?/.test(dialog.message())) return dialog.accept('Bring a hat');
+    return dialog.dismiss();
+  });
+
+  await openParentCalendar(page);
+  // Select the seeded day directly: in the full suite, earlier tests leave
+  // chores dotting today, so "first busy cell" can land on a day with no
+  // events at all. Day-tapping itself is covered by the agenda test below.
+  await page.evaluate(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 2);
+    parentCalendarSelectedDay = d.getFullYear() + '-'
+      + String(d.getMonth() + 1).padStart(2, '0') + '-'
+      + String(d.getDate()).padStart(2, '0');
+    renderParentCalendar();
+  });
+
+  const agenda = page.locator('#p-calendar-agenda');
+  await agenda.getByRole('button', { name: /Checklist/ }).first().click();
+  await expect(agenda.getByRole('button', { name: /\+ Prep item/ })).toBeVisible();
+
+  await agenda.getByRole('button', { name: /\+ Prep item/ }).click();
+  await expect(agenda.locator('.parent-calendar-checklist').first()).toBeVisible();
+  await expect(agenda.locator('.cal-checklist-wrap')).toContainText('Bring a hat');
+  await expect(agenda.getByRole('button', { name: /Set pts/ }).first()).toBeVisible();
+});
+
 test('tapping a day expands its agenda inline, without leaving the screen', async ({ page }) => {
   await seedCalendar(page);
   await openParentCalendar(page);
