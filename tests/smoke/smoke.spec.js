@@ -285,6 +285,46 @@ test('the kid Home screen shows a Today and a This Week section', async ({ page 
   await expect(page.locator('#k-glance-week .glance-skel')).toHaveCount(0);
 });
 
+// The Home glance shares one fetch with the Calendar tab, but its promise is
+// "today and the next seven days" whatever view that tab is in. Before the
+// fetch was widened, switching the calendar to Day silently emptied Home's
+// This Week - Thursday's Scouts vanished from a Tuesday Home screen.
+test('Home’s This Week survives the Calendar tab being in Day view', async ({ page }) => {
+  const eventId = await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    const state = await post({ action: 'state' });
+    const start = new Date(new Date(state.today + 'T12:00:00Z').getTime() + 2 * 86400000);
+    const made = await post({
+      action: 'addPlanningItem', parentId: 'peter', parentPin: '1234',
+      type: 'event', title: 'Glance range probe', personId: 'toby',
+      startAt: start.toISOString(),
+    });
+    return made.item.id;
+  });
+
+  await page.reload();
+  await pickPerson(page, 'Toby');
+  await expect(page.locator('#k-glance-week')).toContainText('Glance range probe');
+
+  await page.locator('#tabbtn-calendar').click();
+  await page.locator('#calendar-view-day').click();
+  await page.locator('#tabbtn-home').click();
+  await expect(page.locator('#k-glance-week')).toContainText('Glance range probe');
+
+  await page.evaluate(async (id) => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    await post({ action: 'deletePlanningItem', planningItemId: id, parentId: 'peter', parentPin: '1234' });
+  }, eventId);
+});
+
 test('the old daily-only Missions section is gone from Home', async ({ page }) => {
   await pickPerson(page, 'Ollie');
   await expect(page.locator('#tab-home')).not.toContainText("Today's Missions");
