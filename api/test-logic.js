@@ -2074,6 +2074,48 @@ async function main() {
   assert.strictEqual(prepRows.length, 1, 'and creates nothing new');
   console.log('\u2713 confirming twice cannot double the reward');
 
+  // -------------------------------------------------------------------------
+  // Sent-back electives stay on offer. Rejecting an extra can price the redo;
+  // the kid puts the same row back in front of the parent, points intact, or
+  // withdraws it. A rejected prep confirmation can be resubmitted too - the
+  // idempotency 409 used to eat that silently.
+  const extraState = await R.addExtra({ kidId: 'toby', personId: 'toby', pin: '1234', title: 'Washed the car' });
+  const extraRow = extraState.completions.find((c) => c.title === 'Washed the car');
+  const pricedReject = await R.reject({
+    parentId: 'peter', parentPin: '1234', completionId: extraRow.id,
+    comment: 'Still soapy - rinse it.', points: 15,
+  });
+  assert.strictEqual(pricedReject.ok, undefined === pricedReject.ok ? pricedReject.ok : pricedReject.ok, 'reject ran');
+  const afterReject = (await R.state()).completions.find((c) => c.id === extraRow.id);
+  assert.strictEqual(afterReject.status, 'rejected');
+  assert.strictEqual(afterReject.points, 15, 'the offer is stored on the sent-back elective');
+
+  const wrongRedo = await R.redoExtra({ personId: 'ollie', pin: '1234', completionId: extraRow.id });
+  assert.strictEqual(wrongRedo.ok, false, "another kid cannot redo someone else's elective");
+
+  await R.redoExtra({ personId: 'toby', pin: '1234', completionId: extraRow.id });
+  const resub = (await R.state()).completions.find((c) => c.id === extraRow.id);
+  assert.strictEqual(resub.status, 'pending', 'redo puts the same row back in front of the parent');
+  assert.strictEqual(resub.points, 15, 'with the offer intact');
+  console.log('\u2713 a priced send-back stays on offer and resubmits with its points');
+
+  const extraState2 = await R.addExtra({ kidId: 'toby', personId: 'toby', pin: '1234', title: 'Weeded the path' });
+  const extraRow2 = extraState2.completions.find((c) => c.title === 'Weeded the path');
+  await R.reject({ parentId: 'peter', parentPin: '1234', completionId: extraRow2.id, comment: 'Half done.', points: 4 });
+  await R.redoExtra({ personId: 'toby', pin: '1234', completionId: extraRow2.id, giveUp: true });
+  const withdrawn = (await R.state()).completions.find((c) => c.id === extraRow2.id);
+  assert.strictEqual(withdrawn.status, 'withdrawn', 'bowing out withdraws the row');
+  console.log('\u2713 a kid can bow out of a sent-back elective');
+
+  // Rejected prep, packed again: the 409 path must flip it back to pending.
+  const soccerPrepId = `prep-${soccerEvent.item.id}-${soccerOccDate}-ollie`;
+  await R.reject({ parentId: 'peter', parentPin: '1234', completionId: soccerPrepId, comment: 'Boots are muddy.' });
+  const rePacked = await R.confirmPrep({ personId: 'ollie', pin: '1234', planningItemId: soccerEvent.item.id });
+  assert.strictEqual(rePacked.ok, undefined === rePacked.ok ? rePacked.ok : rePacked.ok, 'confirm ran');
+  const prepAgain = (await R.state()).completions.find((c) => c.id === soccerPrepId);
+  assert.strictEqual(prepAgain.status, 'pending', 'packing again after a send-back re-pends the same row');
+  console.log('\u2713 a rejected prep confirmation can be resubmitted');
+
   // Prep opens on the day it is due. Thursday Scouts' "uniform on" is not a
   // Tuesday tick: with the default night-before deadline, an event two days
   // out is due tomorrow, so today is too early - refused as such, not as

@@ -960,8 +960,50 @@ async function confirmPrep(req) {
     });
   } catch (err) {
     if (!err || err.code !== 409) throw err;
-    // Already confirmed - not an error worth showing a kid.
+    // Already a row under this occurrence id. Confirmed or still pending:
+    // idempotent, nothing to do. But a REJECTED one silently eating the
+    // resubmit was a dead end - packing again after a send-back must put it
+    // back in front of the parent.
+    const completions = container('completions');
+    const rowId = `prep-${item.id}-${occ.date}-${personId}`;
+    const { resource: existing } = await completions
+      .item(rowId, HOUSEHOLD_ID)
+      .read()
+      .catch(() => ({ resource: null }));
+    if (existing && existing.status === 'rejected') {
+      existing.status = 'pending';
+      existing.date = todayStr();
+      existing.resubmittedAt = new Date().toISOString();
+      await completions.item(rowId, HOUSEHOLD_ID).replace(existing);
+    }
   }
+  return getState();
+}
+
+// A sent-back elective stays on offer: the kid redoes it and this puts the
+// same row back in front of the parent, points intact. giveUp withdraws it
+// instead - off the kid's Home, out of everyone's history lists.
+async function redoExtra(req) {
+  const personId = String(req.personId || '').trim();
+  await requireSelf(personId, req.pin, personId);
+  const completions = container('completions');
+  const { resource: completion } = await completions
+    .item(req.completionId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!completion || completion.kidId !== personId || completion.taskId || completion.planningItemId) {
+    return { ok: false, error: 'Not found' };
+  }
+  if (completion.status !== 'rejected') return { ok: false, error: 'Nothing to redo' };
+  if (req.giveUp) {
+    completion.status = 'withdrawn';
+    completion.decidedAt = new Date().toISOString();
+  } else {
+    completion.status = 'pending';
+    completion.date = todayStr();
+    completion.resubmittedAt = new Date().toISOString();
+  }
+  await completions.item(req.completionId, HOUSEHOLD_ID).replace(completion);
   return getState();
 }
 
@@ -1340,6 +1382,13 @@ async function reject(req) {
     completion.status = 'rejected';
     completion.comment = comment;
     completion.decidedAt = new Date().toISOString();
+    // Pricing a sent-back ELECTIVE keeps the offer alive: the points sit on
+    // the rejected row so the kid's Try-again card can show what redoing it
+    // is worth. Chores carry their points on the task, so this is extras-only.
+    if (!completion.taskId && req.points !== undefined && req.points !== null && req.points !== '') {
+      const offered = Number(req.points);
+      if (Number.isFinite(offered) && offered >= 0) completion.points = offered;
+    }
     await completions.item(req.completionId, HOUSEHOLD_ID).replace(completion);
     const quietHours = await getHouseholdQuietHours();
     await sendPushIfAllowed(completion.kidId, {
@@ -2022,6 +2071,7 @@ const ROUTES = {
   reorderMyItems,
   reorderTasks,
   tickPrepItem,
+  redoExtra,
   confirmPrep,
   clearActivity,
 };

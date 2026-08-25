@@ -768,6 +768,19 @@ Same tokens, different register:
 - Density over generosity — a parent scanning approvals wants to see more at once
 - **No celebration animations.** Approving is administration, not achievement.
 
+### Sent-back electives stay on offer
+
+Rejecting a kid-added extra asks what redoing it is worth (after the note);
+the points sit on the rejected row. The kid's Home shows it as a Try-again
+card — name, the offer, the parent's note — with one tap to resubmit the
+same row (points intact, `redoExtra`) or bow out (`giveUp` → withdrawn,
+which drops it from every history list). No expiry: electives have no
+window, so the card stays until acted on. Approving a priced extra prefills
+the points prompt with the offer. Must-do chores keep their behaviour:
+points on the task, bounce back under the existing window rules. A rejected
+prep confirmation resubmits through `confirmPrep` — the idempotency 409
+flips a rejected row back to pending instead of silently eating the redo.
+
 ### Decision notes
 
 Each pending approval card carries one optional note box (`.approve-note`)
