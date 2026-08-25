@@ -1867,7 +1867,8 @@ button.parent-list-row:active { transform: scale(0.99); }
             <input id="p-due" type="datetime-local">
           </div>
           <div class="field"><label>Points</label><input id="p-points" type="number" value="5" min="1"></div>
-          <button class="btn" onclick="parentAddTask()">Allocate task</button>
+          <button class="btn" id="p-task-submit" onclick="parentAddTask()">Allocate task</button>
+          <button class="btn ghost hidden" id="p-task-cancel" onclick="cancelTaskEdit()">Cancel edit</button>
         </div>
       </section>
 
@@ -1889,7 +1890,8 @@ button.parent-list-row:active { transform: scale(0.99); }
               <span>Needs my approval</span>
             </label>
           </div>
-          <button class="btn" onclick="parentAddReward()">Add reward</button>
+          <button class="btn" id="p-reward-submit" onclick="parentAddReward()">Add reward</button>
+          <button class="btn ghost hidden" id="p-reward-cancel" onclick="cancelRewardEdit()">Cancel edit</button>
         </div>
       </section>
 
@@ -2257,6 +2259,9 @@ let parentCalendarWeekStart = null;
 let parentCalendarSelectedDay = null;
 // When set, the add-to-calendar form is editing this item instead of adding.
 let planningEditId = null;
+// Same pattern for the task and reward forms (#164): one form each, two modes.
+let taskEditId = null;
+let rewardEditId = null;
 // Which event's checklist is expanded in the agenda - by item id, so it
 // survives the re-render every prep mutation triggers.
 let parentCalendarChecklistOpenId = null;
@@ -3278,36 +3283,45 @@ function renderParentCalendarChecklists(item) {
   if (item.kind !== 'event') return '';
   var prepLists = Array.isArray(item.prepLists) ? item.prepLists : [];
   var adultActions = Array.isArray(item.adultActions) ? item.adultActions : [];
-  var prepHtml = prepLists.map(function(list, listIndex) {
-    var kid = state.people.find(function(person) { return person.id === list.personId; });
-    var kidLabel = kid ? avatarText(kid.emoji) + ' ' + kid.name : 'Kid prep';
-    var items = (list.items || []).map(function(entry, itemIndex) {
+  // One section per kid, list or no list yet - typing into a kid's own
+  // section replaces the old numbered which-kid prompt entirely (#164).
+  var prepHtml = kidsOnly().map(function(kid) {
+    var listIndex = prepLists.findIndex(function(list) { return list.personId === kid.id; });
+    var list = listIndex === -1 ? null : prepLists[listIndex];
+    var items = list ? (list.items || []).map(function(entry, itemIndex) {
       return '<label class="check-row">'
         + '<input type="checkbox" ' + (entry.done ? 'checked' : '')
         + ' onchange="parentTogglePrepItem(\'' + jsq(item.id) + '\', ' + listIndex + ', ' + itemIndex + ', this.checked)">'
         + '<span>' + esc(entry.text) + '</span>'
         + '</label>';
-    }).join('') || '<div class="sub">No prep items yet.</div>';
+    }).join('') : '';
+    var ptsButton = list
+      ? ' <button class="btn ghost small" onclick="parentSetPrepPoints(\'' + jsq(item.id) + '\', ' + listIndex + ')">'
+        + (Number(list.points) > 0 ? list.points + ' pts' : 'Set pts') + '</button>'
+      : '';
     return '<div class="parent-calendar-checklist">'
-      + '<strong>' + esc(kidLabel)
-      + ' <button class="btn ghost small" onclick="parentSetPrepPoints(\'' + jsq(item.id) + '\', ' + listIndex + ')">'
-      + (Number(list.points) > 0 ? list.points + ' pts' : 'Set pts') + '</button></strong>'
+      + '<strong>' + esc(avatarText(kid.emoji) + ' ' + kid.name) + ptsButton + '</strong>'
       + items
+      + '<div class="input-row">'
+      + '<input type="text" id="prep-add-' + jsq(item.id) + '-' + jsq(kid.id) + '" placeholder="Add prep item" autocomplete="off">'
+      + '<button class="btn ghost small" onclick="parentAddPrepItem(\'' + jsq(item.id) + '\', \'' + jsq(kid.id) + '\')">Add</button>'
+      + '</div>'
       + '</div>';
-  }).join('') || '<div class="sub">No kid prep lists yet.</div>';
+  }).join('');
   var adultHtml = adultActions.map(function(action, index) {
     return '<label class="check-row">'
       + '<input type="checkbox" ' + (action.done ? 'checked' : '')
       + ' onchange="parentToggleAdultAction(\'' + jsq(item.id) + '\', ' + index + ', this.checked)">'
       + '<span>' + esc(action.text) + '</span>'
       + '</label>';
-  }).join('') || '<div class="sub">No adult actions yet.</div>';
-  return '<div class="parent-calendar-inline-actions">'
-      + '<button class="btn ghost small" onclick="parentAddPrepItem(\'' + jsq(item.id) + '\')">+ Prep item</button>'
-      + '<button class="btn ghost small" onclick="parentAddAdultAction(\'' + jsq(item.id) + '\')">+ Adult action</button>'
+  }).join('');
+  return '<div class="parent-calendar-checklist"><strong>Prep lists</strong>' + prepHtml + '</div>'
+    + '<div class="parent-calendar-checklist"><strong>Adult actions</strong>' + adultHtml
+    + '<div class="input-row">'
+    + '<input type="text" id="adult-add-' + jsq(item.id) + '" placeholder="Add adult action" autocomplete="off">'
+    + '<button class="btn ghost small" onclick="parentAddAdultAction(\'' + jsq(item.id) + '\')">Add</button>'
     + '</div>'
-    + '<div class="parent-calendar-checklist"><strong>Prep lists</strong>' + prepHtml + '</div>'
-    + '<div class="parent-calendar-checklist"><strong>Adult actions</strong>' + adultHtml + '</div>';
+    + '</div>';
 }
 
 function renderParentCalendar() {
@@ -5200,6 +5214,28 @@ async function parentAddTask() {
   var dueInput = document.getElementById('p-due').value;
   var days     = cycle === 'weekly' ? selectedDays() : null;
   if (cycle === 'weekly' && !days.length) { toast('Pick at least one day.'); return; }
+  if (taskEditId) {
+    // Same form, edit mode. Points are validated strictly here: an edit that
+    // silently coerced garbage to 5 would rewrite a task's real value.
+    var editPoints = Number(document.getElementById('p-points').value);
+    if (!Number.isInteger(editPoints) || editPoints < 1) { toast('Points must be a positive integer.'); return; }
+    var updated = await api({
+      action: 'updateTask', parentId: session.personId, parentPin: session.pin,
+      taskId: taskEditId,
+      title: title,
+      points: editPoints,
+      cycle: cycle,
+      days: days,
+      windowId: cycle === 'oneoff' ? null : (document.getElementById('p-window').value || null),
+      kidId: document.getElementById('p-kid').value,
+      dueBy: cycle === 'oneoff' && dueInput ? new Date(dueInput).toISOString() : null,
+    });
+    // On failure the form keeps the edit: nothing typed is lost.
+    if (toastApiError(updated)) return;
+    toast('Task updated! \u270f\ufe0f');
+    cancelTaskEdit();
+    return;
+  }
   var payload  = {
     action: 'addTask', parentId: session.personId, parentPin: session.pin,
     kidId:  document.getElementById('p-kid').value,
@@ -5439,24 +5475,16 @@ async function parentToggleAdultAction(itemId, actionIndex, checked) {
   });
 }
 
-async function parentAddPrepItem(itemId) {
-  var kids = kidsOnly();
-  if (kids.length === 0) { toast('Add a kid first.'); return; }
-  var choice = prompt('Which kid prep list?\n' + kids.map(function(kid, index) {
-    return (index + 1) + ') ' + avatarText(kid.emoji) + ' ' + kid.name;
-  }).join('\n'), '1');
-  if (choice === null) return;
-  var choiceIndex = Number(choice.trim()) - 1;
-  var kid = kids[choiceIndex];
-  if (!kid) { toast('Choose a valid kid number.'); return; }
-  var text = prompt('Prep item?');
-  if (text === null) return;
-  text = text.trim();
-  if (!text) { toast('Enter a prep item.'); return; }
+// Reads the kid's own inline input - the old numbered which-kid prompt and
+// the text prompt are gone (#164).
+async function parentAddPrepItem(itemId, kidId) {
+  var input = document.getElementById('prep-add-' + itemId + '-' + kidId);
+  var text = input ? input.value.trim() : '';
+  if (!text) { toast('Type the prep item first.'); if (input) input.focus(); return; }
   await parentUpdatePlanningItem(itemId, function(payload) {
-    var prepList = payload.prepLists.find(function(list) { return list.personId === kid.id; });
+    var prepList = payload.prepLists.find(function(list) { return list.personId === kidId; });
     if (!prepList) {
-      prepList = { personId: kid.id, items: [] };
+      prepList = { personId: kidId, items: [] };
       payload.prepLists.push(prepList);
     }
     prepList.items.push({ text: text, done: false });
@@ -5469,9 +5497,9 @@ async function parentSetPrepPoints(itemId, listIndex) {
   var item = (parentCalendarItems || []).find(function(entry) { return entry.id === itemId; });
   var current = item && item.prepLists && item.prepLists[listIndex]
     ? (Number(item.prepLists[listIndex].points) || 0) : 0;
-  var input = prompt('Points for getting this packed in time?', String(current || 10));
+  var input = await askText('Points for getting this packed in time?', String(current || 10), 'Set points');
   if (input === null) return;
-  var points = Number(input.trim());
+  var points = Number(String(input).trim());
   if (!Number.isInteger(points) || points < 0) { toast('Points must be a whole number.'); return; }
   await parentUpdatePlanningItem(itemId, function(payload) {
     if (!payload.prepLists[listIndex]) return;
@@ -5480,10 +5508,9 @@ async function parentSetPrepPoints(itemId, listIndex) {
 }
 
 async function parentAddAdultAction(itemId) {
-  var text = prompt('Adult action?');
-  if (text === null) return;
-  text = text.trim();
-  if (!text) { toast('Enter an adult action.'); return; }
+  var input = document.getElementById('adult-add-' + itemId);
+  var text = input ? input.value.trim() : '';
+  if (!text) { toast('Type the adult action first.'); if (input) input.focus(); return; }
   await parentUpdatePlanningItem(itemId, function(payload) {
     payload.adultActions.push({ text: text, done: false });
   }, 'Adult action added.');
@@ -5583,88 +5610,39 @@ function toastApiError(result) {
   return false;
 }
 
+// Editing reuses the allocate form - prefilled, button swapped to Save -
+// instead of the old chain of up to seven browser prompts (#164).
 async function parentEditTask(taskId) {
   var task = (state.tasks || []).find(function(t) { return t.id === taskId; });
   if (!task) { toast('Task not found.'); return; }
-  var title = prompt('Task title?', task.title);
-  if (title === null) return;
-  var trimmed = title.trim();
-  if (!trimmed) { toast('Type or speak a task first!'); return; }
-  var pointsInput = prompt('Points in this task?', String(task.points));
-  if (pointsInput === null) return;
-  var points = Number(pointsInput);
-  if (!Number.isInteger(points) || points < 1) { toast('Points must be a positive integer.'); return; }
-  var cycleOptions = ['daily', 'weekly', 'oneoff'];
-  var cyclePrompt = 'How often?\n1) Every day  2) Certain days  3) One-off';
-  var cycleInput = prompt(cyclePrompt, String(cycleOptions.indexOf(task.cycle) + 1));
-  if (cycleInput === null) return;
-  var cycleIndex = Number(cycleInput.trim()) - 1;
-  var cycle = cycleOptions[cycleIndex];
-  if (!cycle) { toast('Choose 1, 2, or 3 for how often.'); return; }
-  var kids = kidsOnly();
-  var kidPrompt = 'Reassign kid\n' + kids.map(function(k, index) {
-    return (index + 1) + ') ' + avatarText(k.emoji) + ' ' + k.name;
-  }).join('  ');
-  var kidInput = prompt(kidPrompt, String(kids.findIndex(function(k) { return k.id === task.kidId; }) + 1));
-  if (kidInput === null) return;
-  var kidIndex = Number(kidInput.trim()) - 1;
-  var kid = kids[kidIndex];
-  if (!kid) { toast('Choose a valid kid number.'); return; }
-  var windowId = null;
-  if (cycle !== 'oneoff') {
-    var windows = (state.windows || []);
-    var windowPrompt = 'Due by which window?\n'
-      + windows.map(function(w, index) { return (index + 1) + ') ' + w.label + ' — by ' + w.closesAt; }).join('  ');
-    var currentWindowIndex = windows.findIndex(function(w) { return w.id === (task.windowId || state.fallbackWindowId); });
-    var windowInput = prompt(windowPrompt, String((currentWindowIndex === -1 ? windows.length : currentWindowIndex + 1)));
-    if (windowInput === null) return;
-    var windowChoice = windows[Number(windowInput.trim()) - 1];
-    if (!windowChoice) { toast('Choose a window number.'); return; }
-    windowId = windowChoice.id;
-  }
-  var days = null;
-  if (cycle === 'weekly') {
-    var daysPrompt = 'Which days? Numbers separated by commas.\n'
-      + WEEKDAYS.map(function(d, index) { return (index + 1) + ') ' + d.short; }).join('  ');
-    var existing = Array.isArray(task.days) && task.days.length
-      ? WEEKDAYS.map(function(d, index) { return task.days.indexOf(d.value) === -1 ? null : index + 1; })
-          .filter(Boolean).join(',')
-      : '';
-    var daysInput = prompt(daysPrompt, existing);
-    if (daysInput === null) return;
-    var picked = daysInput.split(',')
-      .map(function(part) { return Number(part.trim()); })
-      .filter(function(n) { return Number.isInteger(n) && n >= 1 && n <= 7; })
-      .map(function(n) { return WEEKDAYS[n - 1].value; });
-    days = [...new Set(picked)];
-    if (!days.length) { toast('Pick at least one day, 1 to 7.'); return; }
-  }
-  var dueBy = null;
-  if (cycle === 'oneoff') {
-    var dueInput = prompt('Due date and time? Leave blank to clear it.', task.cycle === 'oneoff' && task.dueBy ? task.dueBy : '');
-    if (dueInput === null) return;
-    dueInput = dueInput.trim();
-    if (dueInput) {
-      var dueDate = new Date(dueInput);
-      if (Number.isNaN(dueDate.getTime())) { toast('Choose a valid due date and time.'); return; }
-      dueBy = dueDate.toISOString();
-    }
-  }
-  var result = await api({
-    action: 'updateTask',
-    parentId: session.personId,
-    parentPin: session.pin,
-    taskId,
-    title: trimmed,
-    points,
-    cycle,
-    days,
-    windowId,
-    kidId: kid.id,
-    dueBy,
+  taskEditId = taskId;
+  document.getElementById('p-title').value = task.title || '';
+  document.getElementById('p-kid').value = task.kidId || '';
+  document.getElementById('p-cycle').value = task.cycle || 'daily';
+  document.getElementById('p-window').value = task.windowId || state.fallbackWindowId || '';
+  Array.prototype.forEach.call(document.querySelectorAll('#p-days input'), function(box) {
+    box.checked = Array.isArray(task.days) && task.days.indexOf(Number(box.value)) !== -1;
   });
-  if (toastApiError(result)) return;
-  toast('Task updated! ✏️');
+  document.getElementById('p-due').value = task.cycle === 'oneoff' && task.dueBy
+    ? planningDateToLocalInput(task.dueBy) : '';
+  document.getElementById('p-points').value = task.points || 5;
+  updateDueVisibility();
+  document.getElementById('p-task-submit').textContent = 'Save changes';
+  document.getElementById('p-task-cancel').classList.remove('hidden');
+  var card = document.getElementById('p-title').closest('.parent-card');
+  if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelTaskEdit() {
+  taskEditId = null;
+  document.getElementById('p-title').value = '';
+  document.getElementById('p-due').value = '';
+  document.getElementById('p-points').value = 5;
+  Array.prototype.forEach.call(document.querySelectorAll('#p-days input'), function(box) {
+    box.checked = false;
+  });
+  document.getElementById('p-task-submit').textContent = 'Allocate task';
+  document.getElementById('p-task-cancel').classList.add('hidden');
 }
 
 async function parentAddReward() {
@@ -5672,6 +5650,19 @@ async function parentAddReward() {
   if (!title) { toast('Enter a reward title first!'); return; }
   var cost = Number(document.getElementById('p-reward-cost').value);
   if (!Number.isInteger(cost) || cost < 1) { toast('Cost must be at least 1 point.'); return; }
+  if (rewardEditId) {
+    var updated = await api({
+      action: 'updateReward', parentId: session.personId, parentPin: session.pin,
+      rewardId: rewardEditId,
+      title: title,
+      cost: cost,
+      needsApproval: document.getElementById('p-reward-approval').checked,
+    });
+    if (toastApiError(updated)) return;
+    toast('Reward updated! \u2728');
+    cancelRewardEdit();
+    return;
+  }
   var result = await api({
     action: 'addReward',
     parentId: session.personId,
@@ -5687,35 +5678,27 @@ async function parentAddReward() {
   toast('Reward added! 🎁');
 }
 
+// Same form-reuse pattern as tasks and calendar items (#164).
 async function parentEditReward(rewardId) {
   var reward = (state.rewards || []).find(function(r) { return r.id === rewardId; });
   if (!reward) { toast('Reward not found.'); return; }
-  var title = prompt('Reward title?', reward.title);
-  if (title === null) return;
-  var trimmed = title.trim();
-  if (!trimmed) { toast('Enter a reward title first!'); return; }
-  var costInput = prompt('Cost in points?', String(reward.cost));
-  if (costInput === null) return;
-  var cost = Number(costInput);
-  if (!Number.isInteger(cost) || cost < 1) { toast('Cost must be at least 1 point.'); return; }
-  var approvalInput = prompt('Needs your approval? Type yes or no.', reward.needsApproval ? 'yes' : 'no');
-  if (approvalInput === null) return;
-  var normalized = approvalInput.trim().toLowerCase();
-  if (!['y', 'yes', 'n', 'no'].includes(normalized)) {
-    toast('Type yes or no for approval.');
-    return;
-  }
-  var result = await api({
-    action: 'updateReward',
-    parentId: session.personId,
-    parentPin: session.pin,
-    rewardId,
-    title: trimmed,
-    cost,
-    needsApproval: normalized === 'y' || normalized === 'yes',
-  });
-  if (toastApiError(result)) return;
-  toast('Reward updated! ✨');
+  rewardEditId = rewardId;
+  document.getElementById('p-reward-title').value = reward.title || '';
+  document.getElementById('p-reward-cost').value = reward.cost || 1;
+  document.getElementById('p-reward-approval').checked = reward.needsApproval !== false;
+  document.getElementById('p-reward-submit').textContent = 'Save changes';
+  document.getElementById('p-reward-cancel').classList.remove('hidden');
+  var card = document.getElementById('p-reward-title').closest('.parent-card');
+  if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelRewardEdit() {
+  rewardEditId = null;
+  document.getElementById('p-reward-title').value = '';
+  document.getElementById('p-reward-cost').value = 20;
+  document.getElementById('p-reward-approval').checked = true;
+  document.getElementById('p-reward-submit').textContent = 'Add reward';
+  document.getElementById('p-reward-cancel').classList.add('hidden');
 }
 
 async function parentDeleteReward(rewardId) {

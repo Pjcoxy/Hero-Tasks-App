@@ -801,11 +801,17 @@ an empty box bounces focus to the box instead of going through — a kid sent
 back with no reason has nothing to act on. Re-renders carry typed notes (and
 focus) over so a background refresh cannot eat a half-written note.
 
-### Calendar item editing
+### Editing is always the form (#164)
 
-Editing an event or reminder reuses the add form - prefilled, the button
-swapped to "Save changes" with a Cancel beside it (`planningEditId` holds the
-mode) - never a chain of browser prompts. Dates are `datetime-local` inputs
+Every Parent HQ editor reuses its add form in edit mode - prefilled, the
+button swapped to "Save changes" with a Cancel beside it - never a chain of
+browser prompts. Calendar items (`planningEditId`), tasks (`taskEditId`) and
+rewards (`rewardEditId`) all follow the same pattern; a failed save keeps
+the edit open so nothing typed is lost. Prep and adult-action items are
+added through inline rows in each kid's own checklist section (no which-kid
+dialog), and prep points use the in-app `askText` modal. Native `prompt()` /
+`confirm()` are banned outright - `check-frontend.js` fails the build if one
+appears. Dates are `datetime-local` inputs
 (the phone's own graphical picker), and a live line under Starts echoes the
 weekday - "Sunday 30 Aug · 9:00am" - so the day of week is visible after
 the picker closes. Saving round-trips through `planningUpdatePayload` so prep

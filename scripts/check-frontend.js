@@ -135,6 +135,13 @@ check(/\.tag\.waiting\s*\{\s*background:\s*var\(--warning-wash\);\s*color:\s*var
 check(/item\.kind === 'chore' && item\.kidId === kid\.id && parentCalendarDayKey\(item\) === todayKey/.test(html), 'today-by-kid renderer filters today chore occurrences per kid');
 check(/switchParentTab\('calendar'\)|switchParentTab\\\('calendar'\\\)/.test(html), 'today-by-kid offers a View calendar action');
 check(/parentEditTask\(\\'/.test(html), 'task rows wire an Edit button');
+// #164: every editor is a form or the in-app modal; the native dialogs that
+// printed the Azure hostname at the family are banned outright.
+{
+  const calls = [...html.matchAll(/[^a-zA-Z.'"](prompt|confirm)\(/g)]
+    .filter((m) => !/\/\//.test(html.slice(html.lastIndexOf('\n', m.index) + 1, m.index)));
+  check(calls.length === 0, `no native prompt()/confirm() calls remain (${calls.length} found)`);
+}
 check(/id="k-voice-reminder-btn"/.test(html), 'kid Home tab includes a voice reminder button');
 check(/id="voice-reminder-modal"/.test(html), 'voice reminder confirmation modal exists');
 check(/window\.SpeechRecognition \|\| window\.webkitSpeechRecognition/.test(html), 'voice reminder flow feature-detects SpeechRecognition support');
@@ -189,155 +196,195 @@ function extractFunctionSource(name) {
 }
 
 async function runParentEditTaskChecks() {
-  const source = extractFunctionSource('parentEditTask');
-  check(Boolean(source), 'parentEditTask exists');
-  if (!source) return;
+  // #164: editing reuses the allocate form (prefilled, Save/Cancel) instead
+  // of a prompt chain. The real page functions are lifted out and driven
+  // against a fake DOM, so these checks fail if the page's behaviour drifts.
+  const sources = {};
+  for (const name of ['parentEditTask', 'cancelTaskEdit', 'parentAddTask', 'updateDueVisibility', 'selectedDays', 'planningDateToLocalInput']) {
+    sources[name] = extractFunctionSource(name);
+    check(Boolean(sources[name]), `${name} source found for the sandbox`);
+    if (!sources[name]) return;
+  }
+  check(!/[^a-zA-Z.'"]prompt\(/.test(sources.parentEditTask + sources.parentAddTask), 'the task editor never calls native prompt()');
 
-  // parentEditTask builds its prompt text through avatarText(), so the real
-  // implementation is lifted out of the page rather than stubbed - otherwise
-  // these checks would pass against behaviour the app does not have.
-  const fallbackSrc = (html.match(/var SVG_AVATAR_FALLBACK = \{[\s\S]*?\};/) || [''])[0];
-  // avatarText() also resolves photo avatars now, so the sandbox needs the
-  // table and the lookup or the eval'd copy throws on an undefined helper.
-  const imgAvatarsSrc = (html.match(/var IMG_AVATARS = \{[\s\S]*?\n\};/) || [''])[0];
-  const imgAvatarFnSrc = extractFunctionSource('imgAvatar');
-  const avatarTextSrc = extractFunctionSource('avatarText');
-  check(Boolean(fallbackSrc), 'SVG_AVATAR_FALLBACK found for the sandbox');
-  check(Boolean(imgAvatarsSrc), 'IMG_AVATARS found for the sandbox');
-  check(Boolean(imgAvatarFnSrc), 'imgAvatar source found for the sandbox');
-  check(Boolean(avatarTextSrc), 'avatarText source found for the sandbox');
+  function makeDom() {
+    const elements = {};
+    for (const id of ['p-title', 'p-kid', 'p-cycle', 'p-window', 'p-due', 'p-points',
+      'p-task-submit', 'p-task-cancel', 'p-due-wrap', 'p-days-wrap', 'p-window-wrap']) {
+      elements[id] = {
+        value: '',
+        checked: false,
+        textContent: '',
+        classList: {
+          set: new Set(['p-task-cancel'].includes(id) ? ['hidden'] : []),
+          toggle(cls, on) { if (on === undefined) on = !this.set.has(cls); on ? this.set.add(cls) : this.set.delete(cls); },
+          add(cls) { this.set.add(cls); },
+          remove(cls) { this.set.delete(cls); },
+          contains(cls) { return this.set.has(cls); },
+        },
+        closest: () => null,
+        focus: () => {},
+      };
+    }
+    const dayBoxes = [1, 2, 3, 4, 5, 6, 0].map((v) => ({ value: String(v), checked: false }));
+    return {
+      elements,
+      dayBoxes,
+      document: {
+        getElementById: (id) => elements[id] || null,
+        querySelectorAll: (sel) => (sel === '#p-days input' ? dayBoxes
+          : sel === '#p-days input:checked' ? dayBoxes.filter((b) => b.checked) : []),
+      },
+    };
+  }
 
-  const factory = new Function(
-    'state',
-    'session',
-    'prompt',
-    'toast',
-    'kidsOnly',
-    'api',
-    'toastApiError',
-    `${fallbackSrc}\n${imgAvatarsSrc}\n${imgAvatarFnSrc}\n${avatarTextSrc}\n` +
-      source.replace(/^async function parentEditTask/, 'return async function')
-  );
-
-  async function exercise(prompts, options) {
-    const promptQueue = prompts.slice();
-    const promptCalls = [];
+  function makeHarness(options) {
+    const dom = makeDom();
     const toasts = [];
     const apiCalls = [];
-    const state = options && options.state ? options.state : {
+    const state = (options && options.state) || {
       tasks: [
         { id: 'task1', title: 'Feed the dog', points: 5, cycle: 'daily', kidId: 'toby', dueBy: null },
       ],
+      windows: [{ id: 'evening', label: 'Evening', closesAt: '21:00' }],
+      fallbackWindowId: 'evening',
       people: [
-        { id: 'peter', role: 'parent', name: 'Peter', emoji: '🧔' },
-        { id: 'toby', role: 'kid', name: 'Toby', emoji: '🐾' },
-        { id: 'ollie', role: 'kid', name: 'Ollie', emoji: '🖨️' },
+        { id: 'peter', role: 'parent', name: 'Peter' },
+        { id: 'toby', role: 'kid', name: 'Toby' },
+        { id: 'ollie', role: 'kid', name: 'Ollie' },
       ],
     };
-    const taskId = options && options.taskId ? options.taskId : 'task1';
     const apiResult = options && Object.prototype.hasOwnProperty.call(options, 'apiResult')
-      ? options.apiResult
-      : { ok: true };
-    const prompt = (message, defaultValue) => {
-      promptCalls.push({ message, defaultValue });
-      return promptQueue.length ? promptQueue.shift() : null;
-    };
-    const toast = (message) => {
-      toasts.push(message);
-    };
-    const api = async (payload) => {
-      apiCalls.push(payload);
-      return apiResult;
-    };
-    const toastApiError = (result) => {
-      if (result && result.ok === false) {
-        toast(result.error || 'Something went wrong.');
-        return true;
-      }
-      return false;
-    };
-    const parentEditTask = factory(
+      ? options.apiResult : { ok: true };
+    const factory = new Function(
+      'state', 'session', 'document', 'toast', 'api', 'toastApiError',
+      `let taskEditId = null;\n${sources.planningDateToLocalInput}\n${sources.selectedDays}\n${sources.updateDueVisibility}\n${sources.cancelTaskEdit}\n${sources.parentAddTask}\n${sources.parentEditTask}\n`
+        + 'return { edit: parentEditTask, save: parentAddTask, cancel: cancelTaskEdit, editId: () => taskEditId };'
+    );
+    const handles = factory(
       state,
       { personId: 'peter', pin: '1234' },
-      prompt,
-      toast,
-      () => state.people.filter((person) => person.role === 'kid'),
-      api,
-      toastApiError
+      dom.document,
+      (message) => toasts.push(message),
+      async (payload) => { apiCalls.push(payload); return apiResult; },
+      (result) => {
+        if (result && result.ok === false) { toasts.push(result.error || 'Something went wrong.'); return true; }
+        return false;
+      }
     );
-    await parentEditTask(taskId);
-    return { promptCalls, toasts, apiCalls };
+    return { dom, toasts, apiCalls, handles };
   }
 
   {
-    const run = await exercise(['Feed the cat', '8', '3', '2', '2026-08-25T18:00']);
-    check(run.apiCalls.length === 1, 'parentEditTask submits a successful edit once');
+    // Prefill and the happy-path save.
+    const run = makeHarness();
+    await run.handles.edit('task1');
+    check(run.dom.elements['p-title'].value === 'Feed the dog', 'edit prefills the title');
+    check(run.dom.elements['p-kid'].value === 'toby', 'edit prefills the kid');
+    check(run.dom.elements['p-cycle'].value === 'daily', 'edit prefills the cycle');
+    check(run.dom.elements['p-task-submit'].textContent === 'Save changes', 'edit swaps the button to Save changes');
+    check(!run.dom.elements['p-task-cancel'].classList.contains('hidden'), 'edit reveals the Cancel button');
+
+    run.dom.elements['p-title'].value = '  Feed the cat  ';
+    run.dom.elements['p-points'].value = '8';
+    run.dom.elements['p-cycle'].value = 'oneoff';
+    run.dom.elements['p-kid'].value = 'ollie';
+    run.dom.elements['p-due'].value = '2026-08-25T18:00';
+    await run.handles.save();
+    check(run.apiCalls.length === 1, 'saving an edit submits once');
     if (run.apiCalls.length === 1) {
       const payload = run.apiCalls[0];
-      check(payload.action === 'updateTask', 'parentEditTask calls updateTask');
-      check(payload.title === 'Feed the cat', 'parentEditTask trims and sends title');
-      check(payload.points === 8, 'parentEditTask sends parsed integer points');
-      check(payload.cycle === 'oneoff', 'parentEditTask maps cycle choice to oneoff');
-      check(payload.kidId === 'ollie', 'parentEditTask reassigns to the chosen kid');
-      check(payload.dueBy === new Date('2026-08-25T18:00').toISOString(), 'parentEditTask converts dueBy to ISO');
+      check(payload.action === 'updateTask', 'saving an edit calls updateTask');
+      check(payload.title === 'Feed the cat', 'saving trims and sends the title');
+      check(payload.points === 8, 'saving sends parsed integer points');
+      check(payload.cycle === 'oneoff', 'saving sends the chosen cycle');
+      check(payload.kidId === 'ollie', 'saving reassigns to the chosen kid');
+      check(payload.windowId === null, 'a one-off carries no window');
+      check(payload.dueBy === new Date('2026-08-25T18:00').toISOString(), 'saving converts dueBy to ISO');
     }
-    check(run.promptCalls[2] && run.promptCalls[2].defaultValue === '1', 'cycle prompt defaults to the current cycle number');
-    check(run.promptCalls[3] && run.promptCalls[3].defaultValue === '1', 'kid prompt defaults to the current kid number');
-    check(run.promptCalls[4] && run.promptCalls[4].defaultValue === '', 'new one-off due prompt starts blank when the task had no due date');
-    check(run.toasts.includes('Task updated! ✏️'), 'parentEditTask toasts success after a clean update');
+    check(run.toasts.includes('Task updated! \u270f\ufe0f'), 'saving toasts success');
+    check(run.handles.editId() === null, 'a clean save leaves edit mode');
+    check(run.dom.elements['p-task-submit'].textContent === 'Allocate task', 'the button reads Allocate task again');
   }
 
   {
-    const run = await exercise(['   ']);
+    // Blank title aborts with the add-task copy.
+    const run = makeHarness();
+    await run.handles.edit('task1');
+    run.dom.elements['p-title'].value = '   ';
+    await run.handles.save();
     check(run.apiCalls.length === 0, 'blank edited task title aborts before API call');
     check(run.toasts.includes('Type or speak a task first!'), 'blank edited task title reuses add-task validation copy');
   }
 
   {
-    const run = await exercise(['Feed the cat', '0']);
+    // Invalid points abort.
+    const run = makeHarness();
+    await run.handles.edit('task1');
+    run.dom.elements['p-points'].value = '0';
+    await run.handles.save();
     check(run.apiCalls.length === 0, 'invalid task points abort before API call');
     check(run.toasts.includes('Points must be a positive integer.'), 'invalid task points show the expected toast');
   }
 
   {
-    const run = await exercise(['Feed the cat', '8', '9']);
-    check(run.apiCalls.length === 0, 'invalid cycle choice aborts before API call');
-    check(run.toasts.includes('Choose 1, 2, or 3 for how often.'), 'invalid cycle choice shows the expected toast');
+    // Weekly with no days aborts.
+    const run = makeHarness();
+    await run.handles.edit('task1');
+    run.dom.elements['p-cycle'].value = 'weekly';
+    await run.handles.save();
+    check(run.apiCalls.length === 0, 'weekly with no days aborts before API call');
+    check(run.toasts.includes('Pick at least one day.'), 'weekly with no days shows the expected toast');
   }
 
   {
-    const run = await exercise(['Feed the cat', '8', '1', '9']);
-    check(run.apiCalls.length === 0, 'invalid kid choice aborts before API call');
-    check(run.toasts.includes('Choose a valid kid number.'), 'invalid kid choice shows the expected toast');
-  }
-
-  {
-    const run = await exercise(['Feed the room', '4', '3', '1', ''], {
+    // Existing one-off due is prefilled; clearing it sends null.
+    const run = makeHarness({
       state: {
         tasks: [
           { id: 'task1', title: 'Clean room', points: 6, cycle: 'oneoff', kidId: 'toby', dueBy: '2026-08-24T10:00:00.000Z' },
         ],
+        windows: [{ id: 'evening', label: 'Evening', closesAt: '21:00' }],
+        fallbackWindowId: 'evening',
         people: [
-          { id: 'peter', role: 'parent', name: 'Peter', emoji: '🧔' },
-          { id: 'toby', role: 'kid', name: 'Toby', emoji: '🐾' },
-          { id: 'ollie', role: 'kid', name: 'Ollie', emoji: '🖨️' },
+          { id: 'peter', role: 'parent', name: 'Peter' },
+          { id: 'toby', role: 'kid', name: 'Toby' },
         ],
       },
     });
+    await run.handles.edit('task1');
+    check(run.dom.elements['p-due'].value !== '', 'existing one-off due date is pre-filled');
+    run.dom.elements['p-due'].value = '';
+    await run.handles.save();
     check(run.apiCalls.length === 1 && run.apiCalls[0].dueBy === null, 'blank one-off due date clears dueBy');
-    check(run.promptCalls[4] && run.promptCalls[4].defaultValue === '2026-08-24T10:00:00.000Z', 'existing one-off due date is pre-filled');
   }
 
   {
-    const run = await exercise([null]);
-    check(run.apiCalls.length === 0, 'cancelling the first prompt aborts without calling the API');
-    check(run.toasts.length === 0, 'cancelling the first prompt exits quietly');
+    // Cancel leaves edit mode quietly, no API call.
+    const run = makeHarness();
+    await run.handles.edit('task1');
+    run.handles.cancel();
+    check(run.apiCalls.length === 0, 'cancelling an edit never calls the API');
+    check(run.handles.editId() === null, 'cancelling leaves edit mode');
+    check(run.toasts.length === 0, 'cancelling exits quietly');
   }
 
   {
-    const run = await exercise([], { taskId: 'missing' });
-    check(run.apiCalls.length === 0, 'missing task aborts before API call');
+    // Missing task aborts without entering edit mode.
+    const run = makeHarness();
+    await run.handles.edit('missing');
     check(run.toasts.includes('Task not found.'), 'missing task shows the not-found toast');
+    check(run.handles.editId() === null, 'missing task never enters edit mode');
+  }
+
+  {
+    // A failed save keeps the edit open so nothing typed is lost.
+    const run = makeHarness({ apiResult: { ok: false, error: 'nope' } });
+    await run.handles.edit('task1');
+    run.dom.elements['p-title'].value = 'Feed the cat';
+    await run.handles.save();
+    check(run.toasts.includes('nope'), 'a failed save surfaces the API error');
+    check(run.handles.editId() === 'task1', 'a failed save keeps the edit open');
   }
 }
 
