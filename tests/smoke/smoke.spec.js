@@ -639,10 +639,11 @@ test('a plain approve goes straight through with no dialog', async ({ page }) =>
   await expect(card).toBeHidden();
 });
 
-// A kid-added extra has no task behind it, so its name lives on the
-// completion itself. Recent activity fell straight to 'Mission' for those,
-// which made a rejected "Eat food" unrecognisable to the kid it went back to.
-test('a rejected extra comes back to the kid by name, with the note', async ({ page }) => {
+// A sent-back elective stays on offer. Rejecting an extra prices the redo
+// (in-app modal, after the note); the kid gets a Try-again card on Home with
+// the points and the note, and one tap puts the same row back in front of
+// the parent, offer intact.
+test('a sent-back elective sits with the kid, points on offer, until resubmitted', async ({ page }) => {
   await page.evaluate(async () => {
     const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
       method: 'POST',
@@ -655,17 +656,43 @@ test('a rejected extra comes back to the kid by name, with the note', async ({ p
   await pickPerson(page, 'Peter');
 
   const card = page.locator('#p-pending .parent-card').filter({ hasText: 'Washed the car' });
-  await card.locator('.approve-note').fill('Still soapy — rinse it and show me.');
+  await card.locator('.approve-note').fill('Still soapy \u2014 rinse it and show me.');
   await card.getByRole('button', { name: /Try again/ }).click();
+
+  // The pricing step, in the app's own modal.
+  await expect(page.locator('#ask-modal')).toBeVisible();
+  await expect(page.locator('#ask-title')).toContainText(/Worth how many points/);
+  await page.locator('#ask-input').fill('15');
+  await page.locator('#ask-ok').click();
   await expect(card).toBeHidden();
 
+  // The kid's side: a Try-again card with the offer and the note.
   await page.getByRole('button', { name: /Switch user/ }).click();
   await pickPerson(page, 'Ollie');
-  const row = page.locator('#k-activity .task', { hasText: 'Washed the car' });
-  await expect(row).toBeVisible();
-  await expect(row).toContainText(/try again/i);
-  await expect(row).toContainText('Still soapy — rinse it and show me.');
-  await expect(page.locator('#k-activity')).not.toContainText(/^Mission$/);
+  const redo = page.locator('#k-redo .task', { hasText: 'Washed the car' });
+  await expect(redo).toBeVisible();
+  await expect(redo).toContainText('15 pts');
+  await expect(redo).toContainText('Still soapy \u2014 rinse it and show me.');
+  // And it also reads as sent back in Recent activity, by name.
+  await expect(page.locator('#k-activity .task', { hasText: 'Washed the car' })).toBeVisible();
+
+  // One tap resubmits; the card leaves Home.
+  await redo.getByRole('button', { name: /check again/i }).click();
+  await expect(redo).toBeHidden();
+
+  // Back in front of the parent, offer intact. (The kid header's switch has
+  // its own accessible name, "Switch to a different person".)
+  await page.getByRole('button', { name: /Switch/ }).first().click();
+  await pickPerson(page, 'Peter');
+  const again = page.locator('#p-pending .parent-card').filter({ hasText: 'Washed the car' });
+  await expect(again).toBeVisible();
+  await expect(again).toContainText('15 pts');
+
+  // Tidy: approve it so later premises hold.
+  await again.getByRole('button', { name: /^\u2713 Approve/ }).click();
+  await expect(page.locator('#ask-modal')).toBeVisible();
+  await page.locator('#ask-ok').click();
+  await expect(again).toBeHidden();
 });
 
 // #174. The app installs on desktops. With no maximum width a task row

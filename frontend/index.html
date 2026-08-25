@@ -1649,6 +1649,9 @@ button.parent-list-row:active { transform: scale(0.99); }
             <div id="k-glance-week"></div>
           </section>
         </div>
+        <!-- Sent-back electives: the offer stays open, no window, until the
+             kid redoes it or bows out. -->
+        <div id="k-redo"></div>
         <div class="kid-home-actions">
           <button class="btn ghost" onclick="addExtraPrompt()">➕ I did something extra!</button>
           <button class="btn voice-trigger" id="k-voice-reminder-btn" onclick="openVoiceReminderFlow()">🎤 Add a voice reminder</button>
@@ -2518,6 +2521,7 @@ function renderKid(kid) {
   renderRewardShop(kid, balance);
   renderRewardProgress(balance);
   renderRedemptions(kid);
+  renderRedoExtras(kid);
   renderRecentActivity(kid);
   renderKidCalendar(kid);
   renderKidGlance(kid);
@@ -4146,7 +4150,10 @@ function renderParent(person) {
         + '<div class="parent-copy">'
         + '<strong>' + esc(kid.name) + '</strong>'
         + '<div>' + esc(c.title) + (isExtra ? ' <span class="tag extra">kid-added</span>' : '') + '</div>'
-        + '<div class="sub">' + c.date + (isExtra ? '' : ' · worth ' + c.points + ' pts') + '</div>'
+        + '<div class="sub">' + c.date
+        + (isExtra
+            ? (c.points ? ' · offered ' + c.points + ' pts' : '')
+            : ' · worth ' + c.points + ' pts') + '</div>'
         + '</div>'
         + '</div>'
         + '<input class="approve-note" id="p-note-' + c.id + '" type="text" maxlength="280"'
@@ -4553,6 +4560,42 @@ async function addExtraPrompt() {
   if (!title || !title.trim()) return;
   toast('Sent to your grown-up! ⏳');
   await api({ action: 'addExtra', kidId: session.personId, personId: session.personId, pin: session.pin, title: title.trim() });
+}
+
+// A sent-back elective is an open offer, not history: it sits on Home until
+// the kid redoes it or bows out. No window - electives have no deadline.
+function renderRedoExtras(kid) {
+  var el = document.getElementById('k-redo');
+  if (!el) return;
+  var redos = (state.completions || []).filter(function(c) {
+    return c.kidId === kid.id && !c.taskId && !c.planningItemId && c.status === 'rejected';
+  });
+  if (redos.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = '<h2 class="section-title">🔁 Try again</h2>' + redos.map(function(c) {
+    return '<div class="task done-rejected">'
+      + '<div class="tick" style="border-color:var(--warning);background:var(--warning-wash);pointer-events:none" aria-hidden="true">🔁</div>'
+      + '<div class="info">'
+      + '<div class="title">' + esc(c.title || 'Extra') + '</div>'
+      + '<div class="sub">' + (c.points ? '⭐ ' + c.points + ' pts when it’s done right' : 'Points decided when approved') + '</div>'
+      + (c.comment ? '<div class="decision-note needs-fixing">🔧 ' + esc(c.comment) + '</div>' : '')
+      + '<div class="approve-row">'
+      + '<button class="btn small" onclick="resubmitExtra(\'' + jsq(c.id) + '\', false)">Done it — check again</button>'
+      + '<button class="btn ghost small" onclick="resubmitExtra(\'' + jsq(c.id) + '\', true)">Not doing it</button>'
+      + '</div>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+async function resubmitExtra(completionId, giveUp) {
+  if (giveUp && !await askConfirm('Take this off your list?', 'Remove it')) return;
+  var result = await api({
+    action: 'redoExtra', personId: session.personId, pin: session.pin,
+    completionId: completionId, giveUp: !!giveUp,
+  });
+  if (toastApiError(result)) return;
+  toast(giveUp ? 'Off your list.' : 'Sent for checking! 🤞');
+  await refresh();
 }
 
 function newVoiceReminderDraft(overrides) {
@@ -5408,7 +5451,10 @@ async function parentApprove(completionId, isExtra) {
   if (isExtra) {
     // Was a raw prompt(), which shows the Azure hostname in the browser's own
     // dialog. Same bug that was fixed for the kid's 'I did something extra'.
-    points = await askText('How many points is this worth?', '5', 'Approve');
+    // A resubmitted elective already carries the offer made at send-back, so
+    // that is the default rather than a flat 5.
+    var priced = state.completions.find(function(c) { return c.id === completionId; });
+    points = await askText('How many points is this worth?', String((priced && priced.points) || 5), 'Approve');
     if (points === null) return;
   }
   await submitApproval(completionId, points, approvalNote(completionId));
@@ -5444,6 +5490,15 @@ async function parentReject(completionId) {
     if (noteInput) noteInput.focus();
     return;
   }
+  // Sending back an ELECTIVE keeps the offer alive: it asks what redoing it
+  // is worth, and those points sit on the kid's Try-again card. Chores carry
+  // their points on the task, so they skip this.
+  var rejecting = state.completions.find(function(c) { return c.id === completionId; });
+  var offer;
+  if (rejecting && !rejecting.taskId && !rejecting.planningItemId) {
+    offer = await askText('Worth how many points when it\u2019s done right?', String(rejecting.points || 5), 'Send it back');
+    if (offer === null) return;
+  }
 
   var prevCompletions = state.completions.slice();
   state.completions = prevCompletions.filter(function(c) { return c.id !== completionId; });
@@ -5452,7 +5507,7 @@ async function parentReject(completionId) {
   try {
     res = await api({
       action: 'reject', parentId: session.personId, parentPin: session.pin,
-      completionId: completionId, comment: comment,
+      completionId: completionId, comment: comment, points: offer,
     });
   } catch (e) {
     state.completions = prevCompletions; render(); toast('Connection problem — try again.'); return;
