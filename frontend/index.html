@@ -1007,6 +1007,7 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
+  position: relative; /* anchors the pull-to-refresh pill, like .kid-main */
 }
 .parent-panel {
   min-height: 100%;
@@ -1524,6 +1525,32 @@ button.parent-list-row:active { transform: scale(0.99); }
 @media (min-width: 80rem) {
   html { font-size: 112.5%; }
 }
+
+/* ─── Pull to refresh ─────────────────────────────────────────────────── */
+.ptr-pill {
+  position: absolute;
+  top: var(--space-2);
+  left: 50%;
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-left: -1.25rem;
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-lg);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-base) var(--ease-out);
+}
+.ptr-pill.refreshing .ptr-icon {
+  display: inline-block;
+  animation: ptr-spin 800ms linear infinite;
+}
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
 
 /* ─── Confetti canvas ─────────────────────────────────────────────────── */
 #confetti-canvas { position: fixed; inset: 0; pointer-events: none; z-index: 99; }
@@ -5861,6 +5888,73 @@ window.addEventListener('online',  function() { setOfflineIndicator(false); drai
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() { navigator.serviceWorker.register('sw.js').catch(function() {}); });
 }
+
+// ─── Pull to refresh ──────────────────────────────────────────────────────
+// The shell pins the page (body overflow hidden, overscroll contained), so
+// the browser's own pull-to-refresh never fires - this is the app's own.
+// Touch events only: it is a phone gesture, and desktop has reload. The
+// guarded preventDefault also covers older iOS that ignores
+// overscroll-behavior, and only fires while actually pulling from the top,
+// so normal scrolling is never touched.
+var PTR_THRESHOLD = 70;
+var PTR_DAMPING = 0.45;
+
+function attachPullToRefresh(container) {
+  if (!container) return;
+  var pill = document.createElement('div');
+  pill.className = 'ptr-pill';
+  pill.innerHTML = '<span class="ptr-icon">🔄</span>';
+  container.appendChild(pill);
+  var startY = null;
+  var pull = 0;
+  var busy = false;
+
+  function reset() {
+    pill.style.transition = '';
+    pill.style.opacity = '0';
+    pill.style.transform = '';
+  }
+
+  container.addEventListener('touchstart', function(e) {
+    if (busy || container.scrollTop > 0) { startY = null; return; }
+    startY = e.touches[0].clientY;
+    pull = 0;
+  }, { passive: true });
+
+  container.addEventListener('touchmove', function(e) {
+    if (busy || startY === null) return;
+    var dy = e.touches[0].clientY - startY;
+    if (dy <= 0 || container.scrollTop > 0) { pull = 0; reset(); return; }
+    pull = dy * PTR_DAMPING;
+    var shown = Math.min(pull, PTR_THRESHOLD + 20);
+    pill.style.transition = 'none'; // follow the finger, no lag
+    pill.style.opacity = String(Math.min(1, pull / PTR_THRESHOLD));
+    pill.style.transform = 'translateY(' + shown + 'px) rotate(' + Math.round(pull * 3) + 'deg)';
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  async function finish() {
+    if (busy || startY === null) return;
+    startY = null;
+    if (pull < PTR_THRESHOLD) { reset(); return; }
+    busy = true;
+    pill.style.transition = '';
+    pill.classList.add('refreshing');
+    pill.style.transform = 'translateY(' + PTR_THRESHOLD + 'px)';
+    try {
+      await refresh();
+    } finally {
+      pill.classList.remove('refreshing');
+      reset();
+      busy = false;
+    }
+  }
+  container.addEventListener('touchend', finish);
+  container.addEventListener('touchcancel', finish);
+}
+
+attachPullToRefresh(document.querySelector('.kid-main'));
+attachPullToRefresh(document.querySelector('.parent-main'));
 </script>
 </body>
 </html>

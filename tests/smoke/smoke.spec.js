@@ -695,6 +695,50 @@ test('a sent-back elective sits with the kid, points on offer, until resubmitted
   await expect(again).toBeHidden();
 });
 
+// The pinned shell suppresses the browser's own pull-to-refresh, so the app
+// provides its own: pull from the top of a scroll area, release past the
+// threshold, and it refreshes. A short pull snaps back and does nothing.
+test('pull down far enough refreshes; a short pull does not', async ({ page }) => {
+  await pickPerson(page, 'Toby');
+  await expect(page.locator('.kid-main .ptr-pill')).toHaveCount(1);
+  await expect(page.locator('.parent-main .ptr-pill')).toHaveCount(1);
+
+  const pullResult = await page.evaluate(async () => {
+    const main = document.querySelector('.kid-main');
+    const results = {};
+    const orig = window.refresh;
+    let hit = false;
+    window.refresh = async () => { hit = true; };
+    const send = (type, y) => {
+      const t = new Touch({ identifier: 1, target: main, clientX: 100, clientY: y });
+      main.dispatchEvent(new TouchEvent(type, {
+        touches: type === 'touchend' ? [] : [t],
+        changedTouches: [t],
+        bubbles: true,
+        cancelable: true,
+      }));
+    };
+    // Long pull: past the threshold.
+    send('touchstart', 100);
+    send('touchmove', 160);
+    send('touchmove', 320);
+    send('touchend', 320);
+    await new Promise((r) => setTimeout(r, 80));
+    results.longPull = hit;
+    // Short pull: under the threshold.
+    hit = false;
+    send('touchstart', 100);
+    send('touchmove', 140);
+    send('touchend', 140);
+    await new Promise((r) => setTimeout(r, 80));
+    results.shortPull = hit;
+    window.refresh = orig;
+    return results;
+  });
+  expect(pullResult.longPull, 'a long pull must refresh').toBe(true);
+  expect(pullResult.shortPull, 'a short pull must not refresh').toBe(false);
+});
+
 // #174. The app installs on desktops. With no maximum width a task row
 // stretched to ~1900px to hold thirty characters, at phone type scale.
 //
