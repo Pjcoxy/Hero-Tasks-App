@@ -999,6 +999,39 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   font-weight: var(--weight-bold);
   margin-bottom: var(--space-3);
 }
+.stat-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+.stat-tile {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  text-align: center;
+}
+.stat-num {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+}
+.stat-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--ink-muted);
+}
+/* A non-zero count is work waiting on the parent, so the tile warms up. */
+.stat-tile.attention { background: var(--warning-wash); }
+.stat-tile.attention .stat-num { color: var(--warning); }
+/* The decision cards only exist when a tile is non-zero; give them room
+   from the tile row without spending it when the containers are empty. */
+#p-pending:not(:empty),
+#p-reward-requests:not(:empty) { margin-top: var(--space-3); }
 .parent-card,
 .parent-list-card {
   background: var(--surface);
@@ -1703,11 +1736,21 @@ button.parent-list-row:active { transform: scale(0.99); }
       <!-- Work waiting on the parent comes first. This is the tab they land on,
            and everything below is context for a decision, not a decision. -->
       <section class="parent-section">
-        <h2 class="parent-section-title">Awaiting your approval</h2>
+        <!-- The two waiting-on-you counts sit side by side as tiles, so the
+             numbers read at a glance instead of two stacked sections spending
+             half a screen saying nothing is here. Cards render below the row
+             only when there is actually something to decide. -->
+        <div class="stat-row">
+          <div class="stat-tile" id="p-stat-approvals">
+            <span class="stat-num">0</span>
+            <span class="stat-label">Awaiting approval</span>
+          </div>
+          <div class="stat-tile" id="p-stat-rewards">
+            <span class="stat-num">0</span>
+            <span class="stat-label">Reward requests</span>
+          </div>
+        </div>
         <div id="p-pending"></div>
-      </section>
-      <section class="parent-section">
-        <h2 class="parent-section-title">Reward requests</h2>
         <div id="p-reward-requests"></div>
       </section>
       <section class="parent-section">
@@ -2314,6 +2357,14 @@ function cycleCompletion(task) {
 // same information as one pill.
 function buildEmptyPill(text) {
   return '<div class="pill-row pill-row-start"><span class="pill neutral">' + esc(text) + '</span></div>';
+}
+
+// The count tiles at the top of Approvals.
+function setStatTile(id, count) {
+  var tile = document.getElementById(id);
+  if (!tile) return;
+  tile.querySelector('.stat-num').textContent = count;
+  tile.classList.toggle('attention', count > 0);
 }
 
 function buildEmptyState(emoji, line1, line2) {
@@ -4135,8 +4186,9 @@ function renderParent(person) {
   renderParentApprovalsSummary();
 
   var el = document.getElementById('p-pending');
+  setStatTile('p-stat-approvals', pending.length);
   if (pending.length === 0) {
-    el.innerHTML = buildEmptyPill('All caught up');
+    el.innerHTML = '';
   } else {
     el.innerHTML = pending.map(function(c) {
       var kid = state.people.find(function(k) { return k.id === c.kidId; }) || { name: '?', emoji: '❓' };
@@ -4218,8 +4270,9 @@ function renderParent(person) {
       + '</div>';
   }).join('') || buildEmptyState('👧', 'Add a kid to start assigning tasks.', 'Once a kid is added, you can assign chores from this tab.');
 
+  setStatTile('p-stat-rewards', pendingRedemptions.length);
   document.getElementById('p-reward-requests').innerHTML = pendingRedemptions.length === 0
-    ? buildEmptyPill('0 requests')
+    ? ''
     : pendingRedemptions.map(function(r) {
         var kid = state.people.find(function(k) { return k.id === r.kidId; }) || { name: '?', emoji: '❓' };
         return '<div class="card parent-card">'

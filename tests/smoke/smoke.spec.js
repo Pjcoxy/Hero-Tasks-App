@@ -453,14 +453,21 @@ test('Parent HQ task rows have no reorder controls', async ({ page }) => {
 });
 
 // Approvals is the tab a parent lands on. What is waiting on them has to be at
-// the top of it, not below two sections of context.
+// the top of it, not below two sections of context. The two counts are tiles
+// side by side, not stacked sections - the row must actually be a row.
 test('Approvals opens with what is waiting on the parent, at the top', async ({ page }) => {
   await pickPerson(page, 'Peter');
 
+  const tiles = page.locator('#p-tab-approvals .parent-section').first().locator('.stat-tile');
+  await expect(tiles).toHaveCount(2);
+  await expect(tiles.first()).toContainText('Awaiting approval');
+  await expect(tiles.nth(1)).toContainText('Reward requests');
+  const a = await tiles.first().boundingBox();
+  const b = await tiles.nth(1).boundingBox();
+  expect(Math.abs(a.y - b.y)).toBeLessThan(4);
+
   const headings = await page.locator('#p-tab-approvals .parent-section-title').allTextContents();
-  expect(headings[0]).toMatch(/Awaiting your approval/);
-  expect(headings[1]).toMatch(/Reward requests/);
-  expect(headings.slice(2).join(' ')).toMatch(/Today, by kid/);
+  expect(headings[0]).toMatch(/Today, by kid/);
 });
 
 // A "Waiting on you" row was a plain div - it looked actionable and did
@@ -1389,10 +1396,13 @@ test('a kid with nothing on gets one pill, not an empty state', async ({ page })
   await expect(ollie.locator('.empty')).toHaveCount(0);
 });
 
-test('empty parent sections are a pill, not a paragraph', async ({ page }) => {
+// Zero is stated once, on the tile - the card containers below stay empty
+// rather than adding a pill or a paragraph to repeat it.
+test('empty waiting sections are a zero on the tile, not filler text', async ({ page }) => {
   await pickPerson(page, 'Peter');
-  await expect(page.locator('#p-reward-requests .pill')).toContainText('0 requests');
-  await expect(page.locator('#p-reward-requests')).not.toContainText('will show up here');
+  await expect(page.locator('#p-stat-rewards .stat-num')).toHaveText('0');
+  await expect(page.locator('#p-reward-requests')).toBeEmpty();
+  await expect(page.locator('#p-tab-approvals')).not.toContainText('will show up here');
 });
 
 // The kids have photos now; the approval card was still drawing the emoji
