@@ -3536,15 +3536,25 @@ async function loadKidCalendar(kid) {
   kidCalendarLoading = true;
   renderKidCalendar(kid);
   renderKidGlance(kid);
+  // The Home glance renders from this same fetch, and its promise is "today
+  // and the next seven days" whatever view the Calendar tab is in - a Day
+  // view must not empty the Home screen's This Week. Fetch the union of the
+  // calendar view's range and the glance's.
   var bounds = kidCalendarBounds();
+  var glanceStart = new Date();
+  glanceStart.setHours(0, 0, 0, 0);
+  var glanceEnd = addDays(glanceStart, 7);
+  glanceEnd.setHours(23, 59, 59, 999);
+  var fetchStart = bounds.start < glanceStart ? bounds.start : glanceStart;
+  var fetchEnd = bounds.end > glanceEnd ? bounds.end : glanceEnd;
   var result;
   try {
     result = await api({
       action: 'calendar',
       personId: session.personId,
       pin: session.pin,
-      start: bounds.start.toISOString(),
-      end: bounds.end.toISOString(),
+      start: fetchStart.toISOString(),
+      end: fetchEnd.toISOString(),
     });
   } catch (e) {
     kidCalendarLoading = false;
