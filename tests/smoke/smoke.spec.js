@@ -627,6 +627,29 @@ for (const bp of BREAKPOINTS) {
   });
 }
 
+// Emoji icons never tint, so colour alone cannot say which tab you are on:
+// the active tab carries a pill behind its icon (the Material bottom-nav
+// convention), and it must follow a tab switch.
+test('the active tab wears a pill behind its icon, and it moves on switch', async ({ page }) => {
+  await pickPerson(page, 'Toby');
+
+  // The pill fades via a CSS transition, so poll on its settled alpha
+  // rather than reading mid-fade: > 0.5 is worn, < 0.05 is bare.
+  const iconAlpha = (tab) => page.locator(`#tabbtn-${tab} .tab-icon`)
+    .evaluate((el) => {
+      const bg = getComputedStyle(el).backgroundColor;
+      const m = bg.match(/rgba?\([\d\s,]+?(?:,\s*([\d.]+))?\)/);
+      return m && m[1] !== undefined ? Number(m[1]) : (bg === 'rgba(0, 0, 0, 0)' ? 0 : 1);
+    });
+
+  await expect.poll(() => iconAlpha('home')).toBeGreaterThan(0.5);
+  await expect.poll(() => iconAlpha('missions')).toBeLessThan(0.05);
+
+  await page.locator('#tabbtn-missions').click();
+  await expect.poll(() => iconAlpha('missions')).toBeGreaterThan(0.5);
+  await expect.poll(() => iconAlpha('home')).toBeLessThan(0.05);
+});
+
 test('content is capped and centred on a wide screen, not stretched', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await pickPerson(page, 'Ollie');
