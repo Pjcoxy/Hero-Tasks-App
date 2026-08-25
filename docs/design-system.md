@@ -816,6 +816,10 @@ Concretely, in this app:
   meta, never for something a kid needs to read or act on.
 - **Round icon buttons in the tab bar**, at least 44px, well spaced. Icons alone
   are fine there; everywhere else an icon needs a label.
+- **The active tab wears a pill behind its icon** (`--brand-wash` on
+  `.tab-icon`, the Material bottom-nav convention) with the label in
+  `--brand`, bold. Colour alone cannot mark these tabs — the icons are emoji,
+  which never tint.
 
 ### Calibrating the age
 

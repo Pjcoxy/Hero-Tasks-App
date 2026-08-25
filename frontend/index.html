@@ -661,8 +661,18 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   padding: var(--space-2) var(--space-1);
 }
 .tab-btn:active { transform: scale(0.97); }
-.tab-btn .tab-icon { font-size: 1.4rem; line-height: 1; }
-.tab-btn.active { color: var(--brand); }
+/* The active indicator is a pill behind the icon (the Material bottom-nav
+   convention). Colour alone cannot mark these tabs: the icons are emoji,
+   which never tint, so without the pill only the tiny label changed. */
+.tab-btn .tab-icon {
+  font-size: 1.4rem;
+  line-height: 1;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.tab-btn.active { color: var(--brand); font-weight: var(--weight-bold); }
+.tab-btn.active .tab-icon { background: var(--brand-wash); }
 
 /* ─── Section titles ──────────────────────────────────────────────────── */
 .section-title {
