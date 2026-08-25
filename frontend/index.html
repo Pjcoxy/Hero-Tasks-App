@@ -2672,11 +2672,15 @@ function glanceEventCard(item, kidId) {
     var missed = (state.completions || []).some(function(c) {
       return c.id === 'prep-miss-' + item.id + '-' + occDate + '-' + kidId;
     });
+    // Prep opens on the day it is due - Thursday's "uniform on" is a
+    // Thursday action, not a Tuesday one. The server refuses early ticks
+    // too; this just stops the card offering them.
+    var notYetOpen = !!item.prepDueDate && item.prepDueDate > todayStr();
     // Ticks belong to one occurrence; a stale tickedFor means an untouched
     // week however the flags look.
     var ticksCount = list.tickedFor === occDate;
     var allTicked = ticksCount && list.items.every(function(entry) { return entry.done; });
-    var locked = missed || confirmed || !isLive;
+    var locked = missed || confirmed || !isLive || notYetOpen;
     var rows = list.items.map(function(entry, index) {
       var ticked = ticksCount && entry.done;
       return '<label class="prep-item' + (ticked ? ' done' : '') + (locked ? ' locked' : '') + '">'
@@ -2694,6 +2698,10 @@ function glanceEventCard(item, kidId) {
       chips.push('<span class="pill bad">⏳ Closed' + (dueLabel ? ' ' + esc(dueLabel) : '') + (list.points ? ' · ' + list.points + ' pts gone' : '') + '</span>');
     } else if (!isLive) {
       chips.push('<span class="pill neutral">Opens after this week\u2019s</span>');
+      if (list.points) chips.push('<span class="pill neutral">⭐ ' + list.points + '</span>');
+    } else if (notYetOpen) {
+      chips.push('<span class="pill neutral">🔒 Opens ' + esc(prepDueDayLabel(item))
+        + (item.prepDueTime ? ' · by ' + esc(prepDueTimeLabel(item)) : '') + '</span>');
       if (list.points) chips.push('<span class="pill neutral">⭐ ' + list.points + '</span>');
     } else {
       chips.push('<span class="pill warn">⏳ by ' + esc(dueLabel || 'the deadline') + '</span>');
@@ -2729,22 +2737,29 @@ function setTodayHeaderDate() {
   if (el) el.textContent = todayHeaderLabel();
 }
 
-function prepDueLabel(item) {
-  if (!item.prepDueDate || !item.prepDueTime) return '';
+function prepDueTimeLabel(item) {
+  if (!item.prepDueTime) return '';
   var parts = item.prepDueTime.split(':');
   var hour = Number(parts[0]);
   var suffix = hour >= 12 ? 'pm' : 'am';
   var displayHour = hour % 12 === 0 ? 12 : hour % 12;
-  var time = displayHour + (parts[1] === '00' ? '' : ':' + parts[1]) + suffix;
+  return displayHour + (parts[1] === '00' ? '' : ':' + parts[1]) + suffix;
+}
+
+function prepDueDayLabel(item) {
+  if (!item.prepDueDate) return '';
   var today = todayStr();
+  if (item.prepDueDate === today) return 'today';
   var tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   var tomorrowStr = tomorrow.getFullYear() + '-' + String(tomorrow.getMonth() + 1).padStart(2, '0') + '-' + String(tomorrow.getDate()).padStart(2, '0');
-  var day;
-  if (item.prepDueDate === today) day = 'today';
-  else if (item.prepDueDate === tomorrowStr) day = 'tomorrow';
-  else day = new Date(item.prepDueDate + 'T12:00:00').toLocaleDateString([], { weekday: 'short' });
-  return day + ' ' + time;
+  if (item.prepDueDate === tomorrowStr) return 'tomorrow';
+  return new Date(item.prepDueDate + 'T12:00:00').toLocaleDateString([], { weekday: 'short' });
+}
+
+function prepDueLabel(item) {
+  if (!item.prepDueDate || !item.prepDueTime) return '';
+  return prepDueDayLabel(item) + ' ' + prepDueTimeLabel(item);
 }
 
 async function tickPrep(planningItemId, itemIndex, done) {

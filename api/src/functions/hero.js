@@ -875,6 +875,15 @@ async function prepDeadlinePassed(item, now = new Date(), occ = null) {
   return Number.isFinite(lastClose) && localMinutes(now) >= lastClose;
 }
 
+// Prep opens at the start of the day it is due - "uniform on" for Thursday
+// Scouts is a Thursday action, not a Tuesday one. The deadline stays the only
+// knob: move it earlier and the open day moves with it.
+async function prepNotYetOpen(item, now = new Date(), occ = null) {
+  const occurrence = occ || currentOccurrence(item, now);
+  const { prepDueDate } = await prepDueParts(occurrence);
+  return todayStr(now) < prepDueDate;
+}
+
 // A kid ticking one item on their own prep list. requireSelf plus a check the
 // list is actually theirs - the parent-only updatePlanningItem stays the only
 // way to touch anyone else's.
@@ -894,6 +903,9 @@ async function tickPrepItem(req) {
     return { ok: false, error: 'No such item' };
   }
   const occ = currentOccurrence(item);
+  if (await prepNotYetOpen(item, new Date(), occ)) {
+    return { ok: false, error: 'Too early — this opens on the day it’s due.', notOpenYet: true };
+  }
   if (await prepDeadlinePassed(item, new Date(), occ)) {
     return { ok: false, error: 'Too late — packing closed.', windowClosed: true };
   }
@@ -926,6 +938,9 @@ async function confirmPrep(req) {
   const occ = currentOccurrence(item);
   if (list.tickedFor !== occ.date || !list.items.length || !list.items.every((entry) => entry.done)) {
     return { ok: false, error: 'Tick everything off first.' };
+  }
+  if (await prepNotYetOpen(item, new Date(), occ)) {
+    return { ok: false, error: 'Too early — this opens on the day it’s due.', notOpenYet: true };
   }
   if (await prepDeadlinePassed(item, new Date(), occ)) {
     return { ok: false, error: 'Too late — packing closed.', windowClosed: true };

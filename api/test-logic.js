@@ -2029,13 +2029,15 @@ async function main() {
   // points are gone but the event stays.
   const { ROUTES: R } = require('./src/functions/hero.js');
 
-  // Sunday soccer: two local days ahead, so tonight is not yet the night
-  // before and nothing can close it.
+  // Sunday soccer, two local days ahead - with the deadline overridden to
+  // tonight, which is also what OPENS it today: prep is tickable only on the
+  // day it is due, and the pinned clock reads ~noon.
   const inTwoDays = new Date(at('09:00').getTime() + 2 * 86400000);
   const soccerEvent = await R.addPlanningItem({
     parentId: 'peter', parentPin: '1234',
     type: 'event', title: 'Soccer', personId: 'ollie',
     startAt: inTwoDays.toISOString(),
+    prepDueBy: at('22:00').toISOString(),
     prepLists: [{ personId: 'ollie', points: 10, items: [
       { text: 'boots' }, { text: 'water bottle' },
     ] }],
@@ -2071,6 +2073,23 @@ async function main() {
   const prepRows = twice.completions.filter((c) => c.id === `prep-${soccerEvent.item.id}-${soccerOccDate}-ollie`);
   assert.strictEqual(prepRows.length, 1, 'and creates nothing new');
   console.log('\u2713 confirming twice cannot double the reward');
+
+  // Prep opens on the day it is due. Thursday Scouts' "uniform on" is not a
+  // Tuesday tick: with the default night-before deadline, an event two days
+  // out is due tomorrow, so today is too early - refused as such, not as
+  // "too late".
+  const scoutsSoon = await R.addPlanningItem({
+    parentId: 'peter', parentPin: '1234', type: 'event', title: 'Scouts night',
+    personId: 'toby', startAt: inTwoDays.toISOString(),
+    prepLists: [{ personId: 'toby', points: 3, items: [{ text: 'Uniform on' }] }],
+  });
+  assert.strictEqual(scoutsSoon.ok, true);
+  const tooEarlyTick = await R.tickPrepItem({
+    personId: 'toby', pin: '1234', planningItemId: scoutsSoon.item.id, itemIndex: 0, done: true,
+  });
+  assert.strictEqual(tooEarlyTick.ok, false, 'a tick before the due day is refused');
+  assert.strictEqual(tooEarlyTick.notOpenYet, true, 'and flagged too early, not too late');
+  console.log('\u2713 prep cannot be ticked before the day it is due');
 
   // The night before, after the last window: too late to tick or confirm,
   // and the sweep records the miss. Event TOMORROW, "now" tonight at 21:30.
@@ -2155,7 +2174,8 @@ async function main() {
   // separately each week, and last week's ticks never carry over.
   const { currentOccurrence } = require('./src/functions/hero.js');
 
-  const cubsStart2 = new Date(at('17:30').getTime() + 26 * 3600000); // tomorrow 19:30ish local? no: +26h from 17:30 today
+  // Tonight, so week one's prep is due (and therefore open) today.
+  const cubsStart2 = new Date(at('17:30').getTime() + 3 * 3600000);
   const weekly = await R.addPlanningItem({
     parentId: 'peter', parentPin: '1234', type: 'event', title: 'Weekly Cubs',
     personId: null, startAt: cubsStart2.toISOString(), recurrence: 'weekly',
