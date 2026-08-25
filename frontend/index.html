@@ -874,8 +874,20 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .mic-btn { background: var(--brand-wash); color: var(--brand); border-radius: var(--radius-md); width: 48px; min-width: 48px; font-size: 1.3rem; touch-action: manipulation; }
 .mic-btn.listening { background: var(--danger); color: var(--on-brand); animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: 0.6; } }
-.approve-row { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+.approve-row { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
 .approve-row .btn { flex: 1; }
+/* One note box serves both buttons: whichever is hit, the note rides along. */
+.approve-note {
+  width: 100%;
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink);
+}
 .tag { font-size: var(--text-xs); font-weight: var(--weight-bold); border-radius: var(--radius-full); padding: var(--space-1) var(--space-2); }
 .tag.extra { background: var(--brand-wash); color: var(--brand); }
 
@@ -4187,6 +4199,14 @@ function renderParent(person) {
 
   var el = document.getElementById('p-pending');
   setStatTile('p-stat-approvals', pending.length);
+  // A background refresh redraws this list; without carrying the values over
+  // it would eat a half-typed note. Focus comes back too, cursor at the end.
+  var draftNotes = {};
+  var focusedNoteId = null;
+  Array.prototype.forEach.call(el.querySelectorAll('.approve-note'), function(input) {
+    if (input.value) draftNotes[input.id] = input.value;
+    if (document.activeElement === input) focusedNoteId = input.id;
+  });
   if (pending.length === 0) {
     el.innerHTML = '';
   } else {
@@ -4202,13 +4222,25 @@ function renderParent(person) {
         + '<div class="sub">' + c.date + (isExtra ? '' : ' · worth ' + c.points + ' pts') + '</div>'
         + '</div>'
         + '</div>'
+        + '<input class="approve-note" id="p-note-' + c.id + '" type="text" maxlength="280"'
+        + ' placeholder="Add a note (optional)" autocomplete="off" aria-label="Note for ' + esc(kid.name) + '">'
         + '<div class="approve-row">'
         + '<button class="btn green small" onclick="parentApprove(\'' + c.id + '\', ' + isExtra + ')">✓ Approve' + (isExtra ? ' & set points' : '') + '</button>'
-        + '<button class="btn ghost small" onclick="parentApproveWithNote(\'' + c.id + '\', ' + isExtra + ')" aria-label="Approve with a note">💬 With note</button>'
-        + '<button class="btn red-ghost small" onclick="parentReject(\'' + c.id + '\')">✗ Nope</button>'
+        + '<button class="btn red-ghost small" onclick="parentReject(\'' + c.id + '\')">✗ Try again</button>'
         + '</div>'
         + '</div>';
     }).join('');
+    Object.keys(draftNotes).forEach(function(id) {
+      var input = document.getElementById(id);
+      if (input) input.value = draftNotes[id];
+    });
+    if (focusedNoteId) {
+      var focusedNote = document.getElementById(focusedNoteId);
+      if (focusedNote) {
+        focusedNote.focus();
+        focusedNote.setSelectionRange(focusedNote.value.length, focusedNote.value.length);
+      }
+    }
   }
 
   var windowSel = document.getElementById('p-window');
@@ -5437,6 +5469,13 @@ async function parentAddAdultAction(itemId) {
 // Approve with no note. The fast path stays one tap - most approvals have
 // nothing to say, and making every one of them go through a dialog would tax
 // the common case to serve the rare one.
+// The note box on the card feeds whichever button is hit. It is read-only for
+// the kid: a message about a decision already made, not a thread.
+function approvalNote(completionId) {
+  var input = document.getElementById('p-note-' + completionId);
+  return input ? input.value.trim() : '';
+}
+
 async function parentApprove(completionId, isExtra) {
   var points;
   if (isExtra) {
@@ -5445,20 +5484,7 @@ async function parentApprove(completionId, isExtra) {
     points = await askText('How many points is this worth?', '5', 'Approve');
     if (points === null) return;
   }
-  await submitApproval(completionId, points, '');
-}
-
-// Approve and say something. The note is read-only for the kid: it is a message
-// about a decision already made, not a thread.
-async function parentApproveWithNote(completionId, isExtra) {
-  var points;
-  if (isExtra) {
-    points = await askText('How many points is this worth?', '5', 'Next');
-    if (points === null) return;
-  }
-  var comment = await askText('Add a note for them (optional)', '', 'Approve');
-  if (comment === null) return;
-  await submitApproval(completionId, points, comment);
+  await submitApproval(completionId, points, approvalNote(completionId));
 }
 
 async function submitApproval(completionId, points, comment) {
@@ -5479,14 +5505,16 @@ async function submitApproval(completionId, points, comment) {
   }
 }
 
-// Declining always asks why. A red cross with no reason leaves the kid with
-// nothing to act on, so there is no path here that skips it - the API refuses
-// an empty comment too, so this is a courtesy, not the only guard.
+// Sending back still requires a reason. A red cross with no reason leaves the
+// kid with nothing to act on, so an empty note box bounces to the box rather
+// than through - the API refuses an empty comment too, so this is a courtesy,
+// not the only guard.
 async function parentReject(completionId) {
-  var comment = await askText('What do they need to do to get this approved?', '', 'Send it back');
-  if (comment === null) return;
-  if (!String(comment).trim()) {
+  var comment = approvalNote(completionId);
+  if (!comment) {
     toast('Tell them what to fix first.');
+    var noteInput = document.getElementById('p-note-' + completionId);
+    if (noteInput) noteInput.focus();
     return;
   }
 
