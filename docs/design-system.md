@@ -196,6 +196,16 @@ Every decorative animation sits behind:
 - View transition: the outgoing view fades to 0 and the incoming fades in with
   `translateY(8px) → 0`, `--dur-base`, `--ease-out`.
 
+### Pull to refresh
+
+Both scroll areas (`.kid-main`, `.parent-main`) carry the app's own
+pull-to-refresh (`attachPullToRefresh`): the pinned shell suppresses the
+browser's native one, so a `.ptr-pill` (surface, `--shadow-2`, 🔄) follows a
+damped pull from the top and a release past ~70px runs `refresh()`. Touch
+events only — desktop has reload — with a guarded `preventDefault` that
+fires only mid-pull from the top, so scrolling is untouched and older iOS
+without `overscroll-behavior` support still behaves. Transform/opacity only.
+
 ### Cards
 
 `--surface`, `--radius-lg`, `--shadow-1`, padding `--space-4`, gap `--space-3`
