@@ -801,6 +801,16 @@ an empty box bounces focus to the box instead of going through — a kid sent
 back with no reason has nothing to act on. Re-renders carry typed notes (and
 focus) over so a background refresh cannot eat a half-written note.
 
+### Calendar item editing
+
+Editing an event or reminder reuses the add form - prefilled, the button
+swapped to "Save changes" with a Cancel beside it (`planningEditId` holds the
+mode) - never a chain of browser prompts. Dates are `datetime-local` inputs
+(the phone's own graphical picker), and a live line under Starts echoes the
+weekday - "Sunday 30 Aug · 9:00am" - so the day of week is visible after
+the picker closes. Saving round-trips through `planningUpdatePayload` so prep
+lists, points and deadline overrides survive an unrelated edit.
+
 ### Stat tiles
 
 The counts waiting on the parent (approvals, reward requests) are two rounded
