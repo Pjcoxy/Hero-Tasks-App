@@ -94,6 +94,8 @@ stub(path.join(API_ROOT, 'node_modules/web-push'), {
 
 process.env.VAPID_PUBLIC_KEY = 'smoke-public';
 process.env.VAPID_PRIVATE_KEY = 'smoke-private';
+// Lets tests drive the real ingestEmailItem route, key and all.
+process.env.EMAIL_INGEST_KEY = 'smoke-ingest-key';
 
 const { ensureSeeded } = require(path.join(API_ROOT, 'src/lib/seed.js'));
 const { ROUTES, recordMisses } = require(path.join(API_ROOT, 'src/functions/hero.js'));

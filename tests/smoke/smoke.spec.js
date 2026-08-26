@@ -499,12 +499,15 @@ test('Approvals opens with what is waiting on the parent, at the top', async ({ 
   await pickPerson(page, 'Peter');
 
   const tiles = page.locator('#p-tab-approvals .parent-section').first().locator('.stat-tile');
-  await expect(tiles).toHaveCount(2);
+  await expect(tiles).toHaveCount(3);
   await expect(tiles.first()).toContainText('Awaiting approval');
   await expect(tiles.nth(1)).toContainText('Reward requests');
+  await expect(tiles.nth(2)).toContainText('From email');
   const a = await tiles.first().boundingBox();
   const b = await tiles.nth(1).boundingBox();
+  const c = await tiles.nth(2).boundingBox();
   expect(Math.abs(a.y - b.y)).toBeLessThan(4);
+  expect(Math.abs(a.y - c.y)).toBeLessThan(4);
 
   const headings = await page.locator('#p-tab-approvals .parent-section-title').allTextContents();
   expect(headings[0]).toMatch(/Today, by kid/);
@@ -1811,4 +1814,136 @@ test('tapping a day expands its agenda inline, without leaving the screen', asyn
   // Tapping the open day again closes it, so the grid never gets stuck open.
   await busy.click();
   await expect(agenda).toContainText('Tap a day');
+});
+
+// ───────────────────────── Email proposals (#41) ─────────────────────────
+
+// Drives the real ingest route with the harness key, exactly as the email
+// Function will. Distinct externalRefs per test: the store lives for the
+// whole run and same-email ingests are deliberately idempotent.
+async function seedProposal(page, overrides) {
+  return page.evaluate(async (extra) => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    const start = new Date();
+    start.setDate(start.getDate() + 2);
+    start.setHours(9, 0, 0, 0);
+    return post(Object.assign({
+      action: 'ingestEmailItem', ingestKey: 'smoke-ingest-key',
+      classification: 'kid-choice', type: 'event',
+      startAt: start.toISOString(),
+    }, extra));
+  }, overrides);
+}
+
+test('an email proposal reaches the parent queue with its payment details', async ({ page }) => {
+  await seedProposal(page, {
+    externalRef: 'smoke-email-hike', title: 'Smoke Track Hike', personId: 'ollie',
+    summary: 'Overnight hike with the unit.',
+    payments: [{ description: 'Hike fee', amount: '$5', bank: 'Westpac', bsb: '036-022', account: '624871', reference: 'Ollie' }],
+  });
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const tile = page.locator('#p-stat-proposals .stat-num');
+  await expect(tile).not.toHaveText('0');
+
+  const card = page.locator('#p-proposals .parent-card').filter({ hasText: 'Smoke Track Hike' });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('waiting on Ollie');
+  await expect(card).toContainText('Hike fee — $5');
+  await expect(card).toContainText('BSB: 036-022');
+  // The deadline the parent can adjust is a real input, prefilled or not.
+  await expect(card.locator('input.proposal-due')).toBeVisible();
+});
+
+test('a kid can put a hand up, and the parent card shows it', async ({ page }) => {
+  await seedProposal(page, {
+    externalRef: 'smoke-email-camp', title: 'Smoke Scout Camp', personId: 'toby',
+  });
+  await page.reload();
+  await pickPerson(page, 'Toby');
+
+  const kidCard = page.locator('#k-proposals .task').filter({ hasText: 'Smoke Scout Camp' });
+  await expect(kidCard).toBeVisible();
+  await kidCard.getByRole('button', { name: /I want to go/ }).click();
+  await expect(kidCard).toContainText('You said yes');
+
+  await page.getByRole('button', { name: /Switch/ }).click();
+  await pickPerson(page, 'Peter');
+  const parentCard = page.locator('#p-proposals .parent-card').filter({ hasText: 'Smoke Scout Camp' });
+  await expect(parentCard).toContainText('wants to go');
+});
+
+test('approving a proposal puts it on the calendar, badged as from email', async ({ page }) => {
+  await seedProposal(page, {
+    externalRef: 'smoke-email-fair', title: 'Smoke School Fair', personId: 'ollie',
+  });
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const card = page.locator('#p-proposals .parent-card').filter({ hasText: 'Smoke School Fair' });
+  await card.getByRole('button', { name: /Approve/ }).click();
+  await expect(card).toBeHidden();
+
+  await page.getByRole('button', { name: /^Calendar$/ }).first().click();
+  await expect(page.locator('#p-calendar-grid .cal-cell').first()).toBeVisible();
+  await page.evaluate(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 2);
+    parentCalendarSelectedDay = d.getFullYear() + '-'
+      + String(d.getMonth() + 1).padStart(2, '0') + '-'
+      + String(d.getDate()).padStart(2, '0');
+    renderParentCalendar();
+  });
+  const agenda = page.locator('#p-calendar-agenda');
+  const row = agenda.locator('.parent-list-row').filter({ hasText: 'Smoke School Fair' });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText('📧 from email');
+});
+
+test('declining a proposal removes it and publishes nothing', async ({ page }) => {
+  await seedProposal(page, {
+    externalRef: 'smoke-email-disco', title: 'Smoke School Disco', personId: 'ollie',
+  });
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const card = page.locator('#p-proposals .parent-card').filter({ hasText: 'Smoke School Disco' });
+  await card.getByRole('button', { name: /Decline/ }).click();
+  // The in-app confirm, never a native dialog.
+  await page.locator('#ask-modal').getByRole('button', { name: /Decline/ }).click();
+  await expect(card).toBeHidden();
+
+  await page.getByRole('button', { name: /^Calendar$/ }).first().click();
+  await expect(page.locator('#p-calendar-grid .cal-cell').first()).toBeVisible();
+  await page.evaluate(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 2);
+    parentCalendarSelectedDay = d.getFullYear() + '-'
+      + String(d.getMonth() + 1).padStart(2, '0') + '-'
+      + String(d.getDate()).padStart(2, '0');
+    renderParentCalendar();
+  });
+  await expect(page.locator('#p-calendar-agenda')).not.toContainText('Smoke School Disco');
+});
+
+test('a parent-direct email never asks the kid', async ({ page }) => {
+  await seedProposal(page, {
+    externalRef: 'smoke-email-ipad', title: 'Smoke iPad Payment',
+    classification: 'parent-direct', personId: 'toby',
+  });
+  await page.reload();
+  await pickPerson(page, 'Toby');
+  await expect(page.locator('#k-proposals')).not.toContainText('Smoke iPad Payment');
+
+  await page.getByRole('button', { name: /Switch/ }).click();
+  await pickPerson(page, 'Peter');
+  const card = page.locator('#p-proposals .parent-card').filter({ hasText: 'Smoke iPad Payment' });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('needs a parent');
+  await expect(card).not.toContainText('waiting on');
 });

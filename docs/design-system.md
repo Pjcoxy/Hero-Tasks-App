@@ -791,6 +791,37 @@ points on the task, bounce back under the existing window rules. A rejected
 prep confirmation resubmits through `confirmPrep` — the idempotency 409
 flips a rejected row back to pending instead of silently eating the redo.
 
+### Email proposals (#41)
+
+Things the email pipeline finds arrive as **proposals**, not calendar items.
+Until a parent approves, they are invisible everywhere except the two places
+that ask for a decision:
+
+- **Parent HQ · Approvals** gets a third stat tile (**From email**) and a
+  card per pending proposal: title with a 📧 mark, classification tag
+  (`kids choose` / `needs a parent`), when and who, the extracted summary,
+  any payment details in a bordered `.proposal-payment` block (bank, BSB,
+  account, reference — displayed for the parent to act on, never paid
+  automatically), a one-line prep preview, and a `datetime-local` input
+  prefilled with the proposed prep deadline. The parent's value wins on
+  approve. Kid-choice cards carry a waiting tag: `waiting on <kid>`,
+  `🙋 wants to go`, or `said not this time` — a parent can approve over the
+  top of any of them. Decline goes through the in-app confirm and archives
+  without publishing. Half-edited deadline inputs survive background
+  re-renders, same as approval notes.
+- **Kid Home** shows kid-choice proposals for that kid (or the whole family)
+  as a "📧 Coming up — want to go?" card with **🙋 I want to go!** /
+  **Not for me**. Answering changes only who is waiting — nothing publishes
+  until a parent approves. After a yes the card reads
+  "waiting on your grown-ups".
+
+Approved items are ordinary calendar items from that moment — prep
+deadlines, miss sweep, conflicts — and carry a small **📧 from email**
+marker on kid event cards and parent agenda rows. Informational emails
+(newsletters with dates) skip the queue entirely and land straight on the
+calendar with the same marker. The approvals badge at the top counts
+pending proposals along with approvals and reward requests.
+
 ### Decision notes
 
 Each pending approval card carries one optional note box (`.approve-note`)
