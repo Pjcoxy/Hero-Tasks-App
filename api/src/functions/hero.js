@@ -1,5 +1,5 @@
 const { app } = require('@azure/functions');
-const { randomUUID } = require('crypto');
+const { randomUUID, createHash } = require('crypto');
 const { container } = require('../lib/cosmos');
 const { ensureSeeded, HOUSEHOLD_ID } = require('../lib/seed');
 const { sendPush } = require('../lib/push');
@@ -191,6 +191,13 @@ async function getState() {
   const rewardDocs = (await queryHousehold('rewards')).filter((r) => r.type === 'reward' && r.active !== false);
   const allRewardRows = await queryHousehold('rewards');
   const redemptionDocs = allRewardRows.filter((r) => r.type === 'redemption');
+  // Email proposals still waiting on someone. Approved ones are ordinary
+  // active planning items and travel via the calendar; declined ones are done.
+  const proposalDocs = (await queryHousehold('planningItems')).filter((p) => (
+    p.source === 'email'
+    && p.active === false
+    && ['proposed', 'kid-interested'].includes(p.proposalState)
+  ));
 
   const windows = await getHouseholdWindows();
 
@@ -262,6 +269,28 @@ async function getState() {
       decidedAt: c.decidedAt || null,
     })),
     stats,
+    proposals: proposalDocs
+      .sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1))
+      .map((p) => ({
+        id: p.id,
+        type: p.type,
+        title: p.title,
+        startAt: p.startAt,
+        endAt: p.endAt || null,
+        allDay: !!p.allDay,
+        personId: p.personId ?? null,
+        classification: p.classification,
+        proposalState: p.proposalState,
+        summary: p.summary || null,
+        payments: p.payments || [],
+        prepLists: p.prepLists || [],
+        adultActions: p.adultActions || [],
+        proposedPrepDueBy: p.proposedPrepDueBy || null,
+        sourceMeta: p.sourceMeta || null,
+        kidResponse: p.kidResponse || null,
+        notes: p.notes || null,
+        createdAt: p.createdAt,
+      })),
     quietHours: household && household.quietHours ? household.quietHours : null,
     today: todayStr(),
   };
@@ -1048,6 +1077,208 @@ async function deletePlanningItem(req) {
   planningItem.active = false;
   await planningItems.item(req.planningItemId, HOUSEHOLD_ID).replace(planningItem);
   return { ok: true };
+}
+
+// ---- Email proposals (#41) -------------------------------------------------
+// Items the email pipeline found live in the same planningItems container but
+// start with active:false, which keeps them invisible to the calendar, kids'
+// lists and the miss sweep until a parent approves. proposalState tracks the
+// approval conversation; classification decides who gets asked.
+
+const PROPOSAL_CLASSIFICATIONS = ['kid-choice', 'parent-direct', 'informational'];
+
+function validatePayments(payments) {
+  if (payments === undefined || payments === null) return { ok: true, payments: [] };
+  if (!Array.isArray(payments)) return { ok: false, error: 'payments must be an array' };
+  const normalized = [];
+  for (const pay of payments) {
+    if (!pay || typeof pay !== 'object') return { ok: false, error: 'payments entries must be objects' };
+    const description = String(pay.description || '').trim();
+    const amount = String(pay.amount || '').trim();
+    if (!description || !amount) return { ok: false, error: 'payments need description and amount' };
+    normalized.push({
+      description,
+      amount,
+      bank: String(pay.bank || '').trim() || null,
+      accountName: String(pay.accountName || '').trim() || null,
+      bsb: String(pay.bsb || '').trim() || null,
+      account: String(pay.account || '').trim() || null,
+      reference: String(pay.reference || '').trim() || null,
+    });
+  }
+  return { ok: true, payments: normalized };
+}
+
+// The ingest Function calls this with EMAIL_INGEST_KEY, not a parent PIN - it
+// runs on a timer with nobody logged in. Refusing when the env var is unset
+// means a misconfigured deploy fails closed rather than accepting anything.
+async function ingestEmailItem(req) {
+  const key = process.env.EMAIL_INGEST_KEY;
+  if (!key || String(req.ingestKey || '') !== key) {
+    throw Object.assign(new Error('Bad ingest key'), { status: 401 });
+  }
+  const classification = String(req.classification || '').trim();
+  if (!PROPOSAL_CLASSIFICATIONS.includes(classification)) {
+    return { ok: false, error: `classification must be one of ${PROPOSAL_CLASSIFICATIONS.join(', ')}` };
+  }
+  const externalRef = String(req.externalRef || '').trim();
+  if (!externalRef) return { ok: false, error: 'externalRef is required' };
+  const paymentCheck = validatePayments(req.payments);
+  if (!paymentCheck.ok) return paymentCheck;
+
+  const validated = await validatePlanningPayload({ ...req, externalRef, source: 'email' });
+  if (!validated.ok) return validated;
+  if (validated.duplicate) return { ok: true, item: validated.duplicate, duplicate: true };
+
+  const item = validated.item;
+  // Same email + same event = same id, so re-reading a message the watermark
+  // missed becomes a 409 instead of a second card.
+  item.id = 'email-' + createHash('sha1').update(`${externalRef}|${item.title}`).digest('hex').slice(0, 24);
+  item.source = 'email';
+  item.classification = classification;
+  item.summary = String(req.summary || '').trim() || null;
+  item.payments = paymentCheck.payments;
+  item.proposedPrepDueBy = parseIso(req.proposedPrepDueBy);
+  item.sourceMeta = {
+    from: String(req.from || '').trim() || null,
+    subject: String(req.subject || '').trim() || null,
+    receivedAt: parseIso(req.receivedAt),
+  };
+  item.kidResponse = null;
+  // Informational items (newsletters, date announcements) skip the approval
+  // queue: they go straight onto the calendar as read-only context.
+  if (classification === 'informational') {
+    item.active = true;
+    item.proposalState = 'approved';
+  } else {
+    item.active = false;
+    item.proposalState = 'proposed';
+  }
+
+  try {
+    await container('planningItems').items.create(item);
+  } catch (err) {
+    if (err && err.code === 409) {
+      const { resource: existing } = await container('planningItems')
+        .item(item.id, HOUSEHOLD_ID)
+        .read()
+        .catch(() => ({ resource: null }));
+      return { ok: true, item: existing || item, duplicate: true };
+    }
+    throw err;
+  }
+
+  const quietHours = await getHouseholdQuietHours();
+  const people = await queryHousehold('people');
+  const parents = people.filter((p) => p.role === 'parent');
+  const notify = [];
+  if (classification === 'kid-choice') {
+    if (item.personId) {
+      notify.push(sendPushIfAllowed(item.personId, {
+        title: 'Something came up! 📧',
+        body: `${item.title} — want to go? Tap to have a look.`,
+        url: '/',
+      }, quietHours));
+    }
+    parents.forEach((parent) => notify.push(sendPushIfAllowed(parent.id, {
+      title: 'New from email 📧',
+      body: `${item.title} — waiting on ${item.personId ? 'a yes from the kids' : 'a decision'}`,
+      url: '/',
+    }, quietHours)));
+  } else if (classification === 'parent-direct') {
+    parents.forEach((parent) => notify.push(sendPushIfAllowed(parent.id, {
+      title: 'Needs a parent 📧',
+      body: item.title,
+      url: '/',
+    }, quietHours)));
+  } else if (item.personId) {
+    notify.push(sendPushIfAllowed(item.personId, {
+      title: 'On your calendar 📧',
+      body: item.title,
+      url: '/',
+    }, quietHours));
+  }
+  await Promise.all(notify);
+  return { ok: true, item };
+}
+
+// A kid saying "I want to go" (or not). Interest never publishes anything -
+// it flips the proposal to kid-interested so the parents' queue shows who's
+// keen, and the parents still make the call.
+async function respondProposal(req) {
+  const personId = String(req.personId || '').trim();
+  await requireSelf(personId, req.pin, personId);
+  const planningItems = container('planningItems');
+  const { resource: item } = await planningItems
+    .item(req.proposalId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!item || item.source !== 'email' || !['proposed', 'kid-interested'].includes(item.proposalState)) {
+    return { ok: false, error: 'Proposal not found' };
+  }
+  if (item.classification !== 'kid-choice') return { ok: false, error: 'This one is not up to the kids' };
+  if (item.personId && item.personId !== personId) return { ok: false, error: 'Not allowed' };
+
+  const wants = !!req.wants;
+  item.kidResponse = { personId, wants, at: new Date().toISOString() };
+  if (wants) item.proposalState = 'kid-interested';
+  await planningItems.item(item.id, HOUSEHOLD_ID).replace(item);
+
+  if (wants) {
+    const quietHours = await getHouseholdQuietHours();
+    const people = await queryHousehold('people');
+    const kid = people.find((p) => p.id === personId);
+    await Promise.all(people
+      .filter((p) => p.role === 'parent')
+      .map((parent) => sendPushIfAllowed(parent.id, {
+        title: 'Wants to go! 🙋',
+        body: `${kid ? kid.name : 'A kid'} wants to go to ${item.title}`,
+        url: '/',
+      }, quietHours)));
+  }
+  return getState();
+}
+
+// The parent decision. Approval is the moment the proposal becomes a real
+// calendar item: active flips true and everything downstream (calendar, prep
+// deadlines, miss sweep) starts treating it exactly like a hand-entered event.
+async function decideProposal(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const planningItems = container('planningItems');
+  const { resource: item } = await planningItems
+    .item(req.proposalId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!item || item.source !== 'email' || !['proposed', 'kid-interested'].includes(item.proposalState)) {
+    return { ok: false, error: 'Proposal not found' };
+  }
+
+  if (!req.approve) {
+    item.proposalState = 'declined';
+    item.decidedAt = new Date().toISOString();
+    await planningItems.item(item.id, HOUSEHOLD_ID).replace(item);
+    return { ok: true, item };
+  }
+
+  item.proposalState = 'approved';
+  item.decidedAt = new Date().toISOString();
+  item.active = true;
+  // The deadline the extractor proposed from the event's scale is only ever a
+  // default; the approving parent's value wins.
+  const prepDueBy = parseIso(req.prepDueBy) || item.proposedPrepDueBy || null;
+  if (prepDueBy) item.prepDueBy = prepDueBy;
+  await planningItems.item(item.id, HOUSEHOLD_ID).replace(item);
+
+  const { conflicts, suggestedTimes } = await getConflictsForItem(item);
+  if (item.personId) {
+    const quietHours = await getHouseholdQuietHours();
+    await sendPushIfAllowed(item.personId, {
+      title: "It's on! 🎉",
+      body: `${item.title} is on your calendar`,
+      url: '/',
+    }, quietHours);
+  }
+  return { ok: true, item, conflicts, suggestedTimes };
 }
 
 function startOfUtcDay(date) {
@@ -2047,6 +2278,9 @@ const ROUTES = {
   addPlanningItem,
   updatePlanningItem,
   deletePlanningItem,
+  ingestEmailItem,
+  respondProposal,
+  decideProposal,
   calendar,
   completeTask,
   uncomplete,
