@@ -2465,6 +2465,200 @@ async function main() {
   assert.strictEqual(ghostDecide.ok, false);
   console.log('✓ responding/deciding on a missing proposal fails cleanly');
 
+  // -------------------------------------------------------------------------
+  // The email ingest Function (#41 part 3). Gmail is mocked at the fetch
+  // layer and Claude at the client factory, so the run under test is the real
+  // pipeline: watermark, triage, attachments, extraction, ingest, dedupe.
+
+  const { runEmailIngest, configMissing } = require('./src/functions/emailIngest.js');
+  const emailPipeline = require('./src/lib/emailPipeline.js');
+
+  // Fail closed: no Gmail credentials = a logged skip, never a crash and
+  // never a half-configured network call.
+  delete process.env.GMAIL_CLIENT_ID;
+  const skipped = await runEmailIngest();
+  assert.strictEqual(skipped.skipped, true);
+  assert.ok(skipped.missing.includes('GMAIL_CLIENT_ID'));
+  console.log('✓ emailIngest skips cleanly when unconfigured');
+
+  process.env.GMAIL_CLIENT_ID = 'test-client';
+  process.env.GMAIL_CLIENT_SECRET = 'test-secret';
+  process.env.GMAIL_REFRESH_TOKEN = 'test-refresh';
+  process.env.LLM_API_KEY = 'test-llm-key';
+  // EMAIL_INGEST_KEY is already 'test-ingest-key' from the proposal tests.
+  assert.deepStrictEqual(configMissing(), []);
+
+  const b64url = (text) => Buffer.from(text, 'utf8').toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  const scoutStart = new Date(at('09:00').getTime() + 6 * 86400000);
+  const scoutsBody = 'Hi families, two events this term. Bibbulmun hike and Manjedal camp. Fees to Westpac BSB 036-022 acct 624871.';
+  const gmailStore = {
+    messages: [
+      { id: 'msg-scouts', threadId: 'thread-scouts' },
+      { id: 'msg-shoes', threadId: 'thread-shoes' },
+    ],
+    full: {
+      'msg-scouts': {
+        id: 'msg-scouts', threadId: 'thread-scouts',
+        internalDate: String(Date.now() - 60000),
+        payload: {
+          mimeType: 'multipart/mixed',
+          headers: [
+            { name: 'From', value: 'leader@scouts.example' },
+            { name: 'Subject', value: 'Term 3 events' },
+          ],
+          parts: [
+            { mimeType: 'text/plain', body: { data: b64url(scoutsBody) } },
+            { mimeType: 'application/pdf', filename: 'camp.pdf', body: { attachmentId: 'att-pdf', size: 1000 } },
+            { mimeType: 'application/octet-stream', filename: 'huge.bin', body: { attachmentId: 'att-huge', size: 99 * 1024 * 1024 } },
+          ],
+        },
+      },
+      'msg-shoes': {
+        id: 'msg-shoes', threadId: 'thread-shoes',
+        internalDate: String(Date.now() - 30000),
+        payload: {
+          mimeType: 'text/html',
+          headers: [
+            { name: 'From', value: 'promo@shoes.example' },
+            { name: 'Subject', value: 'SALE 50% off' },
+          ],
+          body: { data: b64url('<p>Buy <b>shoes</b> now</p>') },
+        },
+      },
+    },
+  };
+
+  const fetchLog = [];
+  const realFetch = global.fetch;
+  global.fetch = async (url, opts) => {
+    const u = String(url);
+    fetchLog.push(u);
+    const json = (obj) => ({ ok: true, status: 200, json: async () => obj, text: async () => JSON.stringify(obj) });
+    if (u.startsWith('https://oauth2.googleapis.com/token')) {
+      const params = new URLSearchParams(String(opts.body));
+      assert.strictEqual(params.get('refresh_token'), 'test-refresh');
+      return json({ access_token: 'test-access-token' });
+    }
+    if (u.includes('/messages?q=')) {
+      assert.ok(decodeURIComponent(u).includes('-in:spam'), 'spam and trash stay excluded');
+      return json({ messages: gmailStore.messages });
+    }
+    if (u.includes('/attachments/')) {
+      return json({ data: b64url('%PDF-1.4 fake camp form') });
+    }
+    const msgMatch = u.match(/\/messages\/([^/?]+)\?format=full/);
+    if (msgMatch) return json(gmailStore.full[msgMatch[1]]);
+    throw new Error('unexpected fetch in test: ' + u);
+  };
+
+  const ingestLlmCalls = [];
+  emailPipeline.setEmailClientFactory(() => ({
+    messages: {
+      create: async (req) => {
+        ingestLlmCalls.push(req);
+        if (req.model === emailPipeline.TRIAGE_MODEL) {
+          const prompt = req.messages[0].content;
+          const relevant = /scouts|Bibbulmun/i.test(prompt);
+          return { content: [{ type: 'text', text: JSON.stringify({ relevant, why: 'test' }) }] };
+        }
+        // Extraction: two events out of the one scouts email, the second with
+        // a payment block and a prep list drawn from the attachment.
+        const hikeStart = new Date(scoutStart);
+        const campStart = new Date(scoutStart.getTime() + 12 * 86400000);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              items: [
+                {
+                  classification: 'kid-choice', type: 'event', title: 'Bibbulmun Track Hike',
+                  personId: 'ollie', startAt: hikeStart.toISOString(), endAt: null,
+                  summary: 'Overnight hike, $5.',
+                  payments: [{ description: 'Hike fee', amount: '$5', bank: 'Westpac', bsb: '036-022', account: '624871', reference: 'Ollie' }],
+                  prepLists: [], adultActions: [{ text: 'Pay $5 hike fee' }],
+                  proposedPrepDueBy: new Date(hikeStart.getTime() - 86400000).toISOString(),
+                },
+                {
+                  classification: 'kid-choice', type: 'event', title: 'Manjedal Scout Camp',
+                  personId: 'ollie', startAt: campStart.toISOString(),
+                  endAt: new Date(campStart.getTime() + 2 * 86400000).toISOString(),
+                  summary: 'Three-day camp, $100.',
+                  payments: [{ description: 'Camp fee', amount: '$100', bank: 'Westpac', bsb: '036-022', account: '624871', reference: 'Ollie' }],
+                  prepLists: [{ personId: 'ollie', items: [{ text: 'Pack sleeping bag' }], points: 0 }],
+                  adultActions: [{ text: 'Pay $100 camp fee' }],
+                  proposedPrepDueBy: new Date(campStart.getTime() - 3 * 86400000).toISOString(),
+                },
+              ],
+            }),
+          }],
+        };
+      },
+    },
+  }));
+
+  const run1 = await runEmailIngest();
+  assert.strictEqual(run1.skipped, false);
+  assert.strictEqual(run1.checked, 2, 'both new messages were checked');
+  assert.strictEqual(run1.relevant, 1, 'only the scouts email survived triage');
+  assert.strictEqual(run1.ingested, 2, 'one email produced two proposals');
+  assert.strictEqual(run1.duplicates, 0);
+
+  const afterRun = await getState();
+  const hikeProp = afterRun.proposals.find((p) => p.title === 'Bibbulmun Track Hike');
+  const campProp = afterRun.proposals.find((p) => p.title === 'Manjedal Scout Camp');
+  assert.ok(hikeProp && campProp, 'both events are pending proposals');
+  assert.strictEqual(campProp.payments[0].bsb, '036-022', 'bank details travelled through');
+  assert.strictEqual(campProp.prepLists[0].items[0].text, 'Pack sleeping bag');
+  assert.strictEqual(hikeProp.sourceMeta.from, 'leader@scouts.example');
+  console.log('✓ one scouts email becomes two pending proposals, payments and prep intact');
+
+  // The deep read carried the PDF but never the oversized attachment.
+  const extractCall = ingestLlmCalls.find((call) => call.model === emailPipeline.EXTRACT_MODEL);
+  assert.ok(extractCall, 'extraction ran');
+  const blockTypes = extractCall.messages[0].content.map((block) => block.type);
+  assert.deepStrictEqual(blockTypes, ['text', 'document'], 'prompt plus the PDF, nothing else');
+  assert.ok(!fetchLog.some((u) => u.includes('att-huge')), 'the 99MB attachment was never fetched');
+  console.log('✓ attachments ride along as document blocks, size-capped');
+
+  // The promo email cost one triage call and nothing more.
+  const triageCalls = ingestLlmCalls.filter((call) => call.model === emailPipeline.TRIAGE_MODEL);
+  assert.strictEqual(triageCalls.length, 2, 'every new email is triaged once');
+  assert.strictEqual(ingestLlmCalls.length, 3, 'irrelevant mail never reaches the extractor');
+  console.log('✓ triage gates the expensive read');
+
+  // Second run: same inbox, nothing new - processedIds and the watermark
+  // mean no re-triage, and the deterministic ids would dedupe anyway.
+  ingestLlmCalls.length = 0;
+  const run2 = await runEmailIngest();
+  assert.strictEqual(run2.ingested, 0);
+  assert.strictEqual(ingestLlmCalls.length, 0, 'already-processed messages are not re-read');
+  console.log('✓ a second run re-reads nothing and creates nothing');
+
+  global.fetch = realFetch;
+  emailPipeline.resetEmailClientFactory();
+
+  // Attachment block mapping, including the xlsx-is-a-zip path.
+  const { attachmentToBlock, xlsxToText } = emailPipeline;
+  const pdfBlock = attachmentToBlock({ filename: 'form.pdf', mimeType: 'application/pdf' }, b64url('%PDF'));
+  assert.strictEqual(pdfBlock.type, 'document');
+  assert.strictEqual(pdfBlock.source.media_type, 'application/pdf');
+  const imgBlock = attachmentToBlock({ filename: 'photo.jpg', mimeType: 'image/jpeg' }, b64url('jpegbytes'));
+  assert.strictEqual(imgBlock.type, 'image');
+  const AdmZip = require('adm-zip');
+  const zip = new AdmZip();
+  zip.addFile('xl/sharedStrings.xml', Buffer.from('<sst><si><t>Sleeping bag</t></si><si><t>Torch</t></si></sst>'));
+  zip.addFile('xl/worksheets/sheet1.xml', Buffer.from('<worksheet><is><t>Water bottle</t></is></worksheet>'));
+  const xlsxB64url = zip.toBuffer().toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
+  const xlsxBlock = attachmentToBlock({ filename: 'packing.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, xlsxB64url);
+  assert.strictEqual(xlsxBlock.type, 'text');
+  assert.ok(/Sleeping bag/.test(xlsxBlock.text) && /Torch/.test(xlsxBlock.text) && /Water bottle/.test(xlsxBlock.text));
+  assert.strictEqual(attachmentToBlock({ filename: 'setup.exe', mimeType: 'application/octet-stream' }, b64url('MZ')), null,
+    'unreadable types are dropped, not sent');
+  assert.strictEqual(xlsxToText(Buffer.from('not a zip')), '', 'a corrupt xlsx degrades to empty, not a throw');
+  console.log('✓ attachments map to the right Claude blocks; junk is dropped');
+
   console.log('\nALL LOGIC TESTS PASSED');
 }
 
