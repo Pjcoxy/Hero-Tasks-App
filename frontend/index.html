@@ -1132,6 +1132,9 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 }
 .parent-list-row {
   display: flex;
+  /* Wrap, don't crush: on a phone the action buttons drop to their own line
+     below the details instead of squeezing the text column to nothing (#244). */
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-3);
@@ -1140,6 +1143,10 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 }
 .parent-list-row + .parent-list-row { margin-top: 0; }
 .parent-list-row .btn.small { flex: none; }
+/* A real basis keeps the text readable; when copy + buttons cannot share the
+   line, the buttons wrap rather than the words. */
+.parent-list-row .parent-copy { flex: 1 1 11rem; }
+.parent-list-row .parent-actions { margin-top: 0; margin-left: auto; }
 /* Only rows that lead somewhere become buttons; these strip the UA chrome so
    they sit flush with the inert rows beside them, and signal they are tappable. */
 button.parent-list-row {

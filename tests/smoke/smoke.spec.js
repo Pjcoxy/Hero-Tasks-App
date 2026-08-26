@@ -1947,3 +1947,44 @@ test('a parent-direct email never asks the kid', async ({ page }) => {
   await expect(card).toContainText('needs a parent');
   await expect(card).not.toContainText('waiting on');
 });
+
+// #244: on a phone-width screen the agenda row's three action buttons crushed
+// the text column to nothing and rendered over the title. The row must wrap:
+// buttons drop below the details when there is no room beside them.
+test('agenda action buttons never sit over the event title on a phone', async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 852 });
+  await seedCalendar(page);
+  await openParentCalendar(page);
+  await page.evaluate(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 2);
+    parentCalendarSelectedDay = d.getFullYear() + '-'
+      + String(d.getMonth() + 1).padStart(2, '0') + '-'
+      + String(d.getDate()).padStart(2, '0');
+    renderParentCalendar();
+  });
+
+  // seedCalendar has run for several earlier tests by now, so the day holds
+  // one 'Soccer match' per run of it - any single row will do.
+  const row = page.locator('#p-calendar-agenda .parent-list-row').filter({ hasText: 'Soccer match' }).first();
+  const title = row.locator('.parent-list-title');
+  await expect(title).toBeVisible();
+  const titleBox = await title.boundingBox();
+  for (const name of [/Checklist/, /^Edit$/, /^Delete$/]) {
+    const btn = row.getByRole('button', { name });
+    await expect(btn).toBeVisible();
+    const btnBox = await btn.boundingBox();
+    const overlaps = !(
+      btnBox.x >= titleBox.x + titleBox.width
+      || btnBox.x + btnBox.width <= titleBox.x
+      || btnBox.y >= titleBox.y + titleBox.height
+      || btnBox.y + btnBox.height <= titleBox.y
+    );
+    expect(overlaps, `button ${name} must not cover the title`).toBe(false);
+  }
+
+  // The text column keeps a readable width - before the fix the time/who line
+  // stacked one character per line.
+  const subBox = await row.locator('.sub').first().boundingBox();
+  expect(subBox.width).toBeGreaterThan(120);
+});
