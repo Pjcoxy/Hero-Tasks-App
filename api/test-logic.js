@@ -2274,7 +2274,196 @@ async function main() {
   });
   assert.strictEqual(recurringReminder.ok, true, 'reminder save: ' + JSON.stringify(recurringReminder));
   assert.strictEqual(recurringReminder.item.recurrence, null, 'recurrence is cleared on reminders');
-  console.log('\u2713 reminders cannot recur');
+  console.log('✓ reminders cannot recur');
+
+  // -------------------------------------------------------------------------
+  // Email proposals (#41). The ingest Function drops items in as inactive
+  // proposals; kids raise a hand, parents decide, and only approval makes the
+  // thing real on the calendar.
+
+  // No key configured = fail closed, whatever the caller sends.
+  delete process.env.EMAIL_INGEST_KEY;
+  await assert.rejects(
+    () => R.ingestEmailItem({ ingestKey: 'anything', classification: 'kid-choice' }),
+    (err) => err.status === 401,
+    'ingest must refuse when EMAIL_INGEST_KEY is unset'
+  );
+  process.env.EMAIL_INGEST_KEY = 'test-ingest-key';
+  await assert.rejects(
+    () => R.ingestEmailItem({ ingestKey: 'wrong-key', classification: 'kid-choice' }),
+    (err) => err.status === 401,
+    'ingest must refuse a wrong key'
+  );
+  console.log('✓ ingestEmailItem fails closed without the right key');
+
+  const hikeStart = new Date(at('09:00').getTime() + 5 * 86400000);
+  pushCalls.length = 0;
+  const hike = await R.ingestEmailItem({
+    ingestKey: 'test-ingest-key',
+    classification: 'kid-choice',
+    externalRef: 'gmail-thread-hike-1',
+    type: 'event',
+    title: 'Bibbulmun Track Hike',
+    personId: 'ollie',
+    startAt: hikeStart.toISOString(),
+    endAt: new Date(hikeStart.getTime() + 6 * 3600000).toISOString(),
+    summary: 'Overnight hike with the unit. $5, packing list attached.',
+    payments: [{
+      description: 'Hike fee', amount: '$5', bank: 'Westpac',
+      accountName: 'Willetton Scout Unit', bsb: '036-022', account: '624871',
+      reference: 'Ollie',
+    }],
+    prepLists: [{ personId: 'ollie', items: [{ text: 'Pack sleeping bag' }, { text: 'Fill water bottles' }], points: 10 }],
+    adultActions: [{ text: 'Pay $5 hike fee' }],
+    proposedPrepDueBy: new Date(hikeStart.getTime() - 2 * 86400000).toISOString(),
+    from: 'leader@scouts.example',
+    subject: 'Term 3 hikes',
+    receivedAt: new Date().toISOString(),
+  });
+  assert.strictEqual(hike.ok, true, 'ingest: ' + JSON.stringify(hike));
+  assert.ok(hike.item.id.startsWith('email-'), 'proposal ids are deterministic email- ids');
+  assert.strictEqual(hike.item.active, false, 'a kid-choice proposal starts inactive');
+  assert.strictEqual(hike.item.proposalState, 'proposed');
+  assert.strictEqual(hike.item.payments[0].bsb, '036-022', 'payment details survive normalisation');
+  assert.strictEqual(hike.item.prepLists[0].points, 10, 'prep list points survive');
+
+  let proposalsState = await getState();
+  assert.ok(proposalsState.proposals.some((p) => p.id === hike.item.id), 'state lists the pending proposal');
+  const hikeCal = await R.calendar({
+    parentId: 'peter', parentPin: '1234',
+    start: new Date(hikeStart.getTime() - 86400000).toISOString(),
+    end: new Date(hikeStart.getTime() + 86400000).toISOString(),
+  });
+  assert.ok(!hikeCal.items.some((row) => row.id === hike.item.id),
+    'an unapproved proposal never reaches the calendar');
+  console.log('✓ ingested kid-choice proposal is pending, visible in state, off the calendar');
+
+  const kidChoicePushes = pushCalls
+    .filter((call) => call.type === 'send')
+    .map((call) => JSON.parse(call.payload));
+  assert.ok(kidChoicePushes.some((p) => p.title === 'Something came up! 📧'),
+    'the kid hears about a kid-choice proposal');
+  assert.ok(kidChoicePushes.some((p) => p.title === 'New from email 📧'),
+    'parents hear about it too');
+
+  const rerun = await R.ingestEmailItem({
+    ingestKey: 'test-ingest-key',
+    classification: 'kid-choice',
+    externalRef: 'gmail-thread-hike-1',
+    type: 'event',
+    title: 'Bibbulmun Track Hike',
+    personId: 'ollie',
+    startAt: hikeStart.toISOString(),
+  });
+  assert.strictEqual(rerun.ok, true);
+  assert.strictEqual(rerun.duplicate, true, 'same email + title is a duplicate, not a second card');
+  assert.strictEqual(rerun.item.id, hike.item.id);
+  assert.strictEqual((await getState()).proposals.filter((p) => p.id === hike.item.id).length, 1);
+  console.log('✓ re-ingesting the same email is idempotent');
+
+  const wrongKidRespond = await R.respondProposal({
+    personId: 'toby', pin: '1234', proposalId: hike.item.id, wants: true,
+  });
+  assert.strictEqual(wrongKidRespond.ok, false, "another kid can't answer for Ollie");
+
+  pushCalls.length = 0;
+  const ollieWants = await R.respondProposal({
+    personId: 'ollie', pin: '1234', proposalId: hike.item.id, wants: true,
+  });
+  assert.strictEqual(ollieWants.ok, true);
+  const hikeAfterRespond = (await getState()).proposals.find((p) => p.id === hike.item.id);
+  assert.strictEqual(hikeAfterRespond.proposalState, 'kid-interested');
+  assert.strictEqual(hikeAfterRespond.kidResponse.wants, true);
+  const interestPushes = pushCalls
+    .filter((call) => call.type === 'send')
+    .map((call) => JSON.parse(call.payload))
+    .filter((p) => p.title === 'Wants to go! 🙋');
+  assert.ok(interestPushes.length >= 1, 'parents are told Ollie wants to go');
+  assert.ok(/Ollie wants to go to Bibbulmun Track Hike/.test(interestPushes[0].body));
+  console.log('✓ kid interest flips the proposal to kid-interested and pings parents');
+
+  const parentDeadline = new Date(hikeStart.getTime() - 86400000).toISOString();
+  pushCalls.length = 0;
+  const hikeApproved = await R.decideProposal({
+    parentId: 'peter', parentPin: '1234', proposalId: hike.item.id,
+    approve: true, prepDueBy: parentDeadline,
+  });
+  assert.strictEqual(hikeApproved.ok, true, 'approve: ' + JSON.stringify(hikeApproved));
+  assert.strictEqual(hikeApproved.item.active, true, 'approval publishes the item');
+  assert.strictEqual(hikeApproved.item.proposalState, 'approved');
+  assert.strictEqual(hikeApproved.item.prepDueBy, parentDeadline, "the parent's deadline beats the proposed one");
+  assert.ok(Array.isArray(hikeApproved.conflicts), 'approval reports conflicts like any calendar add');
+  assert.ok(!(await getState()).proposals.some((p) => p.id === hike.item.id),
+    'an approved proposal leaves the pending list');
+  const hikeCal2 = await R.calendar({
+    parentId: 'peter', parentPin: '1234',
+    start: new Date(hikeStart.getTime() - 86400000).toISOString(),
+    end: new Date(hikeStart.getTime() + 86400000).toISOString(),
+  });
+  assert.ok(hikeCal2.items.some((row) => row.id === hike.item.id && row.source === 'email'),
+    'the approved item now appears on the calendar');
+  assert.ok(pushCalls.some((call) => call.type === 'send'
+    && JSON.parse(call.payload).title === "It's on! 🎉"), 'the kid hears the yes');
+  const decideAgain = await R.decideProposal({
+    parentId: 'peter', parentPin: '1234', proposalId: hike.item.id, approve: true,
+  });
+  assert.strictEqual(decideAgain.ok, false, 'a decided proposal cannot be decided twice');
+  console.log('✓ parent approval publishes the item with the chosen prep deadline');
+
+  // Parent-direct: kids cannot answer; declining archives without publishing.
+  const ipadStart = new Date(at('09:00').getTime() + 8 * 86400000);
+  const ipad = await R.ingestEmailItem({
+    ingestKey: 'test-ingest-key',
+    classification: 'parent-direct',
+    externalRef: 'gmail-thread-ipad-1',
+    type: 'event',
+    title: 'School iPad payment due',
+    personId: 'toby',
+    startAt: ipadStart.toISOString(),
+  });
+  assert.strictEqual(ipad.ok, true);
+  const kidOnParentDirect = await R.respondProposal({
+    personId: 'toby', pin: '1234', proposalId: ipad.item.id, wants: true,
+  });
+  assert.strictEqual(kidOnParentDirect.ok, false, 'parent-direct is not up to the kids');
+  const declined = await R.decideProposal({
+    parentId: 'peter', parentPin: '1234', proposalId: ipad.item.id, approve: false,
+  });
+  assert.strictEqual(declined.ok, true);
+  assert.strictEqual(declined.item.proposalState, 'declined');
+  assert.strictEqual(declined.item.active, false, 'a declined proposal never publishes');
+  assert.ok(!(await getState()).proposals.some((p) => p.id === ipad.item.id));
+  console.log('✓ parent-direct proposals skip the kids and can be declined away');
+
+  // Informational goes straight to the calendar, no approval step at all.
+  const clubStart = new Date(at('09:00').getTime() + 3 * 86400000);
+  const club = await R.ingestEmailItem({
+    ingestKey: 'test-ingest-key',
+    classification: 'informational',
+    externalRef: 'gmail-thread-aviation-1',
+    type: 'event',
+    title: 'Aviation Club meeting',
+    personId: 'toby',
+    startAt: clubStart.toISOString(),
+  });
+  assert.strictEqual(club.ok, true);
+  assert.strictEqual(club.item.active, true, 'informational items are live immediately');
+  assert.strictEqual(club.item.proposalState, 'approved');
+  assert.ok(!(await getState()).proposals.some((p) => p.id === club.item.id),
+    'and never sit in the pending queue');
+  const clubCal = await R.calendar({
+    parentId: 'peter', parentPin: '1234',
+    start: new Date(clubStart.getTime() - 86400000).toISOString(),
+    end: new Date(clubStart.getTime() + 86400000).toISOString(),
+  });
+  assert.ok(clubCal.items.some((row) => row.id === club.item.id));
+  console.log('✓ informational emails land straight on the calendar');
+
+  const ghostRespond = await R.respondProposal({ personId: 'ollie', pin: '1234', proposalId: 'nope', wants: true });
+  assert.strictEqual(ghostRespond.ok, false);
+  const ghostDecide = await R.decideProposal({ parentId: 'peter', parentPin: '1234', proposalId: 'nope', approve: true });
+  assert.strictEqual(ghostDecide.ok, false);
+  console.log('✓ responding/deciding on a missing proposal fails cleanly');
 
   console.log('\nALL LOGIC TESTS PASSED');
 }
