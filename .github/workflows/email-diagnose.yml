@@ -1,0 +1,35 @@
+# Manually-triggered diagnostic: runs the email import on the LIVE app and
+# prints the summary, the per-email log and the resulting proposals into this
+# run's log. Runs from a GitHub runner because the dev container's egress
+# policy cannot reach azurewebsites.net. Never runs on its own.
+name: Diagnose email import
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: How many days of mail to sweep
+        required: false
+        default: '21'
+      max_messages:
+        description: Cap on messages read this run (keeps it inside the HTTP timeout)
+        required: false
+        default: '60'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run the import and print what it did
+        env:
+          EMAIL_INGEST_KEY: ${{ secrets.EMAIL_INGEST_KEY }}
+          LOOKBACK_DAYS: ${{ inputs.lookback_days }}
+          MAX_MESSAGES: ${{ inputs.max_messages }}
+        run: node scripts/email-diagnose.mjs
