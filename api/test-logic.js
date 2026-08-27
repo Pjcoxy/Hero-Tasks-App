@@ -2470,7 +2470,18 @@ async function main() {
   // layer and Claude at the client factory, so the run under test is the real
   // pipeline: watermark, triage, attachments, extraction, ingest, dedupe.
 
-  const { runEmailIngest, configMissing } = require('./src/functions/emailIngest.js');
+  const { runEmailIngest, configMissing, scheduledIngestEnabled } = require('./src/functions/emailIngest.js');
+
+  // Hourly runs cost money whether or not the inbox has anything in it, so the
+  // timer stays off unless the app setting explicitly turns it on.
+  delete process.env.EMAIL_INGEST_ENABLED;
+  assert.strictEqual(scheduledIngestEnabled(), false, 'scheduled runs are off by default');
+  process.env.EMAIL_INGEST_ENABLED = 'yes';
+  assert.strictEqual(scheduledIngestEnabled(), false, 'only an explicit true turns it on');
+  process.env.EMAIL_INGEST_ENABLED = 'TRUE';
+  assert.strictEqual(scheduledIngestEnabled(), true, 'true turns it on, whatever the case');
+  delete process.env.EMAIL_INGEST_ENABLED;
+  console.log('✓ the scheduled email import is off unless EMAIL_INGEST_ENABLED says true');
   const emailPipeline = require('./src/lib/emailPipeline.js');
 
   // Fail closed: no Gmail credentials = a logged skip, never a crash and

@@ -16,6 +16,15 @@ const pipeline = require('../lib/emailPipeline');
 // no DST). Overridable per environment without a deploy.
 const EMAIL_INGEST_SCHEDULE = process.env.EMAIL_INGEST_SCHEDULE || '0 0 21-23,0-14 * * *';
 
+// The scheduled import is OFF unless this app setting says otherwise. Every
+// run triages each new email through the Claude API, which costs money hourly
+// whether or not anything useful arrives - so running on a timer is a
+// deliberate choice, made in the portal, not a side-effect of deploying. The
+// on-demand route below is unaffected: a run you asked for still runs.
+function scheduledIngestEnabled() {
+  return String(process.env.EMAIL_INGEST_ENABLED || '').trim().toLowerCase() === 'true';
+}
+
 const STATE_DOC_ID = 'email-ingest-state';
 // Three weeks of a family inbox comfortably exceeds 200, and a silently
 // truncated sweep reads exactly like a complete one - so this is raised, and
@@ -227,6 +236,10 @@ async function runEmailIngest(log = () => {}, options = {}) {
 app.timer('emailIngest', {
   schedule: EMAIL_INGEST_SCHEDULE,
   handler: async (_timer, context) => {
+    if (!scheduledIngestEnabled()) {
+      context.log('emailIngest: scheduled runs are off (EMAIL_INGEST_ENABLED is not true)');
+      return;
+    }
     try {
       await runEmailIngest((line) => context.log(line));
     } catch (err) {
@@ -273,4 +286,4 @@ app.http('emailIngestRun', {
   },
 });
 
-module.exports = { runEmailIngest, configMissing, EMAIL_INGEST_SCHEDULE };
+module.exports = { runEmailIngest, configMissing, scheduledIngestEnabled, EMAIL_INGEST_SCHEDULE };

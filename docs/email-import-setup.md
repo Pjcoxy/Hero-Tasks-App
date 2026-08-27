@@ -51,10 +51,16 @@ Azure Portal → the Function App (`herotasks-func-dev`) →
 | `GMAIL_REFRESH_TOKEN` | from step 2 |
 | `EMAIL_INGEST_KEY` | any long random string (e.g. from a password generator) — it locks the ingest route so only the timer can feed the app |
 | `LLM_API_KEY` | already set for voice reminders — check it exists |
+| `EMAIL_INGEST_ENABLED` | `true` to let the timer run hourly. Anything else (or absent) = scheduled runs are off |
 
 Save; the Function App restarts itself.
 
 ### 4. Done — what to expect
+
+Scheduled running is **off until `EMAIL_INGEST_ENABLED` is `true`**: every run
+triages each new email through the Claude API, so an hourly timer spends money
+whether or not anything useful arrives. Turn it on when you want it working
+for you; turn it off again with the same setting.
 
 - Within the hour (5am–10pm Perth), the timer runs. First run reads the
   last 24 hours of mail; after that it picks up from where it left off.
@@ -114,8 +120,12 @@ setting rather than a deploy:
 - **Same event proposed twice**: only happens if it arrived in two separate
   email threads with different titles. Decline the extra one; declined
   proposals never come back (same thread + same title always dedupes).
-- **Pausing the whole thing**: delete the `EMAIL_INGEST_KEY` app setting.
-  The timer keeps running but skips harmlessly until you restore it.
+- **Pausing the whole thing**: set `EMAIL_INGEST_ENABLED` to anything but
+  `true` (or delete it). The timer still fires but returns immediately, so
+  no mail is read and no Claude calls are made - it costs nothing while off.
+  On-demand runs (the diagnose workflow) still work, so it can be tested
+  without turning the schedule back on. Deleting `EMAIL_INGEST_KEY` stops
+  both.
 
 ## For the agent (how it hangs together)
 
