@@ -87,6 +87,20 @@ so a sweep can overlap earlier runs harmlessly. `EMAIL_MAX_MESSAGES` (default
 500) caps how many messages one run reads; if a sweep hits the cap, the run
 logs that older mail in the window went unread.
 
+## Which mail gets read
+
+Only Gmail's **Primary** tab, minus spam and trash. Promotions, Social and
+Updates are skipped: that is where marketing lives, and the first live sweep
+turned a swim-school "free trial" promo into a calendar item. School, club and
+scouts mail lands in Primary.
+
+If something legitimate is being filed into another tab, widen it with an app
+setting rather than a deploy:
+
+| Setting | Value |
+|---|---|
+| `EMAIL_GMAIL_CATEGORY` | another tab name (e.g. `updates`), or `all` for every tab |
+
 ## Troubleshooting
 
 - **Nothing appears**: Function App → the `emailIngest` function →

@@ -2542,7 +2542,11 @@ async function main() {
       return json({ access_token: 'test-access-token' });
     }
     if (u.includes('/messages?q=')) {
-      assert.ok(decodeURIComponent(u).includes('-in:spam'), 'spam and trash stay excluded');
+      const query = decodeURIComponent(u);
+      assert.ok(query.includes('-in:spam'), 'spam and trash stay excluded');
+      // Primary only: Promotions and Updates are where marketing lives, and
+      // the first live sweep turned a swim-school promo into a calendar item.
+      assert.ok(query.includes('category:primary'), 'only the Primary tab is read');
       return json({ messages: gmailStore.messages });
     }
     if (u.includes('/attachments/')) {
