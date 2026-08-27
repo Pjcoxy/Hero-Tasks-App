@@ -182,7 +182,9 @@ async function extractProposals(email, attachmentBlocks, kids, tz) {
   const response = await client.messages.create({
     model: EXTRACT_MODEL,
     max_tokens: 3000,
-    temperature: 0,
+    // No temperature: Sonnet 5 removed the sampling parameters and rejects
+    // them with a 400. Triage keeps temperature 0 because Haiku 4.5 still
+    // accepts it and a deterministic yes/no is worth having.
     system: 'Extract structured family-calendar items from one email and its attachments. Return JSON only.',
     messages: [{ role: 'user', content }],
   });
