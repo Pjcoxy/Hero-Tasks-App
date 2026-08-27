@@ -70,7 +70,10 @@ function slug(text) {
   return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
 }
 
-async function runEmailIngest(log = () => {}) {
+// options lets the diagnostic route run a small, bounded sweep on demand:
+// maxMessages caps the batch so the HTTP call cannot outlive its timeout, and
+// lookbackDays forces a window without spending the env var's one-shot.
+async function runEmailIngest(log = () => {}, options = {}) {
   const missing = configMissing();
   if (missing.length) {
     log(`emailIngest skipped - missing app settings: ${missing.join(', ')}`);
@@ -86,18 +89,27 @@ async function runEmailIngest(log = () => {}) {
   // apply on every run it would re-scan weeks of mail hourly, and since
   // processedIds only holds the last few hundred ids, anything older would be
   // re-triaged forever. Change the number to sweep again.
-  const requestedLookback = Number(process.env.EMAIL_LOOKBACK_DAYS);
+  const askedLookback = Number(options.lookbackDays);
+  const oneShotLookback = Number(process.env.EMAIL_LOOKBACK_DAYS);
+  const requestedLookback = Number.isFinite(askedLookback) && askedLookback > 0
+    ? askedLookback : oneShotLookback;
   const lookbackDays = Number.isFinite(requestedLookback) && requestedLookback > 0
     ? requestedLookback : null;
-  const backfilling = lookbackDays !== null && state.lookbackDoneFor !== lookbackDays;
+  // An explicit options.lookbackDays always sweeps; the env var only sweeps
+  // once per value, so a caller asking directly is never refused by history.
+  const backfilling = lookbackDays !== null
+    && (Number.isFinite(askedLookback) || state.lookbackDoneFor !== lookbackDays);
+  const spendsOneShot = backfilling && !Number.isFinite(askedLookback);
 
+  const maxMessages = Number(options.maxMessages) > 0 ? Number(options.maxMessages) : MAX_MESSAGES;
   const sinceMs = backfilling
     ? Date.now() - lookbackDays * 24 * 60 * 60 * 1000
     : watermarkMs - WATERMARK_OVERLAP_MS;
-  if (backfilling) log(`emailIngest: backfilling ${lookbackDays} days`);
-  const refs = await gmail.listMessagesSince(token, Math.floor(sinceMs / 1000), MAX_MESSAGES);
-  if (refs.length >= MAX_MESSAGES) {
-    log(`emailIngest: hit the ${MAX_MESSAGES}-message cap - older mail in this window was not read`);
+  if (backfilling) log(`emailIngest: sweeping ${lookbackDays} days`);
+  const refs = await gmail.listMessagesSince(token, Math.floor(sinceMs / 1000), maxMessages);
+  log(`emailIngest: ${refs.length} messages in the window`);
+  if (refs.length >= maxMessages) {
+    log(`emailIngest: hit the ${maxMessages}-message cap - older mail in this window was not read`);
   }
 
   const kids = await listKids();
@@ -131,6 +143,7 @@ async function runEmailIngest(log = () => {}) {
       const triage = await pipeline.triageEmail(email);
       if (triage.relevant) {
         relevant += 1;
+        log(`emailIngest: relevant - "${email.subject}" from ${email.from}`);
         const blocks = [];
         for (const att of gmail.listAttachments(msg.payload).slice(0, MAX_ATTACHMENTS)) {
           if (att.size > MAX_ATTACHMENT_BYTES) continue;
@@ -143,6 +156,7 @@ async function runEmailIngest(log = () => {}) {
           }
         }
         const extraction = await pipeline.extractProposals(email, blocks, kids, HOUSEHOLD_TZ);
+        log(`emailIngest: ${blocks.length} attachment block(s), ${extraction.items.length} item(s) extracted`);
         for (const item of extraction.items) {
           const result = await ROUTES.ingestEmailItem({
             ingestKey: process.env.EMAIL_INGEST_KEY,
@@ -186,7 +200,7 @@ async function runEmailIngest(log = () => {}) {
     watermarkMs: maxInternalMs,
     processedIds: [...processed].slice(-PROCESSED_IDS_KEPT),
     lastRunAt: new Date().toISOString(),
-    lookbackDoneFor: backfilling ? lookbackDays : (state.lookbackDoneFor ?? null),
+    lookbackDoneFor: spendsOneShot ? lookbackDays : (state.lookbackDoneFor ?? null),
   });
 
   const summary = { skipped: false, checked: refs.length, relevant, ingested, duplicates, backfilled: backfilling };
@@ -201,6 +215,44 @@ app.timer('emailIngest', {
       await runEmailIngest((line) => context.log(line));
     } catch (err) {
       context.error(err);
+    }
+  },
+});
+
+// Ops endpoint: run the import now and hand back, line by line, what it did.
+// This plan offers no log stream, so a failed run is otherwise completely
+// invisible - which is exactly how the first live run went. Same ingest key as
+// the write path guards it; it reads mail and writes proposals, nothing more.
+app.http('emailIngestRun', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'email-ingest-run',
+  handler: async (request, context) => {
+    const req = await request.json().catch(() => ({}));
+    const key = process.env.EMAIL_INGEST_KEY;
+    if (!key || String(req.ingestKey || '') !== key) {
+      return { status: 401, jsonBody: { ok: false, error: 'Bad ingest key' } };
+    }
+    const lines = [];
+    const capture = (line) => { lines.push(line); context.log(line); };
+    try {
+      const summary = await runEmailIngest(capture, {
+        maxMessages: req.maxMessages,
+        lookbackDays: req.lookbackDays,
+      });
+      return { jsonBody: { ok: true, summary, log: lines.slice(-200) } };
+    } catch (err) {
+      // The whole point of this route: the error reaches the caller instead of
+      // vanishing into a log nobody can read.
+      return {
+        status: 500,
+        jsonBody: {
+          ok: false,
+          error: err && err.message ? err.message : String(err),
+          stack: String(err && err.stack || '').split('\n').slice(0, 6),
+          log: lines.slice(-200),
+        },
+      };
     }
   },
 });
