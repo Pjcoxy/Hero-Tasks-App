@@ -1878,6 +1878,30 @@ test('a kid can put a hand up, and the parent card shows it', async ({ page }) =
   await expect(parentCard).toContainText('wants to go');
 });
 
+test('an email that names no kid is offered to both of them', async ({ page }) => {
+  await seedProposal(page, {
+    externalRef: 'smoke-email-both', title: 'Smoke Holiday Workshop', personId: null,
+  });
+  await page.reload();
+  await pickPerson(page, 'Toby');
+  await expect(page.locator('#k-proposals .task').filter({ hasText: 'Smoke Holiday Workshop' }))
+    .toBeVisible();
+
+  await page.getByRole('button', { name: /Switch/ }).click();
+  await pickPerson(page, 'Ollie');
+  const ollieCard = page.locator('#k-proposals .task').filter({ hasText: 'Smoke Holiday Workshop' });
+  await expect(ollieCard).toBeVisible();
+  await ollieCard.getByRole('button', { name: /Not for me/ }).click();
+  await expect(ollieCard).toContainText('not this time');
+
+  // Ollie passing leaves it live for Toby, and the parents still see it.
+  await page.getByRole('button', { name: /Switch/ }).click();
+  await pickPerson(page, 'Peter');
+  const parentCard = page.locator('#p-proposals .parent-card').filter({ hasText: 'Smoke Holiday Workshop' });
+  await expect(parentCard).toContainText('Either kid');
+  await expect(parentCard).toContainText('waiting on Toby');
+});
+
 test('approving a proposal puts it on the calendar, badged as from email', async ({ page }) => {
   await seedProposal(page, {
     externalRef: 'smoke-email-fair', title: 'Smoke School Fair', personId: 'ollie',

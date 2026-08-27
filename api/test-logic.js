@@ -2346,17 +2346,20 @@ async function main() {
   assert.ok(kidChoicePushes.some((p) => p.title === 'New from email 📧'),
     'parents hear about it too');
 
+  // The title is the model's wording, and it drifts between runs - an en-dash
+  // for a hyphen was enough to put one aviation meeting in the queue twice.
+  // Same ref = same card, whatever the extractor called it this time.
   const rerun = await R.ingestEmailItem({
     ingestKey: 'test-ingest-key',
     classification: 'kid-choice',
     externalRef: 'gmail-thread-hike-1',
     type: 'event',
-    title: 'Bibbulmun Track Hike',
+    title: 'Bibbulmun Track Hike \u2013 Term 3',
     personId: 'ollie',
     startAt: hikeStart.toISOString(),
   });
   assert.strictEqual(rerun.ok, true);
-  assert.strictEqual(rerun.duplicate, true, 'same email + title is a duplicate, not a second card');
+  assert.strictEqual(rerun.duplicate, true, 'a reworded title is a duplicate, not a second card');
   assert.strictEqual(rerun.item.id, hike.item.id);
   assert.strictEqual((await getState()).proposals.filter((p) => p.id === hike.item.id).length, 1);
   console.log('✓ re-ingesting the same email is idempotent');
@@ -2373,7 +2376,11 @@ async function main() {
   assert.strictEqual(ollieWants.ok, true);
   const hikeAfterRespond = (await getState()).proposals.find((p) => p.id === hike.item.id);
   assert.strictEqual(hikeAfterRespond.proposalState, 'kid-interested');
-  assert.strictEqual(hikeAfterRespond.kidResponse.wants, true);
+  assert.deepStrictEqual(
+    hikeAfterRespond.kidResponses.map((r) => [r.personId, r.wants]),
+    [['ollie', true]],
+    'the answer is recorded against the kid who gave it'
+  );
   const interestPushes = pushCalls
     .filter((call) => call.type === 'send')
     .map((call) => JSON.parse(call.payload))
@@ -2409,6 +2416,60 @@ async function main() {
   });
   assert.strictEqual(decideAgain.ok, false, 'a decided proposal cannot be decided twice');
   console.log('✓ parent approval publishes the item with the chosen prep deadline');
+
+  // Nobody named: guessing which kid an activity suits would need a list of
+  // who does what that nobody would keep up to date, so both kids are asked
+  // and the one it does not suit says no.
+  const discoStart = new Date(at('09:00').getTime() + 9 * 86400000);
+  pushCalls.length = 0;
+  const disco = await R.ingestEmailItem({
+    ingestKey: 'test-ingest-key',
+    classification: 'kid-choice',
+    externalRef: 'gmail-thread-disco-1',
+    type: 'event',
+    title: 'End of term disco',
+    personId: null,
+    startAt: discoStart.toISOString(),
+    summary: 'Friday night disco at the hall.',
+    prepLists: [
+      { personId: 'ollie', items: [{ text: 'Find a costume' }] },
+      { personId: 'toby', items: [{ text: 'Find a costume' }] },
+    ],
+  });
+  assert.strictEqual(disco.ok, true, 'ingest: ' + JSON.stringify(disco));
+  const subscriptionOwner = new Map([...getMap('pushSubscriptions').values()]
+    .map((sub) => [sub.endpoint, sub.personId]));
+  const askedKids = new Set(pushCalls
+    .filter((call) => call.type === 'send' && JSON.parse(call.payload).title === 'Something came up! 📧')
+    .map((call) => subscriptionOwner.get(call.subscription.endpoint)));
+  const everyKid = (await getState()).people
+    .filter((person) => person.role === 'kid')
+    .map((person) => person.id);
+  assert.ok(everyKid.length >= 2, 'this check needs more than one kid to mean anything');
+  assert.deepStrictEqual([...askedKids].sort(), everyKid.slice().sort(),
+    'every kid is asked, not one guessed at');
+
+  const tobyPasses = await R.respondProposal({
+    personId: 'toby', pin: '1234', proposalId: disco.item.id, wants: false,
+  });
+  assert.strictEqual(tobyPasses.ok, true, 'either kid can answer an unnamed proposal');
+  let discoPending = (await getState()).proposals.find((p) => p.id === disco.item.id);
+  assert.strictEqual(discoPending.proposalState, 'proposed',
+    "one kid's no does not answer for the other");
+  await R.respondProposal({ personId: 'ollie', pin: '1234', proposalId: disco.item.id, wants: true });
+  discoPending = (await getState()).proposals.find((p) => p.id === disco.item.id);
+  assert.strictEqual(discoPending.proposalState, 'kid-interested');
+  assert.strictEqual(discoPending.kidResponses.length, 2, 'both answers are kept side by side');
+
+  const discoApproved = await R.decideProposal({
+    parentId: 'peter', parentPin: '1234', proposalId: disco.item.id, approve: true,
+  });
+  assert.strictEqual(discoApproved.ok, true, 'approve: ' + JSON.stringify(discoApproved));
+  assert.strictEqual(discoApproved.item.personId, 'ollie',
+    'approval lands on the kid who actually wants it');
+  assert.deepStrictEqual(discoApproved.item.prepLists.map((list) => list.personId), ['ollie'],
+    "the packing list of the kid who passed goes with them");
+  console.log('✓ an unnamed kid-choice proposal asks both kids and lands on the one who says yes');
 
   // Parent-direct: kids cannot answer; declining archives without publishing.
   const ipadStart = new Date(at('09:00').getTime() + 8 * 86400000);
@@ -2562,10 +2623,29 @@ async function main() {
     messages: {
       create: async (req) => {
         ingestLlmCalls.push(req);
+        const promptText = Array.isArray(req.messages[0].content)
+          ? req.messages[0].content.map((block) => block.text || '').join(' ')
+          : String(req.messages[0].content);
         if (req.model === emailPipeline.TRIAGE_MODEL) {
-          const prompt = req.messages[0].content;
-          const relevant = /scouts|Bibbulmun/i.test(prompt);
+          const relevant = /scouts|Bibbulmun/i.test(promptText);
           return { content: [{ type: 'text', text: JSON.stringify({ relevant, why: 'test' }) }] };
+        }
+        // The chase-up in the same thread: same event, reworded title - which
+        // is how the same meeting used to arrive twice.
+        if (/chase-up/i.test(promptText)) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                items: [{
+                  classification: 'kid-choice', type: 'event',
+                  title: 'Bibbulmun Track Hike \u2013 don\u2019t forget!',
+                  personId: null, startAt: new Date(scoutStart).toISOString(), endAt: null,
+                  summary: 'Reminder about the hike.', payments: [], prepLists: [], adultActions: [],
+                }],
+              }),
+            }],
+          };
         }
         // Extraction: two events out of the one scouts email, the second with
         // a payment block and a prep list drawn from the attachment.
@@ -2642,6 +2722,25 @@ async function main() {
   assert.strictEqual(run2.ingested, 0);
   assert.strictEqual(ingestLlmCalls.length, 0, 'already-processed messages are not re-read');
   console.log('✓ a second run re-reads nothing and creates nothing');
+
+  // A reminder arrives in the same thread and the extractor words the event
+  // differently. Same thread, same start time = the same card.
+  gmailStore.messages = gmailStore.messages.concat([{ id: 'msg-chase', threadId: 'thread-scouts' }]);
+  gmailStore.full['msg-chase'] = {
+    id: 'msg-chase', threadId: 'thread-scouts', internalDate: String(Date.now() - 10000),
+    payload: {
+      mimeType: 'text/plain',
+      headers: [
+        { name: 'From', value: 'leader@scouts.example' },
+        { name: 'Subject', value: 'Scouts chase-up: Bibbulmun hike' },
+      ],
+      body: { data: b64url('Quick chase-up about the Bibbulmun hike this term.') },
+    },
+  };
+  const chaseRun = await runEmailIngest();
+  assert.strictEqual(chaseRun.ingested, 0, 'a reworded repeat creates no second card');
+  assert.strictEqual(chaseRun.duplicates, 1, 'it is counted as the duplicate it is');
+  console.log('✓ the same event reworded in a later email dedupes on its start time');
 
   // A backfill sweep widens the window once per distinct EMAIL_LOOKBACK_DAYS
   // value, then hands back to the watermark - otherwise every hourly run would

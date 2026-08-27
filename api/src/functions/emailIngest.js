@@ -66,6 +66,15 @@ async function listKids() {
     .map((p) => ({ id: p.id, name: p.name }));
 }
 
+// What makes two extractions the same event. Not the title: the model's
+// wording of one drifts between runs (an en-dash for a hyphen, a longer or
+// shorter phrasing), and that drift is what put the same aviation meeting in
+// the queue twice. The event's own start instant does not drift.
+function eventKey(startAt) {
+  const ms = Date.parse(startAt);
+  return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 16) : '';
+}
+
 function slug(text) {
   return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
 }
@@ -186,8 +195,9 @@ async function runEmailIngest(log = () => {}, options = {}) {
             proposedPrepDueBy: item.proposedPrepDueBy || null,
             // Per item, not per thread: one scouts email carries several
             // events, and a chase-up in the same thread re-mentioning one of
-            // them lands on the same ref and dedupes.
-            externalRef: `gmail-${email.threadId}:${slug(item.title)}`,
+            // them lands on the same ref and dedupes. Title only as a last
+            // resort, when the item somehow arrived without a usable date.
+            externalRef: `gmail-${email.threadId}:${eventKey(item.startAt) || slug(item.title)}`,
             from: email.from,
             subject: email.subject,
             receivedAt: email.receivedAt,
