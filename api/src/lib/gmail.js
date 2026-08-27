@@ -36,10 +36,18 @@ async function gmailGet(token, path) {
   return res.json();
 }
 
+// Which Gmail tab to read. Primary only, by design: the school and club mail
+// that matters lands there, while Promotions, Social and Updates are where
+// marketing lives - and marketing is what the first live sweep wrongly turned
+// into calendar items. Set EMAIL_GMAIL_CATEGORY to another tab name, or to
+// 'all', to widen it without a deploy.
+const GMAIL_CATEGORY = String(process.env.EMAIL_GMAIL_CATEGORY || 'primary').trim();
+
 // Everything since the watermark, spam and trash excluded, newest runs capped
 // so one enormous backlog cannot blow the Function's time budget.
 async function listMessagesSince(token, epochSeconds, cap = 200) {
-  const q = `after:${epochSeconds} -in:spam -in:trash`;
+  const category = GMAIL_CATEGORY && GMAIL_CATEGORY !== 'all' ? ` category:${GMAIL_CATEGORY}` : '';
+  const q = `after:${epochSeconds} -in:spam -in:trash${category}`;
   const out = [];
   let pageToken = null;
   do {
