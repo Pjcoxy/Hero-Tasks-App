@@ -2604,7 +2604,7 @@ async function main() {
 
   const run1 = await runEmailIngest();
   assert.strictEqual(run1.skipped, false);
-  assert.strictEqual(run1.checked, 2, 'both new messages were checked');
+  assert.strictEqual(run1.read, 2, 'both new messages were read');
   assert.strictEqual(run1.relevant, 1, 'only the scouts email survived triage');
   assert.strictEqual(run1.ingested, 2, 'one email produced two proposals');
   assert.strictEqual(run1.duplicates, 0);
@@ -2681,6 +2681,39 @@ async function main() {
   assert.ok(capUrl.includes('maxResults=50'), 'the cap bounds the batch, not the page size');
   delete process.env.EMAIL_LOOKBACK_DAYS;
   console.log('✓ an explicit sweep window always runs and keeps the one-shot intact');
+
+  // A capped run must WALK the window, not re-read its newest messages every
+  // time. Gmail lists newest first, so capping the listing would make every
+  // run skip the same already-processed head and never reach older mail.
+  gmailStore.messages = [
+    { id: 'walk-1', threadId: 't1' }, { id: 'walk-2', threadId: 't2' },
+    { id: 'walk-3', threadId: 't3' }, { id: 'walk-4', threadId: 't4' },
+  ];
+  gmailStore.messages.forEach((m) => {
+    gmailStore.full[m.id] = {
+      id: m.id, threadId: m.threadId, internalDate: String(Date.now() - 60000),
+      payload: {
+        mimeType: 'text/plain',
+        headers: [{ name: 'From', value: 'promo@nothing.example' }, { name: 'Subject', value: 'Nothing here' }],
+        body: { data: b64url('nothing relevant') },
+      },
+    };
+  });
+  const seenIds = [];
+  emailPipeline.setEmailClientFactory(() => ({
+    messages: { create: async () => ({ content: [{ type: 'text', text: '{"relevant":false}' }] }) },
+  }));
+  const walkA = await runEmailIngest((line) => {
+    const m = /could not read message (\S+)/.exec(line); if (m) seenIds.push(m[1]);
+  }, { lookbackDays: 5, maxMessages: 2 });
+  assert.strictEqual(walkA.read, 2, 'the cap bounds what one run reads');
+  assert.strictEqual(walkA.stillUnread, 2, 'and reports what it left behind');
+  const walkB = await runEmailIngest(() => {}, { lookbackDays: 5, maxMessages: 2 });
+  assert.strictEqual(walkB.read, 2, 'the next run reads the two it had not seen');
+  assert.strictEqual(walkB.stillUnread, 0, 'and the window is now clear');
+  const walkC = await runEmailIngest(() => {}, { lookbackDays: 5, maxMessages: 2 });
+  assert.strictEqual(walkC.read, 0, 'a third run finds nothing left to read');
+  console.log('✓ a capped run walks the window instead of re-reading its newest mail');
 
 
   global.fetch = realFetch;

@@ -71,8 +71,9 @@ function slug(text) {
 }
 
 // options lets the diagnostic route run a small, bounded sweep on demand:
-// maxMessages caps the batch so the HTTP call cannot outlive its timeout, and
-// lookbackDays forces a window without spending the env var's one-shot.
+// maxMessages caps how many UNREAD-BY-US messages one run works through (so
+// the HTTP call cannot outlive its timeout), and lookbackDays forces a window
+// without spending the env var's one-shot.
 async function runEmailIngest(log = () => {}, options = {}) {
   const missing = configMissing();
   if (missing.length) {
@@ -101,15 +102,20 @@ async function runEmailIngest(log = () => {}, options = {}) {
     && (Number.isFinite(askedLookback) || state.lookbackDoneFor !== lookbackDays);
   const spendsOneShot = backfilling && !Number.isFinite(askedLookback);
 
-  const maxMessages = Number(options.maxMessages) > 0 ? Number(options.maxMessages) : MAX_MESSAGES;
+  // The batch cap limits how many messages this run READS, not how many it
+  // lists. Listing is cheap metadata; capping it there would be worse than
+  // useless for a backfill, because Gmail returns newest first - every run
+  // would re-list the same newest N, find them all already processed, and
+  // never walk backwards through the window.
+  const batchLimit = Number(options.maxMessages) > 0 ? Number(options.maxMessages) : MAX_MESSAGES;
   const sinceMs = backfilling
     ? Date.now() - lookbackDays * 24 * 60 * 60 * 1000
     : watermarkMs - WATERMARK_OVERLAP_MS;
   if (backfilling) log(`emailIngest: sweeping ${lookbackDays} days`);
-  const refs = await gmail.listMessagesSince(token, Math.floor(sinceMs / 1000), maxMessages);
+  const refs = await gmail.listMessagesSince(token, Math.floor(sinceMs / 1000), MAX_MESSAGES);
   log(`emailIngest: ${refs.length} messages in the window`);
-  if (refs.length >= maxMessages) {
-    log(`emailIngest: hit the ${maxMessages}-message cap - older mail in this window was not read`);
+  if (refs.length >= MAX_MESSAGES) {
+    log(`emailIngest: hit the ${MAX_MESSAGES}-message list cap - older mail in this window was not listed`);
   }
 
   const kids = await listKids();
@@ -118,8 +124,14 @@ async function runEmailIngest(log = () => {}, options = {}) {
   let ingested = 0;
   let duplicates = 0;
 
+  let readThisRun = 0;
+  let unread = 0;
   for (const ref of refs) {
     if (processed.has(ref.id)) continue;
+    // Out of budget for this run: count what is left so a truncated sweep
+    // never reads as a finished one, and let the next run pick it up.
+    if (readThisRun >= batchLimit) { unread += 1; continue; }
+    readThisRun += 1;
     let msg;
     try {
       msg = await gmail.getMessage(token, ref.id);
@@ -203,7 +215,11 @@ async function runEmailIngest(log = () => {}, options = {}) {
     lookbackDoneFor: spendsOneShot ? lookbackDays : (state.lookbackDoneFor ?? null),
   });
 
-  const summary = { skipped: false, checked: refs.length, relevant, ingested, duplicates, backfilled: backfilling };
+  if (unread) log(`emailIngest: ${unread} message(s) in the window still unread - run again to continue`);
+  const summary = {
+    skipped: false, listed: refs.length, read: readThisRun, stillUnread: unread,
+    relevant, ingested, duplicates, backfilled: backfilling,
+  };
   log(`emailIngest: ${JSON.stringify(summary)}`);
   return summary;
 }
