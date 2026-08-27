@@ -17,6 +17,10 @@ const pipeline = require('../lib/emailPipeline');
 const EMAIL_INGEST_SCHEDULE = process.env.EMAIL_INGEST_SCHEDULE || '0 0 21-23,0-14 * * *';
 
 const STATE_DOC_ID = 'email-ingest-state';
+// Three weeks of a family inbox comfortably exceeds 200, and a silently
+// truncated sweep reads exactly like a complete one - so this is raised, and
+// hitting it is logged.
+const MAX_MESSAGES = Number(process.env.EMAIL_MAX_MESSAGES) || 500;
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 const PROCESSED_IDS_KEPT = 300;
@@ -78,8 +82,23 @@ async function runEmailIngest(log = () => {}) {
   const watermarkMs = Number(state.watermarkMs) || (Date.now() - 24 * 60 * 60 * 1000);
   const processed = new Set(Array.isArray(state.processedIds) ? state.processedIds : []);
 
-  const sinceSeconds = Math.floor((watermarkMs - WATERMARK_OVERLAP_MS) / 1000);
-  const refs = await gmail.listMessagesSince(token, sinceSeconds);
+  // A backfill sweep, once per distinct value of EMAIL_LOOKBACK_DAYS. Left to
+  // apply on every run it would re-scan weeks of mail hourly, and since
+  // processedIds only holds the last few hundred ids, anything older would be
+  // re-triaged forever. Change the number to sweep again.
+  const requestedLookback = Number(process.env.EMAIL_LOOKBACK_DAYS);
+  const lookbackDays = Number.isFinite(requestedLookback) && requestedLookback > 0
+    ? requestedLookback : null;
+  const backfilling = lookbackDays !== null && state.lookbackDoneFor !== lookbackDays;
+
+  const sinceMs = backfilling
+    ? Date.now() - lookbackDays * 24 * 60 * 60 * 1000
+    : watermarkMs - WATERMARK_OVERLAP_MS;
+  if (backfilling) log(`emailIngest: backfilling ${lookbackDays} days`);
+  const refs = await gmail.listMessagesSince(token, Math.floor(sinceMs / 1000), MAX_MESSAGES);
+  if (refs.length >= MAX_MESSAGES) {
+    log(`emailIngest: hit the ${MAX_MESSAGES}-message cap - older mail in this window was not read`);
+  }
 
   const kids = await listKids();
   let maxInternalMs = watermarkMs;
@@ -167,9 +186,10 @@ async function runEmailIngest(log = () => {}) {
     watermarkMs: maxInternalMs,
     processedIds: [...processed].slice(-PROCESSED_IDS_KEPT),
     lastRunAt: new Date().toISOString(),
+    lookbackDoneFor: backfilling ? lookbackDays : (state.lookbackDoneFor ?? null),
   });
 
-  const summary = { skipped: false, checked: refs.length, relevant, ingested, duplicates };
+  const summary = { skipped: false, checked: refs.length, relevant, ingested, duplicates, backfilled: backfilling };
   log(`emailIngest: ${JSON.stringify(summary)}`);
   return summary;
 }

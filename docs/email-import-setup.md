@@ -67,6 +67,26 @@ Save; the Function App restarts itself.
 - Payment details from emails are **displayed** on the proposal card for
   you to pay manually. Nothing is ever paid automatically.
 
+## Sweeping older mail (first run, or a catch-up)
+
+With no history, a run only looks back 24 hours - which on a quiet day finds
+nothing, and "working, nothing to report" looks identical to "broken". To sweep
+a few weeks instead, add an app setting:
+
+| Setting | Value |
+|---|---|
+| `EMAIL_LOOKBACK_DAYS` | e.g. `21` |
+
+The sweep runs **once per value**. After it, the next run goes back to reading
+only new mail; change the number (say to `30`) if you want another sweep. It is
+left in place safely - it does not re-scan every hour, which would re-read the
+same weeks of mail over and over.
+
+Anything already imported comes back as a duplicate rather than a second card,
+so a sweep can overlap earlier runs harmlessly. `EMAIL_MAX_MESSAGES` (default
+500) caps how many messages one run reads; if a sweep hits the cap, the run
+logs that older mail in the window went unread.
+
 ## Troubleshooting
 
 - **Nothing appears**: Function App → the `emailIngest` function →
