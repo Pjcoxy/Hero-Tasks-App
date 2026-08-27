@@ -2617,6 +2617,9 @@ async function main() {
   // The deep read carried the PDF but never the oversized attachment.
   const extractCall = ingestLlmCalls.find((call) => call.model === emailPipeline.EXTRACT_MODEL);
   assert.ok(extractCall, 'extraction ran');
+  // Sonnet 5 rejects sampling parameters with a 400 - this cost a live run.
+  assert.strictEqual(extractCall.temperature, undefined,
+    'the extraction call must not send temperature');
   const blockTypes = extractCall.messages[0].content.map((block) => block.type);
   assert.deepStrictEqual(blockTypes, ['text', 'document'], 'prompt plus the PDF, nothing else');
   assert.ok(!fetchLog.some((u) => u.includes('att-huge')), 'the 99MB attachment was never fetched');
