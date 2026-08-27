@@ -4700,8 +4700,19 @@ function proposalWhenLabel(p) {
   return label;
 }
 
+// Names of the kids who answered a proposal one way or the other.
+function proposalAnswerNames(p, wants) {
+  return (p.kidResponses || [])
+    .filter(function(r) { return !!r.wants === wants; })
+    .map(function(r) {
+      var person = state.people.find(function(k) { return k.id === r.personId; });
+      return person ? person.name : 'A kid';
+    });
+}
+
 // Email finds a kid-choice item; the kid's answer here changes who is waiting,
-// never what is published - only a parent's approval does that.
+// never what is published - only a parent's approval does that. An unnamed
+// proposal is offered to both kids and each answers for themselves.
 function renderKidProposals(kid) {
   var el = document.getElementById('k-proposals');
   if (!el) return;
@@ -4711,9 +4722,9 @@ function renderKidProposals(kid) {
   });
   if (mine.length === 0) { el.innerHTML = ''; return; }
   el.innerHTML = '<h2 class="section-title">📧 Coming up — want to go?</h2>' + mine.map(function(p) {
-    var answered = p.kidResponse && p.kidResponse.personId === kid.id;
+    var answered = (p.kidResponses || []).find(function(r) { return r.personId === kid.id; });
     var footer;
-    if (answered && p.kidResponse.wants) {
+    if (answered && answered.wants) {
       footer = '<div class="sub">🙋 You said yes — waiting on your grown-ups</div>';
     } else if (answered) {
       footer = '<div class="sub">You said not this time</div>';
@@ -4762,16 +4773,24 @@ function renderParentProposals() {
   });
   el.innerHTML = pendingProposals.map(function(p) {
     var kid = p.personId ? state.people.find(function(k) { return k.id === p.personId; }) : null;
-    var who = kid ? kid.name : 'Whole family';
-    var classTag = p.classification === 'kid-choice' ? 'kids choose' : 'needs a parent';
+    var isChoice = p.classification === 'kid-choice';
+    var who = kid ? kid.name : (isChoice ? 'Either kid' : 'Whole family');
+    var classTag = isChoice ? 'kids choose' : 'needs a parent';
     var waitTag = '';
-    if (p.classification === 'kid-choice') {
-      if (p.proposalState === 'kid-interested') {
-        waitTag = ' <span class="tag extra">🙋 wants to go</span>';
-      } else if (p.kidResponse && !p.kidResponse.wants) {
-        waitTag = ' <span class="tag">said not this time</span>';
-      } else {
-        waitTag = ' <span class="tag">waiting on ' + esc(who) + '</span>';
+    if (isChoice) {
+      var keen = proposalAnswerNames(p, true);
+      var passed = proposalAnswerNames(p, false);
+      var asked = kid ? [kid] : state.people.filter(function(k) { return k.role === 'kid'; });
+      var quiet = asked.filter(function(k) {
+        return !(p.kidResponses || []).some(function(r) { return r.personId === k.id; });
+      }).map(function(k) { return k.name; });
+      if (keen.length) {
+        waitTag = ' <span class="tag extra">🙋 ' + esc(keen.join(' & '))
+          + (keen.length > 1 ? ' want' : ' wants') + ' to go</span>';
+      } else if (quiet.length) {
+        waitTag = ' <span class="tag">waiting on ' + esc(quiet.join(' & ')) + '</span>';
+      } else if (passed.length) {
+        waitTag = ' <span class="tag">nobody\u2019s keen</span>';
       }
     }
     var payments = (p.payments || []).map(function(pay) {
