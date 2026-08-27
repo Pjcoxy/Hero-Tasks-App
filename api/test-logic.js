@@ -2636,6 +2636,32 @@ async function main() {
   assert.strictEqual(ingestLlmCalls.length, 0, 'already-processed messages are not re-read');
   console.log('✓ a second run re-reads nothing and creates nothing');
 
+  // A backfill sweep widens the window once per distinct EMAIL_LOOKBACK_DAYS
+  // value, then hands back to the watermark - otherwise every hourly run would
+  // re-scan weeks of mail and re-triage anything past the processedIds window.
+  fetchLog.length = 0;
+  process.env.EMAIL_LOOKBACK_DAYS = '21';
+  const backfill = await runEmailIngest();
+  assert.strictEqual(backfill.backfilled, true, 'the first run at a new value backfills');
+  const listUrl = fetchLog.find((u) => u.includes('/messages?q='));
+  const afterSeconds = Number(decodeURIComponent(listUrl).match(/after:(\d+)/)[1]);
+  const daysBack = (Date.now() / 1000 - afterSeconds) / 86400;
+  assert.ok(daysBack > 20.5 && daysBack < 21.5, `expected a ~21 day window, got ${daysBack.toFixed(1)}`);
+
+  fetchLog.length = 0;
+  const afterBackfill = await runEmailIngest();
+  assert.strictEqual(afterBackfill.backfilled, false, 'the same value does not sweep twice');
+  const nextListUrl = fetchLog.find((u) => u.includes('/messages?q='));
+  const nextAfter = Number(decodeURIComponent(nextListUrl).match(/after:(\d+)/)[1]);
+  assert.ok((Date.now() / 1000 - nextAfter) / 86400 < 1, 'back to the watermark window');
+
+  process.env.EMAIL_LOOKBACK_DAYS = '30';
+  const secondBackfill = await runEmailIngest();
+  assert.strictEqual(secondBackfill.backfilled, true, 'a changed value sweeps again');
+  delete process.env.EMAIL_LOOKBACK_DAYS;
+  console.log('✓ a backfill window runs once per value, then hands back to the watermark');
+
+
   global.fetch = realFetch;
   emailPipeline.resetEmailClientFactory();
 
