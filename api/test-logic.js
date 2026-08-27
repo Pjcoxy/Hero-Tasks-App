@@ -2661,6 +2661,20 @@ async function main() {
   delete process.env.EMAIL_LOOKBACK_DAYS;
   console.log('✓ a backfill window runs once per value, then hands back to the watermark');
 
+  // An explicit caller-supplied window always sweeps and never spends the env
+  // var's one-shot - the diagnostic route has to be able to re-run at will.
+  process.env.EMAIL_LOOKBACK_DAYS = '30';
+  const askedOnce = await runEmailIngest(() => {}, { lookbackDays: 5, maxMessages: 1 });
+  assert.strictEqual(askedOnce.backfilled, true);
+  const askedTwice = await runEmailIngest(() => {}, { lookbackDays: 5, maxMessages: 1 });
+  assert.strictEqual(askedTwice.backfilled, true, 'an explicit window is never refused by history');
+  fetchLog.length = 0;
+  await runEmailIngest(() => {}, { maxMessages: 1 });
+  const capUrl = fetchLog.find((u) => u.includes('/messages?q='));
+  assert.ok(capUrl.includes('maxResults=50'), 'the cap bounds the batch, not the page size');
+  delete process.env.EMAIL_LOOKBACK_DAYS;
+  console.log('✓ an explicit sweep window always runs and keeps the one-shot intact');
+
 
   global.fetch = realFetch;
   emailPipeline.resetEmailClientFactory();
