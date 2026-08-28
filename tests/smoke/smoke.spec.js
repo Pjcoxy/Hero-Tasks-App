@@ -1661,8 +1661,10 @@ test('a kid with nothing on gets one pill, not an empty state', async ({ page })
 test('an event on today shows on that kid\u2019s today strip, matching the calendar', async ({ page }) => {
   const title = 'Smoke Hike ' + Date.now();
   await page.evaluate(async (eventTitle) => {
-    const startAt = new Date();
-    startAt.setHours(16, 0, 0, 0);
+    // An hour from now, not a fixed clock time: the household timezone is
+    // pinned to whatever makes it local noon at start-up, so "in an hour" is
+    // reliably still today there while "16:00 browser time" need not be.
+    const startAt = new Date(Date.now() + 60 * 60 * 1000);
     await fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1951,16 +1953,21 @@ test('approving a proposal puts it on the calendar, badged as from email', async
   await expect(page.locator('#p-calendar-grid .cal-cell').first()).toBeVisible();
   const agenda = page.locator('#p-calendar-agenda');
   const row = agenda.locator('.parent-list-row').filter({ hasText: 'Smoke School Fair' });
-  // A background refresh re-enters the loading state and blanks the agenda,
-  // which can land between choosing the day and reading it. Choose and read as
-  // one retried step rather than assuming the first attempt survives.
+  // Open the day the APP says the event is on, not the day browser arithmetic
+  // says. A day is a household-timezone date, and the harness pins that zone to
+  // whatever puts local noon at start-up - so an event seeded at 09:00 UTC sits
+  // on the previous local day whenever that offset is far enough west, which is
+  // exactly how this test failed at 22:00 UTC and passed at 01:00. The retry
+  // covers the other hazard: a background refresh blanks the agenda while it
+  // reloads.
   await expect(async () => {
     await page.evaluate(() => {
-      const d = new Date();
-      d.setDate(d.getDate() + 2);
-      parentCalendarSelectedDay = d.getFullYear() + '-'
-        + String(d.getMonth() + 1).padStart(2, '0') + '-'
-        + String(d.getDate()).padStart(2, '0');
+      const match = (parentCalendarItems || []).find(function(i) {
+        return String(i.title || '').includes('Smoke School Fair');
+      });
+      parentCalendarSelectedDay = match
+        ? (match.occurrenceDate || String(match.startAt).slice(0, 10))
+        : null;
       renderParentCalendar();
     });
     await expect(row).toBeVisible({ timeout: 1000 });
