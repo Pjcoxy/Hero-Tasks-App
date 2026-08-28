@@ -1656,6 +1656,30 @@ test('a kid with nothing on gets one pill, not an empty state', async ({ page })
   await expect(ollie.locator('.empty')).toHaveCount(0);
 });
 
+// The strip counted chores only, so a kid with a scout hike on today read
+// "Nothing on today" while the calendar showed the hike on the same day.
+test('an event on today shows on that kid\u2019s today strip, matching the calendar', async ({ page }) => {
+  const title = 'Smoke Hike ' + Date.now();
+  await page.evaluate(async (eventTitle) => {
+    const startAt = new Date();
+    startAt.setHours(16, 0, 0, 0);
+    await fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'addPlanningItem', parentId: 'peter', parentPin: '1234',
+        type: 'event', title: eventTitle, startAt: startAt.toISOString(), personId: 'toby',
+      }),
+    });
+  }, title);
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const toby = page.locator('#p-approvals-today-by-kid .parent-card').filter({ hasText: 'Toby' });
+  await expect(toby).toContainText(title);
+  await expect(toby).not.toContainText('Nothing on today');
+});
+
 // Zero is stated once, on the tile - the card containers below stay empty
 // rather than adding a pill or a paragraph to repeat it.
 test('empty waiting sections are a zero on the tile, not filler text', async ({ page }) => {

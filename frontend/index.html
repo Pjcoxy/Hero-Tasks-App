@@ -3227,6 +3227,18 @@ function renderParentApprovalsTodayByKid() {
         return item.kind === 'chore' && item.kidId === kid.id && parentCalendarDayKey(item) === todayKey;
       })
       .sort(parentCalendarSortWhen);
+    // What is on today is what the calendar says is on today. This strip used
+    // to count chores only, so a kid with a scout hike on read "Nothing on
+    // today" while the calendar showed the hike - the two views of the same
+    // day disagreeing. Whole-family items are on for every kid, so they count
+    // for each of them.
+    var todayEvents = (parentApprovalsGlanceItems || [])
+      .filter(function(item) {
+        if (item.kind !== 'event' && item.kind !== 'reminder') return false;
+        if (parentCalendarDayKey(item) !== todayKey) return false;
+        return !item.personId || item.personId === kid.id;
+      })
+      .sort(parentCalendarSortWhen);
     // Status as pills, not paragraphs. 'Today's chores overview' under every
     // name said nothing the heading had not already said, and a kid with
     // nothing on got a five-line empty state to report zero.
@@ -3241,8 +3253,14 @@ function renderParentApprovalsTodayByKid() {
     // No "N chores" total pill: the breakdown sums to it, and with a single
     // chore "1 chore · 1 to do" read as the same thing counted twice.
     var pills;
-    if (todayItems.length === 0) {
+    var eventPills = todayEvents.map(function(item) {
+      return '<span class="pill neutral">' + (item.kind === 'reminder' ? '⏰ ' : '🗓️ ')
+        + esc(item.title || 'Untitled') + '</span>';
+    }).join('');
+    if (todayItems.length === 0 && todayEvents.length === 0) {
       pills = '<span class="pill neutral">Nothing on today</span>';
+    } else if (todayItems.length === 0) {
+      pills = eventPills;
     } else if (toDo === 0 && waiting === 0 && missedCount === 0) {
       pills = '<span class="pill good">' + (todayItems.length === 1 ? 'Done ✅' : 'All ' + todayItems.length + ' done ✅') + '</span>';
     } else {
@@ -3250,6 +3268,7 @@ function renderParentApprovalsTodayByKid() {
         + (waiting > 0 ? '<span class="pill warn">' + waiting + ' pending</span>' : '')
         + (toDo > 0 ? '<span class="pill neutral">' + toDo + ' to do</span>' : '');
     }
+    if (todayItems.length && eventPills) pills = eventPills + pills;
 
     return '<div class="card parent-card">'
       + '<div class="parent-item-head">'
@@ -3259,6 +3278,19 @@ function renderParentApprovalsTodayByKid() {
       + '</div>'
       + '<div class="pill-row">' + pills + '</div>'
       + '</div>'
+      + (todayEvents.length === 0
+          ? ''
+          : '<div class="parent-list">' + todayEvents.map(function(item) {
+              return '<div class="parent-list-row">'
+                + '<div class="parent-copy">'
+                + '<span class="parent-list-title">' + esc(item.title || 'Untitled') + '</span>'
+                + '<div class="sub">' + esc(parentCalendarItemTime(item))
+                + ' · ' + esc(parentCalendarWho(item))
+                + (item.source === 'email' ? ' · 📧 from email' : '') + '</div>'
+                + '</div>'
+                + '<span class="tag">' + (item.kind === 'reminder' ? '⏰ reminder' : '🗓️ on today') + '</span>'
+                + '</div>';
+            }).join('') + '</div>')
       + (todayItems.length === 0
           ? ''
           : '<div class="parent-list">' + todayItems.map(function(item) {
