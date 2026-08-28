@@ -1798,16 +1798,22 @@ test('a parent can open an event checklist and add a prep item', async ({ page }
   // Select the seeded day directly: in the full suite, earlier tests leave
   // chores dotting today, so "first busy cell" can land on a day with no
   // events at all. Day-tapping itself is covered by the agenda test below.
-  await page.evaluate(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 2);
-    parentCalendarSelectedDay = d.getFullYear() + '-'
-      + String(d.getMonth() + 1).padStart(2, '0') + '-'
-      + String(d.getDate()).padStart(2, '0');
-    renderParentCalendar();
-  });
-
+  // The day comes from the app, not from browser date arithmetic - a calendar
+  // day is a household-timezone date.
   const agenda = page.locator('#p-calendar-agenda');
+  await expect(async () => {
+    await page.evaluate(() => {
+      const match = (parentCalendarItems || []).find(function(i) {
+        return String(i.title || '').includes('Soccer match');
+      });
+      parentCalendarSelectedDay = match
+        ? (match.occurrenceDate || String(match.startAt).slice(0, 10))
+        : null;
+      renderParentCalendar();
+    });
+    await expect(agenda.getByRole('button', { name: /Checklist/ }).first())
+      .toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 20000 });
   await agenda.getByRole('button', { name: /Checklist/ }).first().click();
   const wrap = agenda.locator('.cal-checklist-wrap');
   await expect(wrap).toBeVisible();
@@ -1990,15 +1996,12 @@ test('declining a proposal removes it and publishes nothing', async ({ page }) =
 
   await page.getByRole('button', { name: /^Calendar$/ }).first().click();
   await expect(page.locator('#p-calendar-grid .cal-cell').first()).toBeVisible();
-  await page.evaluate(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 2);
-    parentCalendarSelectedDay = d.getFullYear() + '-'
-      + String(d.getMonth() + 1).padStart(2, '0') + '-'
-      + String(d.getDate()).padStart(2, '0');
-    renderParentCalendar();
-  });
-  await expect(page.locator('#p-calendar-agenda')).not.toContainText('Smoke School Disco');
+  // Ask the whole loaded calendar, not one day of it: "not on the day I
+  // guessed" is true even when the day guessed is the wrong one.
+  const published = await page.evaluate(() => (parentCalendarItems || [])
+    .filter(function(i) { return String(i.title || '').includes('Smoke School Disco'); })
+    .length);
+  expect(published).toBe(0);
 });
 
 test('a parent-direct email never asks the kid', async ({ page }) => {
@@ -2025,20 +2028,26 @@ test('agenda action buttons never sit over the event title on a phone', async ({
   await page.setViewportSize({ width: 393, height: 852 });
   await seedCalendar(page);
   await openParentCalendar(page);
-  await page.evaluate(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 2);
-    parentCalendarSelectedDay = d.getFullYear() + '-'
-      + String(d.getMonth() + 1).padStart(2, '0') + '-'
-      + String(d.getDate()).padStart(2, '0');
-    renderParentCalendar();
-  });
 
   // seedCalendar has run for several earlier tests by now, so the day holds
   // one 'Soccer match' per run of it - any single row will do.
   const row = page.locator('#p-calendar-agenda .parent-list-row').filter({ hasText: 'Soccer match' }).first();
   const title = row.locator('.parent-list-title');
-  await expect(title).toBeVisible();
+  // Open the day the APP puts the match on: a calendar day is a
+  // household-timezone date, so browser date arithmetic picks the wrong one
+  // whenever that zone is far enough west of the runner's.
+  await expect(async () => {
+    await page.evaluate(() => {
+      const match = (parentCalendarItems || []).find(function(i) {
+        return String(i.title || '').includes('Soccer match');
+      });
+      parentCalendarSelectedDay = match
+        ? (match.occurrenceDate || String(match.startAt).slice(0, 10))
+        : null;
+      renderParentCalendar();
+    });
+    await expect(title).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 20000 });
   const titleBox = await title.boundingBox();
   for (const name of [/Checklist/, /^Edit$/, /^Delete$/]) {
     const btn = row.getByRole('button', { name });
