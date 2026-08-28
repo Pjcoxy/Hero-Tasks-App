@@ -64,9 +64,15 @@ for you; turn it off again with the same setting.
 
 - Within the hour (5am–10pm Perth), the timer runs. First run reads the
   last 24 hours of mail; after that it picks up from where it left off.
-- Kid-choice finds (hikes, camps, discos) ping the kid **and** the parents;
-  the kid gets a "want to go?" card, parents get the proposal card and can
-  approve over the top at any time.
+- Kid-choice finds (hikes, camps, discos) go to **both kids** and the
+  parents. Each kid gets their own "want to go?" card and answers for
+  themselves — one saying no leaves it live for the other. The app never
+  guesses which kid an activity suits; that would need a list of who does
+  what that nobody would keep up to date. Parents get the proposal card
+  either way and can approve over the top at any time.
+- Approving an offer that only one kid wanted puts it on **that kid's**
+  calendar, with their packing list. If both said yes it stays a
+  whole-family item.
 - Parent-direct finds (fees, forms, purchases) go straight to the parents.
 - Informational finds (club newsletters with dates) land directly on the
   calendar with a 📧 mark — no approval step.
@@ -74,6 +80,11 @@ for you; turn it off again with the same setting.
   you to pay manually. Nothing is ever paid automatically.
 
 ## Sweeping older mail (first run, or a catch-up)
+
+Normal running needs none of this. The timer runs hourly, so an email that
+arrives at 9:05 is read by 10:00 - well inside the hour or two of notice
+anything real ever gives. This section is for the first look, or a catch-up
+after the import has been off.
 
 With no history, a run only looks back 24 hours - which on a quiet day finds
 nothing, and "working, nothing to report" looks identical to "broken". To sweep
@@ -117,9 +128,11 @@ setting rather than a deploy:
   Either publish the consent screen (**OAuth consent screen → Publish
   app**) or re-mint the token (step 2) — published apps' refresh tokens
   do not expire.
-- **Same event proposed twice**: only happens if it arrived in two separate
-  email threads with different titles. Decline the extra one; declined
-  proposals never come back (same thread + same title always dedupes).
+- **Same event proposed twice**: two proposals are the same event when they
+  come from the same email thread and start at the same time - the title is
+  the model's own wording and drifts between runs, so it is not part of the
+  test. A genuine repeat across two separate threads still gets two cards;
+  decline the extra one and it never comes back.
 - **Pausing the whole thing**: set `EMAIL_INGEST_ENABLED` to anything but
   `true` (or delete it). The timer still fires but returns immediately, so
   no mail is read and no Claude calls are made - it costs nothing while off.
@@ -141,5 +154,12 @@ setting rather than a deploy:
   via adm-zip). Returns items shaped for `ingestEmailItem`.
 - Writes go through `ROUTES.ingestEmailItem` in-process — same idempotency,
   classification behaviour, and pushes as the tested route. `externalRef`
-  is `gmail-<threadId>:<title-slug>`, so chase-up emails in the same thread
-  dedupe while two events in one email stay distinct.
+  is `gmail-<threadId>:<start time>` (title only as a fallback when an item
+  somehow has no usable date), so chase-up emails in the same thread dedupe
+  however the extractor reworded the event, while two events in one email
+  stay distinct.
+- Kid attribution: the extractor only sets `personId` when the email names
+  one kid for something only they can do (a fee for their class, their
+  team). Anything a kid could choose to join is left unattributed and both
+  kids are asked; `decideProposal` assigns it to the single kid who said yes
+  at approval time. Interest is stored per kid in `kidResponses`.

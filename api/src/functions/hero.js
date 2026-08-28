@@ -287,7 +287,7 @@ async function getState() {
         adultActions: p.adultActions || [],
         proposedPrepDueBy: p.proposedPrepDueBy || null,
         sourceMeta: p.sourceMeta || null,
-        kidResponse: p.kidResponse || null,
+        kidResponses: readKidResponses(p),
         notes: p.notes || null,
         createdAt: p.createdAt,
       })),
@@ -399,6 +399,14 @@ async function findActivePlanningItemByExternalRef(externalRef, excludeId) {
     && item.externalRef === externalRef
     && item.id !== excludeId
   )) || null;
+}
+
+// Every kid-choice proposal is offered to both kids, so interest is a list -
+// one entry per kid who has answered. Proposals written before that carried a
+// single kidResponse; they read as a one-entry list.
+function readKidResponses(item) {
+  if (Array.isArray(item && item.kidResponses)) return item.kidResponses;
+  return item && item.kidResponse ? [item.kidResponse] : [];
 }
 
 async function validatePlanningPayload(req, currentItem = null) {
@@ -1132,8 +1140,10 @@ async function ingestEmailItem(req) {
 
   const item = validated.item;
   // Same email + same event = same id, so re-reading a message the watermark
-  // missed becomes a 409 instead of a second card.
-  item.id = 'email-' + createHash('sha1').update(`${externalRef}|${item.title}`).digest('hex').slice(0, 24);
+  // missed becomes a 409 instead of a second card. The ref alone decides it:
+  // the extractor's wording of a title drifts between runs, and mixing the
+  // raw title into the id turned one aviation meeting into two cards.
+  item.id = 'email-' + createHash('sha1').update(externalRef).digest('hex').slice(0, 24);
   item.source = 'email';
   item.classification = classification;
   item.summary = String(req.summary || '').trim() || null;
@@ -1144,7 +1154,7 @@ async function ingestEmailItem(req) {
     subject: String(req.subject || '').trim() || null,
     receivedAt: parseIso(req.receivedAt),
   };
-  item.kidResponse = null;
+  item.kidResponses = [];
   // Informational items (newsletters, date announcements) skip the approval
   // queue: they go straight onto the calendar as read-only context.
   if (classification === 'informational') {
@@ -1173,16 +1183,21 @@ async function ingestEmailItem(req) {
   const parents = people.filter((p) => p.role === 'parent');
   const notify = [];
   if (classification === 'kid-choice') {
-    if (item.personId) {
-      notify.push(sendPushIfAllowed(item.personId, {
-        title: 'Something came up! 📧',
-        body: `${item.title} — want to go? Tap to have a look.`,
-        url: '/',
-      }, quietHours));
-    }
+    // Unnamed means both kids are asked, not that nobody is: guessing which
+    // kid an activity suits needs a list of who does what that nobody would
+    // keep up to date, so the kids answer for themselves and the ones it
+    // does not suit say no.
+    const asked = item.personId
+      ? people.filter((p) => p.id === item.personId)
+      : people.filter((p) => p.role === 'kid');
+    asked.forEach((kid) => notify.push(sendPushIfAllowed(kid.id, {
+      title: 'Something came up! 📧',
+      body: `${item.title} — want to go? Tap to have a look.`,
+      url: '/',
+    }, quietHours)));
     parents.forEach((parent) => notify.push(sendPushIfAllowed(parent.id, {
       title: 'New from email 📧',
-      body: `${item.title} — waiting on ${item.personId ? 'a yes from the kids' : 'a decision'}`,
+      body: `${item.title} — waiting on a yes from the kids`,
       url: '/',
     }, quietHours)));
   } else if (classification === 'parent-direct') {
@@ -1220,8 +1235,15 @@ async function respondProposal(req) {
   if (item.personId && item.personId !== personId) return { ok: false, error: 'Not allowed' };
 
   const wants = !!req.wants;
-  item.kidResponse = { personId, wants, at: new Date().toISOString() };
-  if (wants) item.proposalState = 'kid-interested';
+  // One answer per kid, replaced if they change their mind. A no from one kid
+  // never speaks for the other, and never buries the proposal: the parents'
+  // queue keeps it until they decide.
+  item.kidResponses = readKidResponses(item)
+    .filter((response) => response.personId !== personId)
+    .concat([{ personId, wants, at: new Date().toISOString() }]);
+  delete item.kidResponse;
+  item.proposalState = item.kidResponses.some((response) => response.wants)
+    ? 'kid-interested' : 'proposed';
   await planningItems.item(item.id, HOUSEHOLD_ID).replace(item);
 
   if (wants) {
@@ -1263,6 +1285,14 @@ async function decideProposal(req) {
   item.proposalState = 'approved';
   item.decidedAt = new Date().toISOString();
   item.active = true;
+  // Offered to both kids, wanted by one: approval is where it stops being
+  // everyone's and becomes theirs, prep list included. Two takers keeps it a
+  // whole-family item, which is what it is.
+  const keen = readKidResponses(item).filter((response) => response.wants);
+  if (!item.personId && keen.length === 1) {
+    item.personId = keen[0].personId;
+    item.prepLists = (item.prepLists || []).filter((list) => list.personId === item.personId);
+  }
   // The deadline the extractor proposed from the event's scale is only ever a
   // default; the approving parent's value wins.
   const prepDueBy = parseIso(req.prepDueBy) || item.proposedPrepDueBy || null;
@@ -1270,13 +1300,16 @@ async function decideProposal(req) {
   await planningItems.item(item.id, HOUSEHOLD_ID).replace(item);
 
   const { conflicts, suggestedTimes } = await getConflictsForItem(item);
-  if (item.personId) {
+  const tellKids = item.personId
+    ? [item.personId]
+    : keen.map((response) => response.personId);
+  if (tellKids.length) {
     const quietHours = await getHouseholdQuietHours();
-    await sendPushIfAllowed(item.personId, {
+    await Promise.all(tellKids.map((kidId) => sendPushIfAllowed(kidId, {
       title: "It's on! 🎉",
       body: `${item.title} is on your calendar`,
       url: '/',
-    }, quietHours);
+    }, quietHours)));
   }
   return { ok: true, item, conflicts, suggestedTimes };
 }
