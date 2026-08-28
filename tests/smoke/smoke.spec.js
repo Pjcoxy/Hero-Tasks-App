@@ -1656,6 +1656,32 @@ test('a kid with nothing on gets one pill, not an empty state', async ({ page })
   await expect(ollie.locator('.empty')).toHaveCount(0);
 });
 
+// The strip counted chores only, so a kid with a scout hike on today read
+// "Nothing on today" while the calendar showed the hike on the same day.
+test('an event on today shows on that kid\u2019s today strip, matching the calendar', async ({ page }) => {
+  const title = 'Smoke Hike ' + Date.now();
+  await page.evaluate(async (eventTitle) => {
+    // An hour from now, not a fixed clock time: the household timezone is
+    // pinned to whatever makes it local noon at start-up, so "in an hour" is
+    // reliably still today there while "16:00 browser time" need not be.
+    const startAt = new Date(Date.now() + 60 * 60 * 1000);
+    await fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'addPlanningItem', parentId: 'peter', parentPin: '1234',
+        type: 'event', title: eventTitle, startAt: startAt.toISOString(), personId: 'toby',
+      }),
+    });
+  }, title);
+  await page.reload();
+  await pickPerson(page, 'Peter');
+
+  const toby = page.locator('#p-approvals-today-by-kid .parent-card').filter({ hasText: 'Toby' });
+  await expect(toby).toContainText(title);
+  await expect(toby).not.toContainText('Nothing on today');
+});
+
 // Zero is stated once, on the tile - the card containers below stay empty
 // rather than adding a pill or a paragraph to repeat it.
 test('empty waiting sections are a zero on the tile, not filler text', async ({ page }) => {
@@ -1772,16 +1798,22 @@ test('a parent can open an event checklist and add a prep item', async ({ page }
   // Select the seeded day directly: in the full suite, earlier tests leave
   // chores dotting today, so "first busy cell" can land on a day with no
   // events at all. Day-tapping itself is covered by the agenda test below.
-  await page.evaluate(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 2);
-    parentCalendarSelectedDay = d.getFullYear() + '-'
-      + String(d.getMonth() + 1).padStart(2, '0') + '-'
-      + String(d.getDate()).padStart(2, '0');
-    renderParentCalendar();
-  });
-
+  // The day comes from the app, not from browser date arithmetic - a calendar
+  // day is a household-timezone date.
   const agenda = page.locator('#p-calendar-agenda');
+  await expect(async () => {
+    await page.evaluate(() => {
+      const match = (parentCalendarItems || []).find(function(i) {
+        return String(i.title || '').includes('Soccer match');
+      });
+      parentCalendarSelectedDay = match
+        ? (match.occurrenceDate || String(match.startAt).slice(0, 10))
+        : null;
+      renderParentCalendar();
+    });
+    await expect(agenda.getByRole('button', { name: /Checklist/ }).first())
+      .toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 20000 });
   await agenda.getByRole('button', { name: /Checklist/ }).first().click();
   const wrap = agenda.locator('.cal-checklist-wrap');
   await expect(wrap).toBeVisible();
@@ -1927,16 +1959,21 @@ test('approving a proposal puts it on the calendar, badged as from email', async
   await expect(page.locator('#p-calendar-grid .cal-cell').first()).toBeVisible();
   const agenda = page.locator('#p-calendar-agenda');
   const row = agenda.locator('.parent-list-row').filter({ hasText: 'Smoke School Fair' });
-  // A background refresh re-enters the loading state and blanks the agenda,
-  // which can land between choosing the day and reading it. Choose and read as
-  // one retried step rather than assuming the first attempt survives.
+  // Open the day the APP says the event is on, not the day browser arithmetic
+  // says. A day is a household-timezone date, and the harness pins that zone to
+  // whatever puts local noon at start-up - so an event seeded at 09:00 UTC sits
+  // on the previous local day whenever that offset is far enough west, which is
+  // exactly how this test failed at 22:00 UTC and passed at 01:00. The retry
+  // covers the other hazard: a background refresh blanks the agenda while it
+  // reloads.
   await expect(async () => {
     await page.evaluate(() => {
-      const d = new Date();
-      d.setDate(d.getDate() + 2);
-      parentCalendarSelectedDay = d.getFullYear() + '-'
-        + String(d.getMonth() + 1).padStart(2, '0') + '-'
-        + String(d.getDate()).padStart(2, '0');
+      const match = (parentCalendarItems || []).find(function(i) {
+        return String(i.title || '').includes('Smoke School Fair');
+      });
+      parentCalendarSelectedDay = match
+        ? (match.occurrenceDate || String(match.startAt).slice(0, 10))
+        : null;
       renderParentCalendar();
     });
     await expect(row).toBeVisible({ timeout: 1000 });
@@ -1959,15 +1996,12 @@ test('declining a proposal removes it and publishes nothing', async ({ page }) =
 
   await page.getByRole('button', { name: /^Calendar$/ }).first().click();
   await expect(page.locator('#p-calendar-grid .cal-cell').first()).toBeVisible();
-  await page.evaluate(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 2);
-    parentCalendarSelectedDay = d.getFullYear() + '-'
-      + String(d.getMonth() + 1).padStart(2, '0') + '-'
-      + String(d.getDate()).padStart(2, '0');
-    renderParentCalendar();
-  });
-  await expect(page.locator('#p-calendar-agenda')).not.toContainText('Smoke School Disco');
+  // Ask the whole loaded calendar, not one day of it: "not on the day I
+  // guessed" is true even when the day guessed is the wrong one.
+  const published = await page.evaluate(() => (parentCalendarItems || [])
+    .filter(function(i) { return String(i.title || '').includes('Smoke School Disco'); })
+    .length);
+  expect(published).toBe(0);
 });
 
 test('a parent-direct email never asks the kid', async ({ page }) => {
@@ -1994,20 +2028,26 @@ test('agenda action buttons never sit over the event title on a phone', async ({
   await page.setViewportSize({ width: 393, height: 852 });
   await seedCalendar(page);
   await openParentCalendar(page);
-  await page.evaluate(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 2);
-    parentCalendarSelectedDay = d.getFullYear() + '-'
-      + String(d.getMonth() + 1).padStart(2, '0') + '-'
-      + String(d.getDate()).padStart(2, '0');
-    renderParentCalendar();
-  });
 
   // seedCalendar has run for several earlier tests by now, so the day holds
   // one 'Soccer match' per run of it - any single row will do.
   const row = page.locator('#p-calendar-agenda .parent-list-row').filter({ hasText: 'Soccer match' }).first();
   const title = row.locator('.parent-list-title');
-  await expect(title).toBeVisible();
+  // Open the day the APP puts the match on: a calendar day is a
+  // household-timezone date, so browser date arithmetic picks the wrong one
+  // whenever that zone is far enough west of the runner's.
+  await expect(async () => {
+    await page.evaluate(() => {
+      const match = (parentCalendarItems || []).find(function(i) {
+        return String(i.title || '').includes('Soccer match');
+      });
+      parentCalendarSelectedDay = match
+        ? (match.occurrenceDate || String(match.startAt).slice(0, 10))
+        : null;
+      renderParentCalendar();
+    });
+    await expect(title).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 20000 });
   const titleBox = await title.boundingBox();
   for (const name of [/Checklist/, /^Edit$/, /^Delete$/]) {
     const btn = row.getByRole('button', { name });
