@@ -1,0 +1,29 @@
+# Manually-triggered read-only diagnostic: prints what the LIVE app holds for
+# the next few days - calendar items and pending proposals. Runs from a GitHub
+# runner because the dev container's egress policy cannot reach
+# azurewebsites.net. Never runs on its own, and writes nothing.
+name: Dump live app state
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: How many days ahead to list
+        required: false
+        default: '7'
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Print the live calendar and proposal queue
+        env:
+          DAYS: ${{ inputs.days }}
+        run: node scripts/app-dump.mjs
