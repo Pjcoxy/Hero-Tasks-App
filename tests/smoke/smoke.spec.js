@@ -1925,17 +1925,22 @@ test('approving a proposal puts it on the calendar, badged as from email', async
 
   await page.getByRole('button', { name: /^Calendar$/ }).first().click();
   await expect(page.locator('#p-calendar-grid .cal-cell').first()).toBeVisible();
-  await page.evaluate(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 2);
-    parentCalendarSelectedDay = d.getFullYear() + '-'
-      + String(d.getMonth() + 1).padStart(2, '0') + '-'
-      + String(d.getDate()).padStart(2, '0');
-    renderParentCalendar();
-  });
   const agenda = page.locator('#p-calendar-agenda');
   const row = agenda.locator('.parent-list-row').filter({ hasText: 'Smoke School Fair' });
-  await expect(row).toBeVisible();
+  // A background refresh re-enters the loading state and blanks the agenda,
+  // which can land between choosing the day and reading it. Choose and read as
+  // one retried step rather than assuming the first attempt survives.
+  await expect(async () => {
+    await page.evaluate(() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 2);
+      parentCalendarSelectedDay = d.getFullYear() + '-'
+        + String(d.getMonth() + 1).padStart(2, '0') + '-'
+        + String(d.getDate()).padStart(2, '0');
+      renderParentCalendar();
+    });
+    await expect(row).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 20000 });
   await expect(row).toContainText('📧 from email');
 });
 
