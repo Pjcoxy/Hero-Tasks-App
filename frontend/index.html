@@ -969,7 +969,19 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   box-shadow: var(--shadow-1);
   flex-shrink: 0;
   scrollbar-width: none;
+  scroll-behavior: smooth;
   z-index: 9;
+  /* Five tabs never fit a phone, so the bar has always scrolled - but with a
+     hard edge it read as "Calendar is cut off", not as "there is more this
+     way". The mask fades the last pill out instead, and the pills below are
+     tightened so more of them fit before it does. */
+  -webkit-mask-image: linear-gradient(to right, currentColor calc(100% - 2rem), transparent);
+  mask-image: linear-gradient(to right, currentColor calc(100% - 2rem), transparent);
+}
+.parent-tabbar .choice-pill { padding-inline: var(--space-3); }
+@media (max-width: 26rem) {
+  .parent-tabbar { gap: var(--space-1); }
+  .parent-tabbar .choice-pill { padding-inline: var(--space-2); }
 }
 .parent-tabbar::-webkit-scrollbar { display: none; }
 .choice-pill {
@@ -997,9 +1009,9 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 1.5rem;
-  min-height: 1.5rem;
-  padding: 0 var(--space-2);
+  min-width: 1.15rem;
+  min-height: 1.15rem;
+  padding: 0 var(--space-1);
   border-radius: var(--radius-full);
   background: var(--warning-wash);
   color: var(--warning);
@@ -2528,6 +2540,11 @@ function syncParentTab(animate) {
       setTimeout(function() { panel.classList.remove('entering'); }, 300);
     }
     btn.classList.toggle('active', active);
+    // The bar scrolls, so the tab just chosen can sit under the fade. Pull it
+    // into view rather than leaving the parent looking at a half-pill.
+    if (active && btn.scrollIntoView) {
+      btn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
   });
 }
 

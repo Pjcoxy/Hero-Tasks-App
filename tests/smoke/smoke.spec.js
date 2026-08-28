@@ -1821,7 +1821,17 @@ test('tapping a day expands its agenda inline, without leaving the screen', asyn
 // Drives the real ingest route with the harness key, exactly as the email
 // Function will. Distinct externalRefs per test: the store lives for the
 // whole run and same-email ingests are deliberately idempotent.
+//
+// And distinct per RUN, which is why the suffix exists. The database is the
+// live one and outlives the run, so a fixed ref meant the second run's ingest
+// found the first run's approved item and returned a duplicate instead of a
+// fresh card - leaving the approve test clicking a card that was not there and
+// looking for a calendar row dated days earlier.
+let proposalSeq = 0;
 async function seedProposal(page, overrides) {
+  proposalSeq += 1;
+  const unique = `${overrides.externalRef}-${Date.now()}-${proposalSeq}`;
+  overrides = { ...overrides, externalRef: unique };
   return page.evaluate(async (extra) => {
     const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
       method: 'POST',
@@ -1915,17 +1925,22 @@ test('approving a proposal puts it on the calendar, badged as from email', async
 
   await page.getByRole('button', { name: /^Calendar$/ }).first().click();
   await expect(page.locator('#p-calendar-grid .cal-cell').first()).toBeVisible();
-  await page.evaluate(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 2);
-    parentCalendarSelectedDay = d.getFullYear() + '-'
-      + String(d.getMonth() + 1).padStart(2, '0') + '-'
-      + String(d.getDate()).padStart(2, '0');
-    renderParentCalendar();
-  });
   const agenda = page.locator('#p-calendar-agenda');
   const row = agenda.locator('.parent-list-row').filter({ hasText: 'Smoke School Fair' });
-  await expect(row).toBeVisible();
+  // A background refresh re-enters the loading state and blanks the agenda,
+  // which can land between choosing the day and reading it. Choose and read as
+  // one retried step rather than assuming the first attempt survives.
+  await expect(async () => {
+    await page.evaluate(() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 2);
+      parentCalendarSelectedDay = d.getFullYear() + '-'
+        + String(d.getMonth() + 1).padStart(2, '0') + '-'
+        + String(d.getDate()).padStart(2, '0');
+      renderParentCalendar();
+    });
+    await expect(row).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 20000 });
   await expect(row).toContainText('📧 from email');
 });
 
