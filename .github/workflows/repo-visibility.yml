@@ -1,0 +1,43 @@
+# Manually-triggered: flip this repository between private and public.
+#
+# Why it exists: the repository being public is how a scraper found the owner's
+# email and cold-mailed him about an unrelated "quant framework" project. The
+# app holds no secrets in its code, but there is no reason for a family's chore
+# app to be readable by everyone either.
+#
+# It is a workflow rather than a one-off click so the change is recorded, and so
+# it can be put back the same way. Never runs on its own.
+name: Set repository visibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      visibility:
+        description: Repository visibility
+        required: true
+        default: private
+        type: choice
+        options:
+          - private
+          - public
+
+permissions:
+  contents: read
+
+jobs:
+  set-visibility:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set visibility
+        env:
+          # The built-in GITHUB_TOKEN cannot change repository settings; this is
+          # the same personal token auto-merge.yml already uses.
+          GH_TOKEN: ${{ secrets.HEROTASK_GITHUB_TOKEN }}
+          VISIBILITY: ${{ inputs.visibility }}
+        run: |
+          set -euo pipefail
+          echo "Before: $(gh api "repos/${GITHUB_REPOSITORY}" --jq '.visibility')"
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}" \
+            -f visibility="${VISIBILITY}" --jq '.visibility' > /tmp/after
+          echo "After:  $(cat /tmp/after)"
+          test "$(cat /tmp/after)" = "${VISIBILITY}"
