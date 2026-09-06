@@ -1,0 +1,22 @@
+# Manually-triggered maintenance job: move the school-lunch chore on the LIVE
+# app to Sunday-Thursday evening, in place. Unlike "Seed demo data" this wipes
+# nothing - points, completions and the calendar are untouched.
+# Never runs on its own - workflow_dispatch only.
+name: Set lunch days
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  set-lunch-days:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Move school lunches to Sun-Thu
+        run: node scripts/set-lunch-days.mjs

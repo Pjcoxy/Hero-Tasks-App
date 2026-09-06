@@ -9,6 +9,8 @@
 //      points, the night-before deadline and the per-event override.
 //
 // Times are written in UTC but MEAN Perth (UTC+8): 17:30 Perth = 09:30Z.
+import { LUNCH_TITLE, LUNCH_DAYS } from './lunch-chore.mjs';
+
 const API = process.env.API_URL || 'https://herotasks-func-dev.azurewebsites.net/api/hero';
 const PIN = process.env.PARENT_PIN || '1234';
 const parent = { parentId: 'peter', parentPin: PIN };
@@ -58,14 +60,14 @@ for (const item of cal.items || []) {
   console.log('deleted calendar item:', item.title);
 }
 
-// ---- 2. chores: school lunches, Mon-Fri, evening window ----
+// ---- 2. chores: school lunches, Sun-Thu, evening window (lunch-chore.mjs) ----
 for (const kid of ['toby', 'ollie']) {
   await post({
     action: 'addTask', ...parent, kidId: kid,
-    title: 'Make school lunches', points: 5,
-    cycle: 'weekly', days: [1, 2, 3, 4, 5], windowId: 'evening',
+    title: LUNCH_TITLE, points: 5,
+    cycle: 'weekly', days: LUNCH_DAYS, windowId: 'evening',
   });
-  console.log(`chore: Make school lunches (${kid}, Mon-Fri, evening)`);
+  console.log(`chore: ${LUNCH_TITLE} (${kid}, Sun-Thu, evening)`);
 }
 
 // ---- 3. events with prep ----
