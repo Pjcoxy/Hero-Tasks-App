@@ -1,0 +1,27 @@
+# Manually-triggered one-shot: put the Cubs Lazer Blaze night (14 Sept 2026)
+# into the LIVE app as a proposal both boys can answer. Wipes nothing.
+#
+# Normally the email pipeline would do this by itself, but the app's Gmail
+# refresh token has expired, so no sweep can read the mail. This posts the same
+# payload through the same ingest action.
+# Never runs on its own - workflow_dispatch only.
+name: Add Lazer Blaze proposal
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  add-lazer-blaze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Offer the Lazer Blaze night to both boys
+        env:
+          EMAIL_INGEST_KEY: ${{ secrets.EMAIL_INGEST_KEY }}
+        run: node scripts/add-lazer-blaze.mjs
