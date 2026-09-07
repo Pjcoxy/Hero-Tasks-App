@@ -1,0 +1,22 @@
+# Manually-triggered one-shot: take Cubs off Monday 14 Sept 2026 on the LIVE
+# app, because that night is the Lazer Blaze activity instead. A skip, not a
+# delete - every other Monday's Cubs is untouched.
+# Never runs on its own - workflow_dispatch only.
+name: Skip Cubs for Lazer Blaze
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  skip-cubs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Take Cubs off 14 Sept
+        run: node scripts/skip-cubs-for-lazer-blaze.mjs
