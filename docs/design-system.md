@@ -323,11 +323,17 @@ deadline.
 
 Three named windows for the whole household, not a clock per chore:
 
-| Window | Closes |
-|---|---|
-| Morning | 08:30 |
-| After school | 18:00 |
-| Evening | 21:00 |
+| Window | Opens | Closes |
+|---|---|---|
+| Morning | — | 08:30 |
+| After school | — | 18:00 |
+| Evening | 14:30 | 21:00 |
+
+`opensAt` is optional. A window without one is open from local midnight, which
+is what every window meant before the field existed. Evening carries one
+because of what an evening chore *is*: school lunches are made for **tomorrow**,
+and a lunch packed at 8am is packed for the day the kid is already leaving for.
+Opening at 14:30 puts the tick and the work in the same afternoon.
 
 Defaults live in `DEFAULT_WINDOWS` in `hero.js`, overridable per household via
 a `windows` array on the household record — in code rather than the seed,
@@ -338,20 +344,36 @@ day is the honest reading of that.
 
 Rules that must not drift:
 
-- **The server is the only clock.** `state.windows[].closed` is computed
-  API-side and the frontend renders it; `completeTask` refuses a shut window
-  with `windowClosed: true`. The browser never computes shutness from its own
-  clock — a phone in the wrong timezone would show a different truth than the
-  API acts on.
+- **The server is the only clock.** `state.windows[].closed` and
+  `state.windows[].notOpenYet` are computed API-side and the frontend renders
+  them; `completeTask` refuses a shut window with `windowClosed: true` and one
+  that has not opened with `windowNotOpenYet: true`. The browser never computes
+  either from its own clock — a phone in the wrong timezone would show a
+  different truth than the API acts on.
+- **Early is not late.** They are opposite messages and must never share a
+  style. A shut window is a forfeit: greyed, danger red, points struck through,
+  `❌`. A window that has not opened is a *hold*: greyed, muted text, `🔒`,
+  "Opens 2:30pm", points untouched — and `recordMisses` never writes a miss for
+  it, because nothing has been forfeited while the window is still coming.
 - **A miss stays on screen.** The row greys, says why, strikes the points —
   it does not vanish. A miss that disappears overnight teaches nothing.
 - **One-offs are separate.** They carry their own `dueBy` and overdue display;
   folding the two mechanisms together is a decision, not a default.
 - **Tests pin the clock.** "Now" is part of behaviour, so `test-logic.js` and
   the smoke server pin `HOUSEHOLD_TIMEZONE` to a fixed-offset zone where local
-  time is ~noon — morning has always shut, evening is always open, whatever
-  hour CI runs. A window of `closesAt: '00:00'` is shut at every moment of the
-  day, which is the deterministic way to test refusal.
+  time is ~noon. At noon: **morning** has always shut, **after school** is
+  always open, and **evening** has not opened yet — all three states, whatever
+  hour CI runs. So a test that merely needs a tickable chore must name
+  `afterschool`; leaving the window off falls back to evening and the tick is
+  refused as early. A window of `closesAt: '00:00'` is shut at every moment of
+  the day and one of `opensAt: '23:59'` has never opened at noon — the
+  deterministic ways to test each refusal.
+
+  `test-logic.js` additionally runs its household on windows with no `opensAt`,
+  because the pinned noon is before 14:30 and dozens of tests about approval,
+  points and streaks would otherwise fail for a reason none of them asserts.
+  The opening rule has its own block, driven by explicit clocks in the real
+  Perth zone.
 
 ### Misses — the record that points were not earned
 
