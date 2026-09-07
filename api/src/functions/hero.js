@@ -48,6 +48,7 @@ function localMinutes(now = new Date()) {
 }
 
 const HHMM_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DUE_REMINDER_SCHEDULE = '0 */15 * * * *';
 const VOICE_INTENT_CONFIRMATION_THRESHOLD = 0.6;
 
@@ -440,6 +441,11 @@ async function validatePlanningPayload(req, currentItem = null) {
     prepDueBy: null,
     externalRef: null,
     allDay: false,
+    // Household-local dates (YYYY-MM-DD) this weekly series does NOT run on.
+    // One night off is not the end of a series: Cubs replaced by a Lazer Blaze
+    // night is still Cubs every other Monday, so the exception belongs on the
+    // series rather than forcing a delete-and-recreate.
+    skipDates: [],
   };
 
   if (!currentItem || req.type !== undefined) {
@@ -505,6 +511,16 @@ async function validatePlanningPayload(req, currentItem = null) {
     } else {
       return { ok: false, error: "recurrence must be 'weekly' or null" };
     }
+  }
+
+  // Skipped dates only mean anything on a repeating item. Same rule as a
+  // chore's weekday list: a field that belongs to one shape is cleared when the
+  // item leaves that shape, rather than lying dormant and surprising someone
+  // who turns repetition back on.
+  if (next.recurrence !== 'weekly') {
+    next.skipDates = [];
+  } else if (!Array.isArray(next.skipDates)) {
+    next.skipDates = [];
   }
 
   // Per-event override for when prep is due. Absent, the rule is the last
@@ -863,6 +879,14 @@ function occurrenceShift(item, k) {
   };
 }
 
+// One night off. A skipped occurrence is not on the calendar, its prep is not
+// live, and the sweep records no prep miss for it - all three follow from this
+// one predicate, because the calendar and the sweep both read occurrences
+// through here.
+function isOccurrenceSkipped(item, dateStr) {
+  return Array.isArray(item.skipDates) && item.skipDates.includes(dateStr);
+}
+
 function currentOccurrence(item, now = new Date()) {
   if (item.recurrence !== 'weekly') {
     return { startAt: item.startAt, endAt: item.endAt || null, prepDueBy: item.prepDueBy || null,
@@ -872,6 +896,9 @@ function currentOccurrence(item, now = new Date()) {
   for (let k = 0; k < MAX_OCCURRENCES; k += 1) {
     const occ = occurrenceShift(item, k);
     const date = todayStr(new Date(occ.startAt));
+    // A skipped week is not "the next one up" - the prep for a night that is
+    // not happening must never be the live list.
+    if (isOccurrenceSkipped(item, date)) continue;
     if (date >= nowDate) return { ...occ, date };
   }
   const last = occurrenceShift(item, MAX_OCCURRENCES - 1);
@@ -1089,6 +1116,49 @@ async function updatePlanningItem(req) {
   await planningItems.item(req.planningItemId, HOUSEHOLD_ID).replace(validated.item);
   const { conflicts, suggestedTimes } = await getConflictsForItem(validated.item);
   return { ok: true, item: validated.item, conflicts, suggestedTimes };
+}
+
+// Take one night out of a weekly series, or put it back. Deliberately NOT a
+// delete: deleting the item deletes the whole series, and "Lazer Blaze instead
+// of Cubs this week" is one night off a series that otherwise carries on.
+//
+// The date is the occurrence's household-local date, which is what the calendar
+// already labels every occurrence with (occurrenceDate), so a client never does
+// timezone maths to name the night it means.
+async function skipOccurrence(req) {
+  await requireParent(req.parentId, req.parentPin);
+  const date = String(req.occurrenceDate || '').trim();
+  if (!DATE_RE.test(date)) return { ok: false, error: 'occurrenceDate must be YYYY-MM-DD' };
+
+  const planningItems = container('planningItems');
+  const { resource: item } = await planningItems
+    .item(req.planningItemId, HOUSEHOLD_ID)
+    .read()
+    .catch(() => ({ resource: null }));
+  if (!item || item.active === false) return { ok: false, error: 'Planning item not found' };
+  if (item.recurrence !== 'weekly') {
+    return { ok: false, error: 'Only a repeating event has occurrences to skip' };
+  }
+
+  // The date has to BE one of this series' nights. Without this a typo silently
+  // writes a skip that matches nothing and the night it was meant to remove
+  // stays on the calendar, which looks exactly like the feature not working.
+  const dates = [];
+  for (let k = 0; k < MAX_OCCURRENCES; k += 1) {
+    dates.push(todayStr(new Date(occurrenceShift(item, k).startAt)));
+  }
+  if (!dates.includes(date)) {
+    return { ok: false, error: 'That date is not one of this event\u2019s nights' };
+  }
+
+  const current = Array.isArray(item.skipDates) ? item.skipDates : [];
+  const skip = req.skip === undefined ? true : !!req.skip;
+  item.skipDates = skip
+    ? [...new Set([...current, date])].sort()
+    : current.filter((d) => d !== date);
+
+  await planningItems.item(req.planningItemId, HOUSEHOLD_ID).replace(item);
+  return { ok: true, item, skipped: skip };
 }
 
 async function deletePlanningItem(req) {
@@ -1396,6 +1466,7 @@ async function calendar(req) {
       const occStart = new Date(occ.startAt);
       if (occStart.getTime() > end.getTime()) break;
       if (occStart.getTime() < start.getTime()) continue;
+      if (isOccurrenceSkipped(item, todayStr(occStart))) continue;
       const row = {
         ...item,
         kind: item.type,
@@ -2337,6 +2408,7 @@ const ROUTES = {
   addPlanningItem,
   updatePlanningItem,
   deletePlanningItem,
+  skipOccurrence,
   ingestEmailItem,
   respondProposal,
   decideProposal,
@@ -2422,4 +2494,4 @@ app.timer('choreDueReminder', {
   },
 });
 
-module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, recordMisses, sendWindowNudges, sendEveningSummary, todayStr, localMinutes, HOUSEHOLD_TZ, DEFAULT_WINDOWS, isWindowClosed, isWindowNotOpenYet, resolveWindow, currentOccurrence };
+module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, recordMisses, sendWindowNudges, sendEveningSummary, todayStr, localMinutes, HOUSEHOLD_TZ, DEFAULT_WINDOWS, isWindowClosed, isWindowNotOpenYet, resolveWindow, currentOccurrence, isOccurrenceSkipped };
