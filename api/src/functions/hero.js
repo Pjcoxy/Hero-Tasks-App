@@ -78,10 +78,17 @@ function isInQuietHours(quietHours, now = new Date()) {
 // record on purpose - ensureSeeded() only writes when the household is absent,
 // so seeding them would do nothing for a household created weeks ago. A
 // household may override them; when it has not, these apply immediately.
+//
+// A window may also carry `opensAt`. Without it a window is open from local
+// midnight - which is what every window meant before, so morning and after
+// school are unchanged. Evening carries one because of what an evening chore
+// actually is: school lunches are made for TOMORROW, and a lunch packed at
+// 8am is packed for the day the kid is about to leave for. Opening at 14:30
+// (the school day is over) means the tick and the work land together.
 const DEFAULT_WINDOWS = Object.freeze([
   Object.freeze({ id: 'morning',     label: 'Morning',      closesAt: '08:30' }),
   Object.freeze({ id: 'afterschool', label: 'After school', closesAt: '18:00' }),
-  Object.freeze({ id: 'evening',     label: 'Evening',      closesAt: '21:00' }),
+  Object.freeze({ id: 'evening',     label: 'Evening',      opensAt: '14:30', closesAt: '21:00' }),
 ]);
 
 // What a chore with no window set means. Existing chores predate the concept,
@@ -112,6 +119,16 @@ function resolveWindow(windows, windowId) {
 function isWindowClosed(windowDef, now = new Date()) {
   if (!windowDef || !HHMM_RE.test(windowDef.closesAt || '')) return false;
   return localMinutes(now) >= hhmmToMinutes(windowDef.closesAt);
+}
+
+// Whether the window has not started yet today. The mirror of isWindowClosed,
+// and deliberately a SEPARATE state from closed: "come back at 2:30" and "you
+// missed it" are opposite messages, and a row that renders one as the other
+// teaches the kid the wrong thing. A window with no opensAt is never early -
+// that is the pre-opensAt meaning, kept for every window that has none.
+function isWindowNotOpenYet(windowDef, now = new Date()) {
+  if (!windowDef || !HHMM_RE.test(windowDef.opensAt || '')) return false;
+  return localMinutes(now) < hhmmToMinutes(windowDef.opensAt);
 }
 
 async function getHouseholdQuietHours() {
@@ -224,7 +241,7 @@ async function getState() {
     // truth than the API acts on. Stale-while-open is acceptable - the display
     // refreshes on every state fetch, and a submit against a window that shut
     // in between gets the API's own refusal with a clear message.
-    windows: windows.map((w) => ({ ...w, closed: isWindowClosed(w) })),
+    windows: windows.map((w) => ({ ...w, closed: isWindowClosed(w), notOpenYet: isWindowNotOpenYet(w) })),
     fallbackWindowId: FALLBACK_WINDOW_ID,
     people: people.map((p) => ({ id: p.id, name: p.name, emoji: p.emoji, role: p.role, hasPin: !!p.pin })),
     rewards: rewardDocs.map((r) => ({ id: r.id, title: r.title, cost: r.cost, needsApproval: r.needsApproval })),
@@ -1476,6 +1493,15 @@ async function completeTask(req) {
   if (chore.cycle !== 'oneoff') {
     const windows = await getHouseholdWindows();
     const choreWindow = resolveWindow(windows, chore.windowId);
+    // Early is not the same as late. Nothing is forfeited here - the window is
+    // still coming, so this is a "not yet", and no miss is ever recorded for it.
+    if (isWindowNotOpenYet(choreWindow)) {
+      return {
+        ok: false,
+        error: `The ${String(choreWindow.label).toLowerCase()} window opens at ${choreWindow.opensAt}.`,
+        windowNotOpenYet: true,
+      };
+    }
     if (isWindowClosed(choreWindow)) {
       return {
         ok: false,
@@ -2396,4 +2422,4 @@ app.timer('choreDueReminder', {
   },
 });
 
-module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, recordMisses, sendWindowNudges, sendEveningSummary, todayStr, localMinutes, HOUSEHOLD_TZ, DEFAULT_WINDOWS, isWindowClosed, resolveWindow, currentOccurrence };
+module.exports = { getState, calcStreak, calcBadges, ROUTES, updateQuietHours, isInQuietHours, sendDueReminders, recordMisses, sendWindowNudges, sendEveningSummary, todayStr, localMinutes, HOUSEHOLD_TZ, DEFAULT_WINDOWS, isWindowClosed, isWindowNotOpenYet, resolveWindow, currentOccurrence };

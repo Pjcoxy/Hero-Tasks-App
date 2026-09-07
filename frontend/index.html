@@ -728,6 +728,12 @@ button:disabled { cursor: not-allowed; opacity: 0.65; }
 .task.overdue .sub  { color: var(--danger); font-weight: var(--weight-medium); }
 /* A shut window. Dimmed but still on the list - a miss that vanished overnight
    would teach nothing; one that sits there until tomorrow is the record. */
+/* Not open yet. Dimmed like a miss because it cannot be ticked, but never in
+   the danger colour: "come back at 2:30" and "you missed it" are opposite
+   messages, and the points are still there to be earned. */
+.task.not-open-yet { opacity: 0.6; }
+.task.not-open-yet .tick { cursor: default; }
+.task.not-open-yet .sub  { color: var(--ink-muted); }
 .task.missed { opacity: 0.6; }
 .task.missed .tick { border-color: var(--danger); cursor: default; }
 .task.missed .sub  { color: var(--danger); font-weight: var(--weight-medium); }
@@ -2721,13 +2727,15 @@ function glanceChoreCard(item) {
     ? (c.status === 'approved' ? 'Done — points banked! 💰' : c.status === 'queued' ? 'Saved offline — syncing soon 📡' : 'Waiting for a grown-up to check ⏳')
     : '';
   var ws = choreWindowState(task, c);
-  if (!c && ws) sub = ws.missed ? ws.missedText : (sub ? sub + ' · ' + ws.stake : ws.stake);
   var missed = !!(ws && ws.missed);
+  var notOpenYet = !!(ws && ws.notOpenYet);
+  if (!c && ws) sub = missed ? ws.missedText : notOpenYet ? ws.notOpenYetText : (sub ? sub + ' · ' + ws.stake : ws.stake);
   var action = c
     ? ((c.status === 'pending' || c.status === 'queued') ? 'undoTask(\'' + c.id + '\')' : '')
-    : (missed ? '' : 'doTask(\'' + task.id + '\')');
+    : (missed || notOpenYet ? '' : 'doTask(\'' + task.id + '\')');
   if (missed) tickIcon = '❌';
-  return '<div class="task ' + cls + (missed ? ' missed' : '') + '">'
+  else if (notOpenYet) tickIcon = '🔒';
+  return '<div class="task ' + cls + (missed ? ' missed' : '') + (notOpenYet ? ' not-open-yet' : '') + '">'
     + '<button class="tick" ' + (action ? 'onclick="' + action + '"' : 'disabled') + '>' + tickIcon + '</button>'
     + '<div class="info">'
     + '<div class="title">' + esc(task.title) + '</div>'
@@ -3696,18 +3704,22 @@ function renderTaskList(elId, tasks, emptyEmoji, emptyLine1, emptyLine2) {
     // dueBy mechanics.
     var ws = choreWindowState(t, c);
     var missed = !!(ws && ws.missed);
+    // Early, not late. The row is held rather than lost: no tick yet, but the
+    // points are still on the table and nothing is struck through.
+    var notOpenYet = !!(ws && ws.notOpenYet);
     var sub = c
       ? (c.status === 'approved' ? 'Done — points banked! 💰' : c.status === 'queued' ? 'Saved offline — syncing soon 📡' : 'Waiting for a grown-up to check ⏳')
       : (t.cycle === 'weekly'
           ? (t.days && t.days.length ? 'On ' + daysLabel(t.days) : 'Any time this week')
           : '');
-    if (!c && ws) sub = missed ? ws.missedText : (sub ? sub + ' · ' + ws.stake : ws.stake);
+    if (!c && ws) sub = missed ? ws.missedText : notOpenYet ? ws.notOpenYetText : (sub ? sub + ' · ' + ws.stake : ws.stake);
     if (!c && t.dueBy) sub = isOverdue ? '⚠️ Overdue — was due ' + formatDue(t.dueBy) : 'Due ' + formatDue(t.dueBy);
     var action = c
       ? ((c.status === 'pending' || c.status === 'queued') ? 'undoTask(\'' + c.id + '\')' : '')
-      : (missed ? '' : 'doTask(\'' + t.id + '\')');
+      : (missed || notOpenYet ? '' : 'doTask(\'' + t.id + '\')');
     if (missed) tickIcon = '❌';
-    return '<div class="task ' + cls + ' ' + (isOverdue ? 'overdue' : '') + (missed ? ' missed' : '') + '">'
+    else if (notOpenYet) tickIcon = '🔒';
+    return '<div class="task ' + cls + ' ' + (isOverdue ? 'overdue' : '') + (missed ? ' missed' : '') + (notOpenYet ? ' not-open-yet' : '') + '">'
       + '<button class="tick" ' + (action ? 'onclick="' + action + '"' : 'disabled') + '>' + tickIcon + '</button>'
       + '<div class="info">'
       + '<div class="title">' + esc(t.title) + '</div>'
@@ -4322,7 +4334,7 @@ function renderParent(person) {
   if (windowSel) {
     var windowCurrent = windowSel.value;
     windowSel.innerHTML = ((state.windows) || []).map(function(w) {
-      return '<option value="' + w.id + '">' + esc(w.label) + ' — by ' + w.closesAt + '</option>';
+      return '<option value="' + w.id + '">' + esc(w.label) + ' — ' + windowLabel(w) + '</option>';
     }).join('');
     // Default new chores to the fallback window rather than the first option,
     // so an untouched form matches what the API would assume anyway.
@@ -5391,13 +5403,22 @@ function choreWindow(t) {
   return windows.length ? windows[windows.length - 1] : null;
 }
 
-function windowLabel(w) {
-  if (!w) return '';
-  var mins = hhmmToMinutes(w.closesAt);
+// "9pm", "2:30pm" - the chip form. Minutes are dropped when they are zero,
+// because "9:00pm" is a clock and "9pm" is how the household says it.
+function hhmmTo12(value) {
+  var mins = hhmmToMinutes(value);
   var h = Math.floor(mins / 60), m = mins % 60;
   var ampm = h >= 12 ? 'pm' : 'am';
   var h12 = h % 12 === 0 ? 12 : h % 12;
-  return 'closes ' + h12 + (m ? ':' + String(m).padStart(2, '0') : '') + ' ' + ampm;
+  return h12 + (m ? ':' + String(m).padStart(2, '0') : '') + ampm;
+}
+
+// A window with both ends reads as a span - "2:30pm-9pm" - rather than two
+// sentences. One with only a close keeps the wording it has always had.
+function windowLabel(w) {
+  if (!w) return '';
+  if (w.opensAt) return hhmmTo12(w.opensAt) + '\u2013' + hhmmTo12(w.closesAt);
+  return 'closes ' + hhmmTo12(w.closesAt);
 }
 
 function hhmmToMinutes(value) {
@@ -5412,6 +5433,10 @@ function isWindowShut(w) {
   return !!(w && w.closed);
 }
 
+function isWindowNotOpenYet(w) {
+  return !!(w && w.notOpenYet);
+}
+
 // The window facts a chore row needs, shared by the Home glance card and the
 // Missions lists so the two can never drift apart. Null for one-offs - they
 // carry their own dueBy mechanics.
@@ -5421,8 +5446,10 @@ function choreWindowState(task, completion) {
   if (!w) return null;
   return {
     missed: !completion && isWindowShut(w),
+    notOpenYet: !completion && isWindowNotOpenYet(w),
     stake: windowLabel(w),
     missedText: 'Missed — ' + String(w.label || '').toLowerCase() + ' window closed at ' + w.closesAt,
+    notOpenYetText: 'Opens ' + hhmmTo12(w.opensAt),
   };
 }
 

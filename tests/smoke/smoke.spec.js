@@ -532,6 +532,9 @@ test('a Waiting on you row leads to its approval card', async ({ page }) => {
     await post({
       action: 'addTask', parentId: 'peter', parentPin: '1234',
       kidId: 'toby', title: 'Feed the dog', points: 3, cycle: 'daily',
+      // afterschool is the window the pinned clock leaves open (see the window
+      // tests). This test is about approval, not about which window it is in.
+      windowId: 'afterschool',
     });
     const state = await post({ action: 'state' });
     const task = state.tasks.find((t) => t.title === 'Feed the dog');
@@ -1041,10 +1044,11 @@ test('a completion counts for its own day, not the whole week', async ({ page })
   expect(verdict.legacyWednesday, 'a chore with no named days keeps the weekly rule').toBe(true);
 });
 
-// Windows are what make the points real: submit before the close or they are
-// gone for the day. The server is the only clock - the harness pins household
-// time to ~noon, so 'morning' has always shut and 'evening' is always open,
-// whatever hour CI runs at.
+// Windows are what make the points real: submit inside the window or the points
+// are gone for the day. The server is the only clock - the harness pins
+// household time to ~noon, so 'morning' has always shut, 'afterschool' (closes
+// 18:00, no opening time) is always open, and 'evening' (14:30-21:00) has not
+// opened yet, whatever hour CI runs at. All three states, deterministically.
 test('a chore states its window and stake, and a shut window reads as missed', async ({ page }) => {
   await page.evaluate(async () => {
     const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
@@ -1054,7 +1058,7 @@ test('a chore states its window and stake, and a shut window reads as missed', a
     }).then((r) => r.json());
     await post({
       action: 'addTask', parentId: 'peter', parentPin: '1234',
-      kidId: 'toby', title: 'Feed the fish', points: 2, cycle: 'daily', windowId: 'evening',
+      kidId: 'toby', title: 'Feed the fish', points: 2, cycle: 'daily', windowId: 'afterschool',
     });
     await post({
       action: 'addTask', parentId: 'peter', parentPin: '1234',
@@ -1071,7 +1075,7 @@ test('a chore states its window and stake, and a shut window reads as missed', a
   // Open window: the row names its stake and can be ticked.
   const open = page.locator('.task', { hasText: 'Feed the fish' }).first();
   await expect(open).toBeVisible();
-  await expect(open).toContainText(/closes 9\s?pm/i);
+  await expect(open).toContainText(/closes 6\s?pm/i);
   await expect(open.locator('.tick')).toBeEnabled();
 
   // Shut window: greyed, says missed, tick disabled, points struck through.
@@ -1079,6 +1083,69 @@ test('a chore states its window and stake, and a shut window reads as missed', a
   await expect(missed).toBeVisible();
   await expect(missed).toContainText(/missed/i);
   await expect(missed.locator('.tick')).toBeDisabled();
+});
+
+// The other end of a window. Evening opens at 14:30 because an evening chore is
+// done for TOMORROW - school lunches packed at 8am are packed for the day the
+// kid is already leaving for. Early must not read as missed: the points are
+// still there, so the row says when to come back and nothing is struck through.
+test('a window that has not opened yet says when, and never reads as a miss', async ({ page }) => {
+  await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    await post({
+      action: 'addTask', parentId: 'peter', parentPin: '1234',
+      kidId: 'toby', title: 'Pack the lunchbox', points: 5, cycle: 'daily', windowId: 'evening',
+    });
+  });
+  await page.reload();
+  await pickPerson(page, 'Toby');
+
+  const early = page.locator('.task.not-open-yet', { hasText: 'Pack the lunchbox' }).first();
+  await expect(early).toBeVisible();
+  await expect(early).toContainText(/opens 2:30\s?pm/i);
+  await expect(early.locator('.tick')).toBeDisabled();
+  // A miss is a forfeit. This is not one, so none of that styling applies.
+  await expect(early).not.toHaveClass(/\bmissed\b/);
+  await expect(early).not.toContainText(/missed/i);
+});
+
+// The refusal is the API's here too - and it is its own answer, not the
+// shut-window one wearing a different label.
+test('a window that has not opened refuses the completion at the API', async ({ page }) => {
+  const verdict = await page.evaluate(async () => {
+    const post = (body) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+    await post({
+      action: 'addTask', parentId: 'peter', parentPin: '1234',
+      kidId: 'ollie', title: 'Rinse the bottles', points: 2, cycle: 'daily', windowId: 'evening',
+    });
+    const state = await post({ action: 'state' });
+    const task = state.tasks.find((t) => t.title === 'Rinse the bottles');
+    const refusal = await post({ action: 'completeTask', taskId: task.id, personId: 'ollie', pin: '1234' });
+    await post({ action: 'deleteTask', parentId: 'peter', parentPin: '1234', taskId: task.id });
+    const evening = (state.windows || []).find((w) => w.id === 'evening');
+    return {
+      ok: refusal.ok,
+      notOpenYet: refusal.windowNotOpenYet,
+      closed: refusal.windowClosed,
+      error: refusal.error,
+      stateSaysEarly: evening && evening.notOpenYet,
+      stateOpensAt: evening && evening.opensAt,
+    };
+  });
+  expect(verdict.ok, 'the API refuses a completion before the window opens').toBe(false);
+  expect(verdict.notOpenYet, 'and flags it as early').toBe(true);
+  expect(verdict.closed, 'never as a shut window').not.toBe(true);
+  expect(verdict.error, 'the message says when to come back').toMatch(/opens at 14:30/i);
+  expect(verdict.stateSaysEarly, 'state carries the flag so the browser never computes it').toBe(true);
+  expect(verdict.stateOpensAt, 'and the opening time to render').toBe('14:30');
 });
 
 // The refusal is the API's, not just the row's - a stale page that still shows
@@ -1235,6 +1302,8 @@ test('the Today header shows the real date, and a submitted chore is struck thro
     await post({
       action: 'addTask', parentId: 'peter', parentPin: '1234',
       kidId: 'toby', title: 'Sweep the porch', points: 2, cycle: 'daily',
+      // Open at the pinned clock, so the tick below is about the strike-through.
+      windowId: 'afterschool',
     });
   });
   await page.reload();
@@ -1620,7 +1689,7 @@ test('a kid card reports status as pills, not paragraphs', async ({ page }) => {
     const post = (b) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
     }).then((r) => r.json());
-    await post({ action: 'addTask', parentId: 'peter', parentPin: '1234', kidId: 'toby', title: 'Pill check chore', points: 3, cycle: 'daily' });
+    await post({ action: 'addTask', parentId: 'peter', parentPin: '1234', kidId: 'toby', title: 'Pill check chore', points: 3, cycle: 'daily', windowId: 'afterschool' });
     const st = await post({ action: 'state' });
     const t = st.tasks.find((x) => x.title === 'Pill check chore');
     await post({ action: 'completeTask', personId: 'toby', pin: '1234', taskId: t.id });

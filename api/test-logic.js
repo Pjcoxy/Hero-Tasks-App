@@ -108,6 +108,26 @@ async function main() {
   process.env.VAPID_PRIVATE_KEY = 'test-vapid-private-key';
   await ensureSeeded();
 
+  // The pinned clock reads ~noon (see the top of this file), and the DEFAULT
+  // evening window opens at 14:30 - so with the shipped defaults every chore on
+  // the fallback window would be refused as "not open yet" and dozens of tests
+  // about approval, points and streaks would fail for a reason none of them is
+  // asserting. Those tests are about the CLOSE, so the household runs on
+  // windows with no opensAt, which is what a window meant before the field
+  // existed. The opening rule has its own block further down, driven by
+  // explicit clocks so it is deterministic whatever hour CI runs.
+  const OPEN_ALL_DAY_WINDOWS = [
+    { id: 'morning', label: 'Morning', closesAt: '08:30' },
+    { id: 'afterschool', label: 'After school', closesAt: '18:00' },
+    { id: 'evening', label: 'Evening', closesAt: '21:00' },
+  ];
+  {
+    const { resource: seeded } = await mockContainer('households')
+      .item(HOUSEHOLD_ID, HOUSEHOLD_ID).read();
+    seeded.windows = OPEN_ALL_DAY_WINDOWS;
+    await mockContainer('households').item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(seeded);
+  }
+
   const peopleMap = getMap('people');
   assert.strictEqual(peopleMap.size, 4, 'expected 4 seeded people');
   const toby = peopleMap.get('toby');
@@ -1805,6 +1825,7 @@ async function main() {
   const { execFileSync } = require('child_process');
   const perthProbe = execFileSync(process.execPath, ['-e', `
     const h = require(${JSON.stringify(path.join(__dirname, 'src/functions/hero.js'))});
+    const EVENING = { id: 'evening', label: 'Evening', opensAt: '14:30', closesAt: '21:00' };
     const out = {
       beforeSchool: h.todayStr(new Date('2026-08-23T23:30:00Z')),
       midnightMins: h.localMinutes(new Date('2026-08-23T16:00:00Z')),
@@ -1814,6 +1835,14 @@ async function main() {
       quietMidMorning: h.isInQuietHours({ start: '21:00', end: '07:00' }, new Date('2026-08-24T02:00:00Z')),
       windowShutLateEvening: h.isWindowClosed({ id: 'evening', closesAt: '21:00' }, new Date('2026-08-24T13:30:00Z')),
       windowOpenAfternoon:  h.isWindowClosed({ id: 'evening', closesAt: '21:00' }, new Date('2026-08-24T06:00:00Z')),
+      shippedEvening: h.DEFAULT_WINDOWS.find((w) => w.id === 'evening'),
+      otherWindowsHaveNoOpen: h.DEFAULT_WINDOWS.filter((w) => w.id !== 'evening').every((w) => !w.opensAt),
+      // 08:00 Perth, 14:00 Perth (half an hour early) and 15:00 Perth.
+      earlyAtBreakfast:  h.isWindowNotOpenYet(EVENING, new Date('2026-08-24T00:00:00Z')),
+      earlyAtTwo:        h.isWindowNotOpenYet(EVENING, new Date('2026-08-24T06:00:00Z')),
+      earlyAtThree:      h.isWindowNotOpenYet(EVENING, new Date('2026-08-24T07:00:00Z')),
+      shutAtThree:       h.isWindowClosed(EVENING, new Date('2026-08-24T07:00:00Z')),
+      noOpensAtIsNeverEarly: h.isWindowNotOpenYet({ id: 'x', label: 'X', closesAt: '21:00' }, new Date('2026-08-24T00:00:00Z')),
     };
     process.stdout.write(JSON.stringify(out));
   `], {
@@ -1840,6 +1869,21 @@ async function main() {
   assert.strictEqual(perth.windowShutLateEvening, true, '9:30pm is past a 21:00 close');
   assert.strictEqual(perth.windowOpenAfternoon, false, '2pm is not');
   console.log('\u2713 a window closes on the household clock, not UTC');
+
+  // The other end of the same window. Evening opens at 14:30 because an evening
+  // chore is done for TOMORROW - school lunches packed at 8am are packed for the
+  // day the kid is already leaving for. Early is not late: nothing is forfeited.
+  assert.strictEqual(perth.shippedEvening.opensAt, '14:30', 'the shipped evening window opens at 14:30');
+  assert.strictEqual(perth.shippedEvening.closesAt, '21:00', 'and still closes at 21:00');
+  assert.strictEqual(perth.otherWindowsHaveNoOpen, true,
+    'morning and after school carry no opening time - unchanged by this');
+  assert.strictEqual(perth.earlyAtBreakfast, true, '8am is before the evening window opens');
+  assert.strictEqual(perth.earlyAtTwo, true, 'so is 2pm - the edge is 14:30, not 14:00');
+  assert.strictEqual(perth.earlyAtThree, false, '3pm is inside it');
+  assert.strictEqual(perth.shutAtThree, false, 'and 3pm is not past its close either');
+  assert.strictEqual(perth.noOpensAtIsNeverEarly, false,
+    'a window with no opening time is never early - the meaning every window had before');
+  console.log('\u2713 the evening window is a 14:30-21:00 band on the household clock');
 
   // -------------------------------------------------------------------------
   // Windows. The rule: submit inside the window or the points are gone - no
@@ -1901,8 +1945,52 @@ async function main() {
     'a chore with no window falls back to the evening window rather than escaping the rule');
   console.log('\u2713 legacy chores without a window are held to the fallback window');
 
-  // Put the windows back for anything that runs after this.
-  household.windows = null;
+  // Put the windows back for anything that runs after this - the open-all-day
+  // set this file runs on, not null, which would restore the shipped defaults
+  // and their 14:30 opening.
+  household.windows = OPEN_ALL_DAY_WINDOWS;
+  await mockContainer('households').item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(household);
+
+  // -------------------------------------------------------------------------
+  // Opening times, at the API. The clock facts are asserted in the Perth probe
+  // above; this is the behaviour built on them. An opening time of 23:59 has
+  // not arrived at the pinned ~noon whatever hour CI runs, which is the mirror
+  // of the closesAt '00:00' trick the shut-window tests use.
+  household.windows = [
+    { id: 'morning', label: 'Morning', closesAt: '08:30' },
+    { id: 'afterschool', label: 'After school', closesAt: '18:00' },
+    { id: 'evening', label: 'Evening', opensAt: '23:59', closesAt: '23:59' },
+  ];
+  await mockContainer('households').item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(household);
+
+  await ROUTES.addTask({
+    parentId: 'peter', parentPin: '1234', kidId: 'ollie',
+    title: 'Too early chore', points: 4, cycle: 'daily', windowId: 'evening',
+  });
+  const earlyChore = (await ROUTES.state()).tasks.find((t) => t.title === 'Too early chore');
+  const earlyTick = await ROUTES.completeTask({ taskId: earlyChore.id, personId: 'ollie', pin: '1234' });
+  assert.strictEqual(earlyTick.ok, false, 'a window that has not opened refuses the completion');
+  assert.strictEqual(earlyTick.windowNotOpenYet, true, 'and says so machine-readably');
+  assert.notStrictEqual(earlyTick.windowClosed, true, 'without ever calling it a miss');
+  console.log('\u2713 a window that has not opened refuses the tick - and never as a miss');
+
+  const earlyState = await ROUTES.state();
+  const earlyWindow = earlyState.windows.find((w) => w.id === 'evening');
+  assert.strictEqual(earlyWindow.notOpenYet, true, 'state tells the client the window is early');
+  assert.strictEqual(earlyWindow.opensAt, '23:59', 'and carries the opening time to render');
+  assert.ok(earlyState.windows.every((w) => typeof w.notOpenYet === 'boolean'),
+    'every window carries the flag - the server is the only clock, same as closed');
+  console.log('\u2713 state carries opensAt and notOpenYet so the browser never computes either');
+
+  // The sweep must not turn an unopened window into a miss. A miss is a
+  // forfeit, and nothing has been forfeited while the window is still coming.
+  await require('./src/functions/hero.js').recordMisses();
+  const sweptEarly = (await ROUTES.state()).completions
+    .filter((c) => c.taskId === earlyChore.id && c.status === 'missed');
+  assert.strictEqual(sweptEarly.length, 0, 'a chore whose window has not opened is not swept as missed');
+  console.log('\u2713 the miss sweep leaves a not-yet-open chore alone');
+
+  household.windows = OPEN_ALL_DAY_WINDOWS;
   await mockContainer('households').item(HOUSEHOLD_ID, HOUSEHOLD_ID).replace(household);
 
   // -------------------------------------------------------------------------
