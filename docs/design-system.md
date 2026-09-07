@@ -458,6 +458,24 @@ document, expanded into occurrences by `calendar()` exactly as a weekly chore
 is; the event's own `startAt` anchors the weekday and time, and `prepDueBy`
 shifts week by week with the occurrence. Deleting the item deletes the series.
 
+**One night off is not the end of a series.** `skipDates` holds household-local
+`YYYY-MM-DD` dates the series does not run on, set by `skipOccurrence`
+(`skip: false` puts a night back). Cubs replaced by a Lazer Blaze night is still
+Cubs every other Monday, so the exception lives on the series rather than
+forcing a delete-and-recreate. The rule is enforced in exactly two places, and
+everything else follows from them:
+
+- `calendar()` drops a skipped occurrence, so it is not on anyone's calendar.
+- `currentOccurrence()` steps past one, so a skipped night is never the live
+  prep list and `recordMisses` records no prep miss for it. A kid must never be
+  asked to pack for a night that was called off.
+
+`skipOccurrence` refuses a date that is not one of that series' nights. A
+well-formed date that matches nothing would write a skip silently and leave the
+night on the calendar, which looks exactly like the feature not working. The
+field is cleared whenever an item stops repeating, the same rule a chore's
+weekday list follows.
+
 The week-two behaviour is the design:
 
 - **Each week earns separately.** Prep completion and miss ids carry the

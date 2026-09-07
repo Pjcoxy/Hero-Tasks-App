@@ -3503,6 +3503,11 @@ function renderParentCalendar() {
                     + (item.kind === 'event'
                         ? '<button class="btn ghost small" onclick="parentToggleChecklist(\'' + jsq(item.id) + '\')">🎒 Checklist</button>'
                         : '')
+                    // One night off a repeating series. Only on a repeating
+                    // item, because a one-off has no other occurrence to keep.
+                    + (item.recurrence === 'weekly'
+                        ? '<button class="btn ghost small" onclick="parentSkipOccurrence(\'' + jsq(item.id) + '\', \'' + jsq(item.occurrenceDate) + '\')">Skip this one</button>'
+                        : '')
                     + '<button class="btn ghost small" onclick="parentEditPlanningItem(\'' + jsq(item.id) + '\')">Edit</button>'
                     + '<button class="btn red-ghost small" onclick="parentDeletePlanningItem(\'' + jsq(item.id) + '\')">Delete</button>'
                     + '</div>'
@@ -3512,6 +3517,34 @@ function renderParentCalendar() {
                   ? '<div class="cal-checklist-wrap">' + renderParentCalendarChecklists(item) + '</div>'
                   : '');
           }).join('') + '</div>');
+}
+
+// Take this one night out of a repeating series, leaving every other week
+// alone. Confirmed rather than instant: it removes something from everyone's
+// calendar, and "Delete" sits right beside it.
+async function parentSkipOccurrence(itemId, occurrenceDate) {
+  var item = (parentCalendarItems || []).find(function(i) {
+    return i.id === itemId && i.occurrenceDate === occurrenceDate;
+  });
+  var when = new Date(occurrenceDate + 'T12:00:00')
+    .toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' });
+  var label = item ? item.title : 'this event';
+  if (!await askConfirm('Skip ' + label + ' on ' + when + '? Every other week stays.', 'Skip it')) return;
+  try {
+    await api({
+      action: 'skipOccurrence',
+      parentId: session.personId,
+      parentPin: session.pin,
+      planningItemId: itemId,
+      occurrenceDate: occurrenceDate,
+      skip: true,
+    });
+  } catch (e) {
+    toast('Could not skip that one right now.');
+    return;
+  }
+  toast('Skipped ' + when + '.');
+  await loadParentCalendar();
 }
 
 function parentToggleChecklist(itemId) {

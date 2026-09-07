@@ -2331,6 +2331,85 @@ async function main() {
     'and it is the next one');
   console.log('\u2713 a weekly event expands into weekly occurrences with one live prep date');
 
+  // One night off. "Lazer Blaze instead of Cubs this week" is a single
+  // occurrence removed from a series that otherwise carries on - not a delete,
+  // which would take the whole series with it.
+  const skipDate = occurrences[1].occurrenceDate;
+  const otherDates = occurrences.filter((o) => o.occurrenceDate !== skipDate)
+    .map((o) => o.occurrenceDate);
+
+  const badDate = await R.skipOccurrence({
+    parentId: 'peter', parentPin: '1234',
+    planningItemId: weekly.item.id, occurrenceDate: '14th of Sept',
+  });
+  assert.strictEqual(badDate.ok, false, 'a date that is not a date is refused');
+
+  const notANight = await R.skipOccurrence({
+    parentId: 'peter', parentPin: '1234',
+    planningItemId: weekly.item.id, occurrenceDate: '2019-01-01',
+  });
+  assert.strictEqual(notANight.ok, false,
+    'a well-formed date that is not one of this series nights is refused - a silent no-op would look exactly like the feature not working');
+  console.log('\u2713 skipping refuses a date that is not one of the event\u2019s nights');
+
+  const nightOff = await R.skipOccurrence({
+    parentId: 'peter', parentPin: '1234',
+    planningItemId: weekly.item.id, occurrenceDate: skipDate,
+  });
+  assert.strictEqual(nightOff.ok, true, 'the parent can take one night out');
+  assert.deepStrictEqual(nightOff.item.skipDates, [skipDate], 'and it is recorded on the series');
+
+  const afterSkip = await R.calendar({ parentId: 'peter', parentPin: '1234', start: calFrom, end: calTo });
+  const leftOnCalendar = afterSkip.items.filter((i) => i.id === weekly.item.id)
+    .map((i) => i.occurrenceDate);
+  assert.ok(!leftOnCalendar.includes(skipDate), 'the skipped night is off the calendar');
+  assert.deepStrictEqual(leftOnCalendar, otherDates,
+    'and every other week is untouched - skipping one night is not deleting the series');
+  console.log('\u2713 one night comes off a weekly series and the rest of it stays');
+
+  // Putting it back is the same call with skip:false, so a mis-tap is one tap
+  // to undo rather than rebuilding the series.
+  const restored = await R.skipOccurrence({
+    parentId: 'peter', parentPin: '1234',
+    planningItemId: weekly.item.id, occurrenceDate: skipDate, skip: false,
+  });
+  assert.strictEqual(restored.ok, true);
+  assert.deepStrictEqual(restored.item.skipDates, [], 'the skip is lifted');
+  const afterRestore = await R.calendar({ parentId: 'peter', parentPin: '1234', start: calFrom, end: calTo });
+  assert.strictEqual(afterRestore.items.filter((i) => i.id === weekly.item.id).length, 4,
+    'and the night is back');
+  console.log('\u2713 a skipped night can be put back');
+
+  // The prep for a night that is not happening must never be the live list -
+  // otherwise a kid is asked to pack for an event that was called off.
+  const nextUp = currentOccurrence(weekly.item).date;
+  await R.skipOccurrence({
+    parentId: 'peter', parentPin: '1234',
+    planningItemId: weekly.item.id, occurrenceDate: nextUp,
+  });
+  const { resource: skippedDoc } = await mockContainer('planningItems')
+    .item(weekly.item.id, HOUSEHOLD_ID).read();
+  const movedOn = currentOccurrence(skippedDoc).date;
+  assert.notStrictEqual(movedOn, nextUp, 'the live occurrence moves past a skipped night');
+  assert.ok(movedOn > nextUp, 'and moves forward, not back');
+  await R.skipOccurrence({
+    parentId: 'peter', parentPin: '1234',
+    planningItemId: weekly.item.id, occurrenceDate: nextUp, skip: false,
+  });
+  console.log('\u2713 a skipped night is never the live prep occurrence');
+
+  // A one-off has no other occurrence to keep, so there is nothing to skip.
+  const oneOff = await R.addPlanningItem({
+    parentId: 'peter', parentPin: '1234', type: 'event', title: 'One-off thing',
+    personId: 'toby', startAt: cubsStart2.toISOString(),
+  });
+  const noSeries = await R.skipOccurrence({
+    parentId: 'peter', parentPin: '1234',
+    planningItemId: oneOff.item.id, occurrenceDate: currentOccurrence(oneOff.item).date,
+  });
+  assert.strictEqual(noSeries.ok, false, 'a one-off event has no occurrences to skip');
+  console.log('\u2713 only a repeating event has a night to skip');
+
   // Week one: tick, confirm, paid. The id carries the occurrence date.
   const occ1 = currentOccurrence(weekly.item).date;
   await R.tickPrepItem({ personId: 'ollie', pin: '1234', planningItemId: weekly.item.id, itemIndex: 0, done: true });

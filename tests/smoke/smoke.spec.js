@@ -1148,6 +1148,47 @@ test('a window that has not opened refuses the completion at the API', async ({ 
   expect(verdict.stateOpensAt, 'and the opening time to render').toBe('14:30');
 });
 
+// One night off a repeating series. "Lazer Blaze instead of Cubs this week" is
+// a single occurrence removed - the series itself carries on, so this must not
+// behave like Delete, which takes the whole thing.
+test('a parent can skip one night of a repeating event and keep the rest', async ({ page }) => {
+  const seeded = await page.evaluate(async () => {
+    const post = (b) => fetch('https://herotasks-func-dev.azurewebsites.net/api/hero', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b),
+    }).then((r) => r.json());
+    // Next week, so every occurrence in range is in the future.
+    const startAt = new Date(Date.now() + 7 * 86400000).toISOString();
+    const added = await post({
+      action: 'addPlanningItem', parentId: 'peter', parentPin: '1234',
+      type: 'event', title: 'Skippable Club', personId: 'toby',
+      startAt, recurrence: 'weekly',
+    });
+    const range = (from, to) => post({
+      action: 'calendar', parentId: 'peter', parentPin: '1234',
+      start: new Date(Date.now() + from * 86400000).toISOString(),
+      end: new Date(Date.now() + to * 86400000).toISOString(),
+    });
+    const before = (await range(0, 28)).items
+      .filter((i) => i.id === added.item.id).map((i) => i.occurrenceDate);
+
+    const skipped = await post({
+      action: 'skipOccurrence', parentId: 'peter', parentPin: '1234',
+      planningItemId: added.item.id, occurrenceDate: before[1], skip: true,
+    });
+    const after = (await range(0, 28)).items
+      .filter((i) => i.id === added.item.id).map((i) => i.occurrenceDate);
+
+    await post({ action: 'deletePlanningItem', parentId: 'peter', parentPin: '1234', planningItemId: added.item.id });
+    return { before, after, skippedDate: before[1], ok: skipped.ok };
+  });
+
+  expect(seeded.ok, 'the API accepts the skip').toBe(true);
+  expect(seeded.before.length, 'the series ran every week to begin with').toBeGreaterThan(2);
+  expect(seeded.after, 'the skipped night is gone').not.toContain(seeded.skippedDate);
+  expect(seeded.after, 'and only that one night went')
+    .toEqual(seeded.before.filter((d) => d !== seeded.skippedDate));
+});
+
 // The refusal is the API's, not just the row's - a stale page that still shows
 // a tick cannot sneak a completion past a shut window.
 test('a shut window refuses the completion at the API', async ({ page }) => {
