@@ -1,0 +1,23 @@
+# Manually-triggered one-shot: put Ollie's school photo days (26-28 Oct 2026) on
+# the LIVE app - the night-before prep list, a light tidy-up chore on each of the
+# three possible mornings, and the sibling-order deadline that falls BEFORE
+# photo day. Wipes nothing.
+# Never runs on its own - workflow_dispatch only.
+name: Add school photos
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  add-school-photos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Add photo days, prep and the ordering deadlines
+        run: node scripts/add-school-photos.mjs
