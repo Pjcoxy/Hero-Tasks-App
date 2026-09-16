@@ -4,12 +4,15 @@
 //
 // Two groups, two different rules, because they are two different problems:
 //
-//   AVIATION  The Perth Aviation Youth Club meeting is on Saturday 19 Sept
-//             three times at the same minute - once for Toby, twice for
-//             everyone - with the title punctuated differently each time ("-"
-//             vs "–", "Lesson" vs "lesson"), which is why nothing deduplicated
-//             them. Toby is at the Manjedal camp that weekend, so ALL of them
-//             come off that date.
+//   AVIATION  The Perth Aviation Youth Club meeting is written three times at
+//             the same minute - once for Toby, twice for everyone - with the
+//             title punctuated differently each time ("-" vs "–", "Lesson" vs
+//             "lesson"), which is why nothing deduplicated them. It happened on
+//             19 Sept and again on 24 Oct, the date it was rescheduled to.
+//             Two rules, because they are different situations:
+//               19 Sept        - Toby is at the Manjedal camp, so ALL of them go.
+//               any other date - the meeting IS happening, so it is cut down to
+//                                one rather than removed.
 //
 //   TENNIS    One "book Ollie's tennis make-up class before the token expires"
 //             reminder, written three times across two days with three
@@ -71,33 +74,65 @@ const events = (before.items || []).filter((i) => i.kind === 'event');
 const done = [];
 const seen = new Set();
 
-// ---- aviation: everything on the 19th goes ----
-const aviation = events.filter((i) => /aviation/i.test(i.title || '') && i.occurrenceDate === '2026-09-19');
-console.log(`AVIATION on 2026-09-19 — found ${aviation.length}:`);
-aviation.forEach((i) => console.log(describe(i)));
-for (const item of aviation) {
-  if (seen.has(item.id)) continue;
-  seen.add(item.id);
-  done.push(await remove(item, '2026-09-19'));
-}
-
-// ---- tennis: keep the earliest, remove the rest ----
-const tennis = events
-  .filter((i) => /tennis/i.test(i.title || ''))
-  .sort((a, b) => String(a.startAt).localeCompare(String(b.startAt)));
-console.log(`\nTENNIS make-up booking — found ${tennis.length}:`);
-tennis.forEach((i) => console.log(describe(i)));
-if (tennis.length > 1) {
-  const [keep, ...rest] = tennis;
-  // Sorted by startAt, so "earliest" is earliest in real time whatever the
-  // household date reads as.
-  console.log(`\n  keeping the earliest: ${keep.startAt} ${JSON.stringify(keep.title)}`);
+// Keep the earliest of a group and remove the rest.
+//
+// Two rules that exist because of a bug this script had in the dry run. Several
+// copies of one meeting share a start time to the minute - that is what makes
+// them copies - so "earliest" alone does not pick a winner and the tie resolved
+// arbitrarily. Worse, when a REPEATING series happened to land on the same
+// minute it could win the tie and take all the one-offs with it, throwing away
+// the copy that carried the real detail.
+//
+//   1. Ties break on id, so the choice is deterministic rather than incidental.
+//   2. A group mixing a repeating series with one-offs is NOT deduplicated at
+//      all. "The series and three one-offs at the same minute" is a genuinely
+//      ambiguous situation, and a script that silently picks one is worse than
+//      one that says so and leaves it for a human.
+async function dedupe(group, label) {
+  const repeating = group.filter((i) => i.recurrence === 'weekly');
+  if (repeating.length && repeating.length !== group.length) {
+    console.log(`\n  SKIPPED ${label}: ${repeating.length} repeating and ${group.length - repeating.length} one-off`
+      + ' at the same time. Too ambiguous to pick a winner - left alone.');
+    return;
+  }
+  const sorted = group.slice().sort((a, b) =>
+    String(a.startAt).localeCompare(String(b.startAt)) || String(a.id).localeCompare(String(b.id)));
+  const [keep, ...rest] = sorted;
+  console.log(`\n  keeping the earliest ${label}: ${keep.startAt} ${JSON.stringify(keep.title)}`);
   for (const item of rest) {
     if (seen.has(item.id) || item.id === keep.id) continue;
     seen.add(item.id);
     done.push(await remove(item, item.occurrenceDate));
   }
 }
+
+// ---- aviation ----
+const aviation = events.filter((i) => /aviation/i.test(i.title || ''));
+console.log(`AVIATION — found ${aviation.length}:`);
+aviation.forEach((i) => console.log(describe(i)));
+
+// 19 Sept: Toby is at camp, so the whole day goes.
+for (const item of aviation.filter((i) => i.occurrenceDate === '2026-09-19')) {
+  if (seen.has(item.id)) continue;
+  seen.add(item.id);
+  done.push(await remove(item, '2026-09-19'));
+}
+
+// Every other date: the meeting is happening, so cut each date down to one.
+const byDate = new Map();
+for (const i of aviation.filter((x) => x.occurrenceDate !== '2026-09-19')) {
+  if (!byDate.has(i.occurrenceDate)) byDate.set(i.occurrenceDate, []);
+  byDate.get(i.occurrenceDate).push(i);
+}
+for (const [date, group] of byDate) {
+  if (group.length > 1) await dedupe(group, `on ${date}`);
+}
+
+// ---- tennis: keep the earliest, remove the rest ----
+const tennis = events.filter((i) => /tennis/i.test(i.title || ''));
+console.log(`\nTENNIS make-up booking — found ${tennis.length}:`);
+tennis.forEach((i) => console.log(describe(i)));
+if (tennis.length > 1) await dedupe(tennis, 'tennis reminder');
 
 console.log('\nwhat changed:');
 if (!done.length) console.log('  nothing - already tidy');
