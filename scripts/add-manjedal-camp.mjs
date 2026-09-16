@@ -112,6 +112,12 @@ const result = await post({
   // prepDueBy is deliberately left off: the default is the last window's close
   // the day before, which is Thursday 9pm - the night before they leave, not
   // the Friday afternoon he is still at school for.
+  //
+  // But the list must be tickable NOW. Prep normally opens on the day it is
+  // due, and a 29-item camp pack is not a one-evening job - Toby starts filling
+  // the bag days ahead. The lead counts back from the DEADLINE (Thursday), so
+  // two days opens it Tuesday and leaves Thursday 9pm exactly where it was.
+  prepOpensDaysBefore: 2,
 });
 
 console.log(already ? 'already there - nothing created' : 'created the camp');
@@ -142,6 +148,7 @@ for (const i of (cal.items || []).filter((x) => x.kind !== 'chore')) {
 }
 const camp = (cal.items || []).find((i) => i.externalRef === EXTERNAL_REF);
 if (camp) {
-  console.log(`\npacking is due: ${camp.prepDueDate || '(no deadline parts)'} ${camp.prepDueTime || ''}`);
+  console.log(`\npacking opens: ${camp.prepOpensDate || '(none)'}`);
+  console.log(`packing is due: ${camp.prepDueDate || '(none)'} ${camp.prepDueTime || ''}`);
 }
 console.log('DONE');

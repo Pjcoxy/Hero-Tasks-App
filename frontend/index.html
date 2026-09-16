@@ -2780,9 +2780,12 @@ function glanceEventCard(item, kidId) {
       return c.id === 'prep-miss-' + item.id + '-' + occDate + '-' + kidId;
     });
     // Prep opens on the day it is due - Thursday's "uniform on" is a
-    // Thursday action, not a Tuesday one. The server refuses early ticks
-    // too; this just stops the card offering them.
-    var notYetOpen = !!item.prepDueDate && item.prepDueDate > todayStr();
+    // Thursday action, not a Tuesday one - unless the event bought itself
+    // more days (prepOpensDaysBefore), which a camp does. Falls back to the
+    // due date for items written before opening dates existed. The server
+    // refuses early ticks too; this just stops the card offering them.
+    var opensOn = item.prepOpensDate || item.prepDueDate;
+    var notYetOpen = !!opensOn && opensOn > todayStr();
     // Ticks belong to one occurrence; a stale tickedFor means an untouched
     // week however the flags look.
     var ticksCount = list.tickedFor === occDate;
@@ -2807,8 +2810,8 @@ function glanceEventCard(item, kidId) {
       chips.push('<span class="pill neutral">Opens after this week\u2019s</span>');
       if (list.points) chips.push('<span class="pill neutral">⭐ ' + list.points + '</span>');
     } else if (notYetOpen) {
-      chips.push('<span class="pill neutral">🔒 Opens ' + esc(prepDueDayLabel(item))
-        + (item.prepDueTime ? ' · by ' + esc(prepDueTimeLabel(item)) : '') + '</span>');
+      chips.push('<span class="pill neutral">🔒 Opens ' + esc(dayLabel(opensOn))
+        + (item.prepDueTime ? ' · by ' + esc(prepDueLabel(item)) : '') + '</span>');
       if (list.points) chips.push('<span class="pill neutral">⭐ ' + list.points + '</span>');
     } else {
       chips.push('<span class="pill warn">⏳ by ' + esc(dueLabel || 'the deadline') + '</span>');
@@ -2854,15 +2857,22 @@ function prepDueTimeLabel(item) {
   return displayHour + (parts[1] === '00' ? '' : ':' + parts[1]) + suffix;
 }
 
-function prepDueDayLabel(item) {
-  if (!item.prepDueDate) return '';
+// "today" / "tomorrow" / "Thu" for any household-local date. Shared by both
+// ends of a prep list, so the day it opens and the day it is due can never be
+// worded differently.
+function dayLabel(dateStr) {
+  if (!dateStr) return '';
   var today = todayStr();
-  if (item.prepDueDate === today) return 'today';
+  if (dateStr === today) return 'today';
   var tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   var tomorrowStr = tomorrow.getFullYear() + '-' + String(tomorrow.getMonth() + 1).padStart(2, '0') + '-' + String(tomorrow.getDate()).padStart(2, '0');
-  if (item.prepDueDate === tomorrowStr) return 'tomorrow';
-  return new Date(item.prepDueDate + 'T12:00:00').toLocaleDateString([], { weekday: 'short' });
+  if (dateStr === tomorrowStr) return 'tomorrow';
+  return new Date(dateStr + 'T12:00:00').toLocaleDateString([], { weekday: 'short' });
+}
+
+function prepDueDayLabel(item) {
+  return dayLabel(item.prepDueDate);
 }
 
 function prepDueLabel(item) {

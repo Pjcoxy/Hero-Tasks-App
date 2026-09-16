@@ -434,11 +434,19 @@ night is the thing rewarded** — not attending. The rules, all settled:
   winning when set. After it: ticking and confirming are refused with
   `windowClosed: true`, and the sweep records `prep-miss-<itemId>-<kidId>`.
 - **Prep opens on the day it is due** (`prepNotYetOpen`): Thursday's "uniform
-  on" is a Thursday action, not a Tuesday tick. Before the due day, ticking
-  and confirming are refused with `notOpenYet: true`, and the kid card
-  renders the checklist locked under a neutral "🔒 Opens Thu · by 5:30pm"
-  chip. The deadline stays the only knob — set it earlier and the open day
-  moves with it.
+  on" is a Thursday action, not a Tuesday tick. Before it opens, ticking and
+  confirming are refused with `notOpenYet: true`, and the kid card renders the
+  checklist locked under a neutral "🔒 Opens Thu · by 5:30pm" chip.
+- **A long list can open early, without moving the deadline.**
+  `prepOpensDaysBefore` (whole days, 0–14, default 0) counts back from the
+  **deadline**, not the event: a camp whose prep is due Thursday 9pm with a
+  lead of 2 opens on Tuesday and is still due Thursday 9pm. The two ends are
+  separate knobs on purpose — a 29-item camp pack is not a one-evening job, and
+  the only way to buy packing days used to be moving the deadline earlier,
+  which moves the one end that must not move. `calendar()` reports both
+  (`prepOpensDate`, `prepDueDate`/`prepDueTime`) so the browser computes
+  neither. Default 0 is exactly the old behaviour, so nothing that does not
+  ask for a lead changes.
 - **A kid ticks only their own list** — `tickPrepItem` is `requireSelf` plus
   a personId match; the parent-only `updatePlanningItem` remains the only way
   to touch anyone else's.

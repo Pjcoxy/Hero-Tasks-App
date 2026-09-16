@@ -2298,6 +2298,73 @@ async function main() {
     'with the override, same-day prep is open - the night-before rule would have refused this');
   console.log('\u2713 prepDueBy overrides the night-before default for same-day prep');
 
+  // Opening early. A 29-item camp pack is not a one-evening job, but the only
+  // knob used to be the deadline - and buying packing days by moving the
+  // deadline moves the one end that must not move.
+  //
+  // The event is three days out, so by default prep opens the day before and
+  // nothing can be ticked today. Deterministic whatever day CI runs.
+  const campStart = new Date(Date.now() + 3 * 86400000);
+  const campItems = [{ text: 'Sleeping bag' }, { text: 'Torch' }];
+
+  const shutCamp = await R.addPlanningItem({
+    parentId: 'peter', parentPin: '1234', type: 'event', title: 'Camp, default open',
+    personId: 'toby', startAt: campStart.toISOString(),
+    prepLists: [{ personId: 'toby', points: 20, items: campItems }],
+  });
+  assert.strictEqual(shutCamp.item.prepOpensDaysBefore, 0, 'the default is unchanged: opens on the due day');
+  const tooEarly = await R.tickPrepItem({
+    personId: 'toby', pin: '1234', planningItemId: shutCamp.item.id, itemIndex: 0, done: true,
+  });
+  assert.strictEqual(tooEarly.ok, false, 'by default a camp three days out cannot be packed yet');
+  assert.strictEqual(tooEarly.notOpenYet, true, 'and says so machine-readably');
+  console.log('\u2713 prep still opens on the day it is due when nothing asks otherwise');
+
+  const openCamp = await R.addPlanningItem({
+    parentId: 'peter', parentPin: '1234', type: 'event', title: 'Camp, opens early',
+    personId: 'toby', startAt: campStart.toISOString(),
+    // The lead counts back from the DUE date, not the event: the deadline is
+    // already the day before, so two days of lead opens it today.
+    prepOpensDaysBefore: 2,
+    prepLists: [{ personId: 'toby', points: 20, items: campItems }],
+  });
+  assert.strictEqual(openCamp.item.prepOpensDaysBefore, 2, 'the opening lead is stored');
+  const packedEarly = await R.tickPrepItem({
+    personId: 'toby', pin: '1234', planningItemId: openCamp.item.id, itemIndex: 0, done: true,
+  });
+  assert.strictEqual(packedEarly.ok, true, 'with the lead, packing can start days ahead');
+  console.log('\u2713 prepOpensDaysBefore opens a camp list early');
+
+  // The whole point: the deadline did NOT move with it.
+  const campCal = await R.calendar({
+    parentId: 'peter', parentPin: '1234',
+    start: new Date(Date.now() - 86400000).toISOString(),
+    end: new Date(Date.now() + 10 * 86400000).toISOString(),
+  });
+  const shutRow = campCal.items.find((i) => i.id === shutCamp.item.id);
+  const openRow = campCal.items.find((i) => i.id === openCamp.item.id);
+  assert.strictEqual(openRow.prepDueDate, shutRow.prepDueDate,
+    'opening early does not move the deadline - that is the one end that must not move');
+  assert.strictEqual(openRow.prepDueTime, shutRow.prepDueTime, 'nor the time it is due');
+  assert.strictEqual(openRow.prepOpensDate, require('./src/functions/hero.js').todayStr(new Date()),
+    'two days of lead, on an event whose deadline is two days out, opens it today');
+  assert.ok(openRow.prepOpensDate < openRow.prepDueDate, 'and the list opens before it is due');
+  assert.strictEqual(shutRow.prepOpensDate, shutRow.prepDueDate,
+    'while the default still opens on the due day');
+  console.log('\u2713 the two ends of a prep list move independently');
+
+  const silly = await R.addPlanningItem({
+    parentId: 'peter', parentPin: '1234', type: 'event', title: 'Camp, silly lead',
+    personId: 'toby', startAt: campStart.toISOString(), prepOpensDaysBefore: 60,
+  });
+  assert.strictEqual(silly.ok, false, 'an open-ended lead is refused - that is not a deadline any more');
+  const fractional = await R.addPlanningItem({
+    parentId: 'peter', parentPin: '1234', type: 'event', title: 'Camp, half a day',
+    personId: 'toby', startAt: campStart.toISOString(), prepOpensDaysBefore: 1.5,
+  });
+  assert.strictEqual(fractional.ok, false, 'and so is half a day');
+  console.log('\u2713 the opening lead is whole days, and bounded');
+
   // -------------------------------------------------------------------------
   // Recurring events. One document, expanded weekly - and the week-two
   // behaviour is the whole point: the calendar shows every week, prep earns

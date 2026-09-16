@@ -441,6 +441,11 @@ async function validatePlanningPayload(req, currentItem = null) {
     prepDueBy: null,
     externalRef: null,
     allDay: false,
+    // How many days BEFORE the deadline the prep list opens. 0 - the default
+    // and what every item meant before this existed - opens it on the day it is
+    // due. A 29-item camp pack is not a one-evening job, so a camp sets this
+    // and gets the days it needs without moving the deadline.
+    prepOpensDaysBefore: 0,
     // Household-local dates (YYYY-MM-DD) this weekly series does NOT run on.
     // One night off is not the end of a series: Cubs replaced by a Lazer Blaze
     // night is still Cubs every other Monday, so the exception belongs on the
@@ -543,6 +548,20 @@ async function validatePlanningPayload(req, currentItem = null) {
       next.externalRef = req.externalRef;
     } else {
       return { ok: false, error: 'externalRef must be a string or null' };
+    }
+  }
+
+  if (req.prepOpensDaysBefore !== undefined) {
+    if (req.prepOpensDaysBefore === null || req.prepOpensDaysBefore === '') {
+      next.prepOpensDaysBefore = 0;
+    } else {
+      const days = Number(req.prepOpensDaysBefore);
+      // Capped rather than open-ended: a list that opens a month out is not a
+      // deadline any more, it is just permanently on screen.
+      if (!Number.isInteger(days) || days < 0 || days > 14) {
+        return { ok: false, error: 'prepOpensDaysBefore must be a whole number of days from 0 to 14' };
+      }
+      next.prepOpensDaysBefore = days;
     }
   }
 
@@ -905,6 +924,13 @@ function currentOccurrence(item, now = new Date()) {
   return { ...last, date: todayStr(new Date(last.startAt)) };
 }
 
+// A household-local date, N days off. Taken at UTC noon so no timezone can
+// shift it across midnight - the same guard choreDueToday already uses.
+function shiftDate(dateStr, days) {
+  const at = new Date(`${dateStr}T12:00:00Z`).getTime() + days * 86400000;
+  return new Date(at).toISOString().slice(0, 10);
+}
+
 function localHHMM(date) {
   const parts = LOCAL_TIME_FORMAT.formatToParts(date);
   return `${parts.find((part) => part.type === 'hour').value}:${parts.find((part) => part.type === 'minute').value}`;
@@ -914,20 +940,28 @@ function localHHMM(date) {
 // client shows these verbatim, so no timezone maths ever happens in the
 // browser. Mirrors prepDeadlinePassed: the override wins; otherwise the last
 // window's close on the day before.
-async function prepDueParts(occ, windows) {
+async function prepDueParts(occ, windows, opensDaysBefore = 0) {
+  // Both ends, always: when the list opens and when it shuts. They are separate
+  // knobs on purpose - moving the deadline to give a camp more packing time
+  // would also move the deadline, which is the one thing that must not move.
+  const withOpen = (prepDueDate, prepDueTime) => ({
+    prepDueDate,
+    prepDueTime,
+    prepOpensDate: shiftDate(prepDueDate, -Math.max(0, Number(opensDaysBefore) || 0)),
+  });
+
   if (occ.prepDueBy) {
     const when = new Date(occ.prepDueBy);
     if (!Number.isNaN(when.getTime())) {
-      return { prepDueDate: todayStr(when), prepDueTime: localHHMM(when) };
+      return withOpen(todayStr(when), localHHMM(when));
     }
   }
-  const dayBefore = new Date(new Date(`${occ.date}T12:00:00Z`).getTime() - 86400000)
-    .toISOString().slice(0, 10);
+  const dayBefore = shiftDate(occ.date, -1);
   const closes = (windows || await getHouseholdWindows())
     .filter((w) => HHMM_RE.test(w.closesAt || ''))
     .map((w) => w.closesAt)
     .sort();
-  return { prepDueDate: dayBefore, prepDueTime: closes[closes.length - 1] || '21:00' };
+  return withOpen(dayBefore, closes[closes.length - 1] || '21:00');
 }
 
 // When prep for an event is due: the close of the LAST window on the day
@@ -957,12 +991,14 @@ async function prepDeadlinePassed(item, now = new Date(), occ = null) {
 }
 
 // Prep opens at the start of the day it is due - "uniform on" for Thursday
-// Scouts is a Thursday action, not a Tuesday one. The deadline stays the only
-// knob: move it earlier and the open day moves with it.
+// Scouts is a Thursday action, not a Tuesday one - unless the item asks for
+// longer with prepOpensDaysBefore. A weekend camp needs days to pack for, and
+// the only way to buy those days used to be moving the deadline earlier, which
+// moved the wrong end.
 async function prepNotYetOpen(item, now = new Date(), occ = null) {
   const occurrence = occ || currentOccurrence(item, now);
-  const { prepDueDate } = await prepDueParts(occurrence);
-  return todayStr(now) < prepDueDate;
+  const { prepOpensDate } = await prepDueParts(occurrence, null, item.prepOpensDaysBefore);
+  return todayStr(now) < prepOpensDate;
 }
 
 // A kid ticking one item on their own prep list. requireSelf plus a check the
@@ -1477,7 +1513,7 @@ async function calendar(req) {
       };
       if (item.type === 'event' && (item.prepLists || []).some((l) => l.items && l.items.length)) {
         Object.assign(row, await prepDueParts(
-          { ...occ, date: row.occurrenceDate }, householdWindows));
+          { ...occ, date: row.occurrenceDate }, householdWindows, item.prepOpensDaysBefore));
       }
       if (callerRole === 'kid') delete row.adultActions;
       schedule.push(row);
