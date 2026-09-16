@@ -1,0 +1,23 @@
+# Manually-triggered one-shot: tidy the duplicated calendar items the email
+# import left on the LIVE app - the aviation meeting comes off Sat 19 Sept
+# entirely (Toby is at camp), the tennis reminder is deduplicated to one.
+# A repeating item is never deleted - that occurrence is skipped instead.
+# Never runs on its own - workflow_dispatch only.
+name: Clear duplicate events
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clear-duplicates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Clear the duplicates
+        run: node scripts/clear-duplicate-events.mjs
