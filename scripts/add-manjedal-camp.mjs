@@ -8,11 +8,14 @@
 //   - times, location and leader: the filled Y3 form's own fields
 //   - the packing list: "Manjedal Camp Packing Check List (1).xlsx"
 //
-// On the dates. The SUBJECT line says "18-19 Sept", but three sources in the
-// email say otherwise and agree with each other: the body ("18-20 September"),
-// the Y3's Activity Date field ("18 to 20 Sept 2026"), and the Y3's own finish
-// date (20/09/2026, 10.00am). The subject is simply wrong; the camp runs
+// On the dates. The SUBJECT line of the first email says "18-19 Sept" and is
+// simply wrong. Everything else agrees: that email's body ("18-20 September"),
+// the Y3's Activity Date field ("18 to 20 Sept 2026"), the Y3's finish date
+// (20/09/2026, 10.00am), and the leader's later gate-code email - "Arrival:
+// Friday 18th Sept from 5pm. Departure: Sunday 20th Sept 10am." The camp runs
 // Friday evening to Sunday morning.
+//
+// The gate code and the LAIR/CASTLE detail come from that second email.
 //
 // Idempotent: externalRef is the Gmail thread plus the start minute, so a
 // second run updates nothing and the API refuses it as a duplicate rather than
@@ -66,8 +69,12 @@ const PACKING = [
 ];
 
 const NOTES = [
+  // First line on purpose: this is the one fact you need while sitting at a
+  // locked gate at 5pm on Friday, and notes are shown from the top.
+  'Gate code: 2907',
   'Manjedal Activity Centre, 163 Manjedal Rd, Karrakup WA 6122.',
   'Drop off Fri 5:00pm, pick up Sun 10:00am — both at Manjedal.',
+  'Camping at the LAIR camp ground; the cabins are at the CASTLE area.',
   'Arrive in uniform. Have dinner at home before arriving Friday.',
   'Scouts supply the food and the tents (youths put the tents up themselves).',
   'Activities: mountain biking (no bike gear needed), hiking, camp cooking.',
