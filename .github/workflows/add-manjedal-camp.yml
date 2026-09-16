@@ -1,0 +1,21 @@
+# Manually-triggered one-shot: put Toby's Manjedal Scout Camp (18-20 Sept 2026)
+# on the LIVE app with the leader's packing list attached as a prep list.
+# Wipes nothing. Never runs on its own - workflow_dispatch only.
+name: Add Manjedal camp
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  add-camp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Add the camp and Toby's packing list
+        run: node scripts/add-manjedal-camp.mjs
