@@ -1,0 +1,22 @@
+# Manually-triggered one-shot: put the Personal Development Course (9-11 Oct
+# 2026) on the LIVE app for Toby and Ollie - each boy's own food choices (wanted
+# back asap) and his own packing list (due the night before). Wipes nothing.
+# Never runs on its own - workflow_dispatch only.
+name: Add personal development camp
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  add-pd-camp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Add the camp, the food choices and both packing lists
+        run: node scripts/add-personal-development-camp.mjs
